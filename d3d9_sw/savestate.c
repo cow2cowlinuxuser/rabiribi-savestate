@@ -4046,8 +4046,8 @@ static const char *const g_knobs[] = {
 	"D3D9SW_DERIVED",	  "D3D9SW_FREEZE",
 	"D3D9SW_PROBE",           "D3D9SW_WATCH",
 	"D3D9SW_NOTHREAD",        "D3D9SW_RUNAWAY",
-	"D3D9SW_REWIND_TEXTINPUT", "D3D9SW_DECPATCH",
-	"D3D9SW_LFHHOLD",
+	"D3D9SW_REWIND_TEXTINPUT", "D3D9SW_HELDVETO",
+	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN"
 };
 
@@ -10056,7 +10056,168 @@ static int in_the_allocator(unsigned *who, uintptr_t *where)
 	return 0;
 }
 
+/* What the threads we are NOT rewinding are currently holding.
+ *
+ * Park settled the question the other diagnostics could not: fifty-four threads
+ * stopped for a hundred seconds and the game carried on, so being suspended is
+ * harmless. What is not harmless is being suspended and then resumed into
+ * memory that changed while you were still holding a pointer into it.
+ *
+ * That is a question with an answer. Every thread is stopped and its registers
+ * and stack are readable, so before a single block is written we can ask which
+ * of them a foreign thread is actually looking at, and decline those. It needs
+ * no type information and relocates nothing - the test is only "is some thread
+ * that keeps running pointed at this exact range", which is decidable.
+ *
+ * Only threads marked transient are consulted. A game thread's pointers are
+ * expected to point at restored memory; that is the entire point. It is the
+ * ones that keep their registers and keep running that must not be lied to.
+ *
+ * The live stack is scanned rather than the whole reservation. Anything below
+ * the stack pointer is dead frames, and the words above it are what the thread
+ * will return through. Bounded, because a scan proportional to the reservation
+ * would cost more than the restore. */
+#define HELD_CAP 262144
+#define HELD_STACK_WORDS 8192
+
+static uintptr_t *g_held;
+static int g_held_n;
+static int g_held_full;
+static int g_held_threads;
+
+static int held_on(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_HELDVETO", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+static int held_cmp(const void *a, const void *b)
+{
+	uintptr_t x = *(const uintptr_t *)a, y = *(const uintptr_t *)b;
+	return x < y ? -1 : x > y ? 1 : 0;
+}
+
+static void held_add(uintptr_t v)
+{
+	/* A value only matters if it could name a heap block. Anything below the
+	 * first user page is a small integer wearing a pointer's clothes, and there
+	 * are a great many of those on a stack. */
+	if (v < 0x10000)
+		return;
+	if (g_held_n >= HELD_CAP) {
+		g_held_full = 1;
+		return;
+	}
+	g_held[g_held_n++] = v;
+}
+
+static void held_build(void)
+{
+	int i;
+
+	g_held_n = 0;
+	g_held_full = 0;
+	g_held_threads = 0;
+	if (!held_on() || !g_ctl)
+		return;
+	if (!g_held) {
+		g_held = (uintptr_t *)blk_arena(HELD_CAP * sizeof(uintptr_t));
+		if (!g_held)
+			return;
+	}
+	for (i = 0; i < g_ctl->nids; i++) {
+		CONTEXT c;
+		uintptr_t sp, top;
+		MEMORY_BASIC_INFORMATION mbi;
+		int w;
+
+		if (!g_ctl->transient[i] || !g_ctl->handles[i])
+			continue;
+		memset(&c, 0, sizeof(c));
+		c.ContextFlags = CONTEXT_FULL;
+		if (!GetThreadContext(g_ctl->handles[i], &c))
+			continue;
+		g_held_threads++;
+#if defined(_M_IX86) || defined(__i386__)
+		held_add((uintptr_t)c.Eax);
+		held_add((uintptr_t)c.Ebx);
+		held_add((uintptr_t)c.Ecx);
+		held_add((uintptr_t)c.Edx);
+		held_add((uintptr_t)c.Esi);
+		held_add((uintptr_t)c.Edi);
+		held_add((uintptr_t)c.Ebp);
+		sp = (uintptr_t)c.Esp;
+#else
+		held_add((uintptr_t)c.Rax);
+		held_add((uintptr_t)c.Rbx);
+		held_add((uintptr_t)c.Rcx);
+		held_add((uintptr_t)c.Rdx);
+		held_add((uintptr_t)c.Rsi);
+		held_add((uintptr_t)c.Rdi);
+		held_add((uintptr_t)c.Rbp);
+		held_add((uintptr_t)c.R8);
+		held_add((uintptr_t)c.R9);
+		held_add((uintptr_t)c.R10);
+		held_add((uintptr_t)c.R11);
+		held_add((uintptr_t)c.R12);
+		held_add((uintptr_t)c.R13);
+		held_add((uintptr_t)c.R14);
+		held_add((uintptr_t)c.R15);
+		sp = (uintptr_t)c.Rsp;
+#endif
+		if (!sp)
+			continue;
+		/* The end of this stack's committed range, so the scan stops at the
+		 * top of the thread rather than walking into whatever follows it. */
+		top = sp + HELD_STACK_WORDS * sizeof(uintptr_t);
+		if (VirtualQuery((LPCVOID)sp, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+			uintptr_t end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+
+			if (end < top)
+				top = end;
+		}
+		sp = (sp + sizeof(uintptr_t) - 1) & ~(uintptr_t)(sizeof(uintptr_t) - 1);
+		for (w = 0; sp + sizeof(uintptr_t) <= top; sp += sizeof(uintptr_t), w++) {
+			if (!ss_readable(sp, sizeof(uintptr_t)))
+				break;
+			held_add(*(const uintptr_t *)sp);
+		}
+	}
+	if (g_held_n > 1)
+		qsort(g_held, (size_t)g_held_n, sizeof(uintptr_t), held_cmp);
+	if (g_held_full)
+		ss_log("  held: the table filled at %d, so some of what the surviving "
+		       "threads point at is invisible and those blocks will be written "
+		       "anyway\n", HELD_CAP);
+}
+
+/* Is any surviving thread pointed into [base, base+size)? */
+static int held_hit(uintptr_t base, unsigned long size)
+{
+	int lo = 0, hi = g_held_n;
+
+	if (!g_held_n)
+		return 0;
+	while (lo < hi) {
+		int mid = lo + (hi - lo) / 2;
+
+		if (g_held[mid] < base)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo < g_held_n && g_held[lo] < base + size;
+}
+
 static int settle_tries(void);
+static int ensure_helper(void);
 
 /* The freeze on its own, with nothing in the middle.
  *
@@ -10081,6 +10242,14 @@ int savestate_park(int ms)
 	LARGE_INTEGER pf, t0, t1, t2;
 	int held;
 
+	/* Park is the first thing here that runs before any save, so it is also the
+	 * first to discover that the control block does not exist until one
+	 * happens. Six parks were requested and six returned instantly on the
+	 * strength of a bare "if (!g_ctl) return 0" - the key was right, the wiring
+	 * was right, and nothing ran. The block carries the thread list and the log
+	 * handle, so it has to exist before anything can be held still or said. */
+	if (!g_ctl && !ensure_helper())
+		return 0;
 	if (!g_ctl)
 		return 0;
 	if (ms <= 0)
@@ -12243,7 +12412,10 @@ static int do_load(int slotno)
 			int recycled = 0;
 			unsigned long long recycled_bytes = 0;
 			uintptr_t recycled_first = 0;
+			int heldveto = 0;
+			unsigned long long heldbytes = 0;
 
+			held_build();
 			for (bi = 0; bi < g_blk_match_n; bi++) {
 				uintptr_t b = g_blk_save[bi].base;
 				unsigned long n = g_blk_save[bi].size;
@@ -12251,6 +12423,19 @@ static int do_load(int slotno)
 
 				if (r < 0) {
 					homeless++;
+					continue;
+				}
+				/* Ahead of the ownership tests, because this one is not
+				 * about whose block it is. A block the game certainly
+				 * owns is still fatal to write if a thread that keeps
+				 * running is holding a pointer into it - that thread
+				 * resumes and reads a value from a moment it never
+				 * lived through. Leaving it in the present is the
+				 * smaller error: the game loses one object's worth of
+				 * rewind, and nobody is lied to. */
+				if (held_hit(b, n)) {
+					heldveto++;
+					heldbytes += n;
 					continue;
 				}
 				/* Only the shared heap needs vetting; the game's own
@@ -12351,6 +12536,14 @@ static int do_load(int slotno)
 			       "metadata untouched\n",
 			       g_blk_match_n, g_blk_save_n, wrote,
 			       (double)done / (1024.0 * 1024.0), homeless, not_ours, vetoed);
+			if (held_on())
+				ss_log("  held: %d block(s) (%.2f MB) left in the present "
+				       "because a surviving thread was pointed into them - "
+				       "%d pointer(s) read from %d thread(s) that keep "
+				       "running. Those are the blocks that would have been "
+				       "lies\n",
+				       heldveto, (double)heldbytes / (1024.0 * 1024.0),
+				       g_held_n, g_held_threads);
 			if (vmode_b && vbad)
 				ss_log("  verify by block: %d of %d written block(s) do NOT "
 				       "match what we wrote, %llu word(s) differ, %d "

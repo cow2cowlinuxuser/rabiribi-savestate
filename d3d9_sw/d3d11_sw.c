@@ -6464,8 +6464,11 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 			 * so a park taken before one would otherwise leave no trace
 			 * anywhere and read as a key that never fired. */
 			d11_log("park: requested, %d ms", ms ? ms : 1000);
-			savestate_park(ms ? ms : 1000);
-			d11_log("park: returned, the game is running again");
+			if (savestate_park(ms ? ms : 1000))
+				d11_log("park: returned, the game is running again");
+			else
+				d11_log("park: REFUSED - the savestate engine could not "
+					"bring up its control block, so nothing was held");
 		} else {
 			/* Arm here, act at the top of the next frame, so the census
 			 * covers a whole frame from its first draw rather than
