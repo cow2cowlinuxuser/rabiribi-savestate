@@ -12414,6 +12414,8 @@ static int do_load(int slotno)
 			uintptr_t recycled_first = 0;
 			int heldveto = 0;
 			unsigned long long heldbytes = 0;
+			uintptr_t heldfirst = 0, heldbigat = 0;
+			unsigned long heldbig = 0;
 
 			held_build();
 			for (bi = 0; bi < g_blk_match_n; bi++) {
@@ -12434,6 +12436,12 @@ static int do_load(int slotno)
 				 * smaller error: the game loses one object's worth of
 				 * rewind, and nobody is lied to. */
 				if (held_hit(b, n)) {
+					if (!heldveto)
+						heldfirst = b;
+					if (n > heldbig) {
+						heldbig = n;
+						heldbigat = b;
+					}
 					heldveto++;
 					heldbytes += n;
 					continue;
@@ -12536,14 +12544,19 @@ static int do_load(int slotno)
 			       "metadata untouched\n",
 			       g_blk_match_n, g_blk_save_n, wrote,
 			       (double)done / (1024.0 * 1024.0), homeless, not_ours, vetoed);
+			/* Spelled "pointed" rather than "held", which the exclusion
+			 * list above already uses for every module it keeps in the
+			 * present. Two unrelated things under one prefix made the log
+			 * unreadable the first time this ran. */
 			if (held_on())
-				ss_log("  held: %d block(s) (%.2f MB) left in the present "
+				ss_log("  pointed: %d block(s) (%.2f MB) left in the present "
 				       "because a surviving thread was pointed into them - "
 				       "%d pointer(s) read from %d thread(s) that keep "
-				       "running. Those are the blocks that would have been "
-				       "lies\n",
+				       "running. First at %p, largest %p (%lu bytes). Those "
+				       "are the blocks that would have been lies\n",
 				       heldveto, (double)heldbytes / (1024.0 * 1024.0),
-				       g_held_n, g_held_threads);
+				       g_held_n, g_held_threads, (void *)heldfirst,
+				       (void *)heldbigat, heldbig);
 			if (vmode_b && vbad)
 				ss_log("  verify by block: %d of %d written block(s) do NOT "
 				       "match what we wrote, %llu word(s) differ, %d "
