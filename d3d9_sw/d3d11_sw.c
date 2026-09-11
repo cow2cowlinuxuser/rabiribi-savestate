@@ -6435,6 +6435,21 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 			(double)g_retired_bytes / (1024.0 * 1024.0));
 		res_census();
 	}
+	/* F10 parks the process: every thread held still for a while with no
+	 * memory read or written, then let go. It is the control for every restore
+	 * failure we have, because a restore freezes, copies and writes back, and
+	 * only the last two have ever been varied. Length comes from
+	 * D3D9SW_PARK_MS so the same key can ask a harder question. */
+	if (savestate_key_edge(VK_F10)) {
+		char v[16];
+		unsigned n = savestate_getenv("D3D9SW_PARK_MS", v, sizeof(v));
+		int ms = 0;
+		unsigned i;
+
+		for (i = 0; i < n && v[i] >= '0' && v[i] <= '9'; i++)
+			ms = ms * 10 + (v[i] - '0');
+		savestate_park(ms ? ms : 1000);
+	}
 	/* Arm here, act at the top of the next frame, so the census covers a
 	 * whole frame from its first draw rather than joining one midway. */
 	if (savestate_key_edge(VK_F9))

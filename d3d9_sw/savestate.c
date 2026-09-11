@@ -10056,6 +10056,87 @@ static int in_the_allocator(unsigned *who, uintptr_t *where)
 	return 0;
 }
 
+static int settle_tries(void);
+
+/* The freeze on its own, with nothing in the middle.
+ *
+ * Every failure so far has been read as a restore failure, but a restore is
+ * three things at once: the process is held still, memory is copied, and memory
+ * is written back. Only the last two have ever been varied. Nobody has asked
+ * whether a game of this vintage survives simply being stopped for a third of a
+ * second and started again, and if the answer is no then every conclusion drawn
+ * from a save-and-restore has been measuring the wrong one of the three.
+ *
+ * Deliberately the same shape as a save: the audio is silenced first, the same
+ * settle loops run, the same threads are collected and suspended, and the same
+ * resume and audio restart happen at the end. The only difference is that the
+ * middle is a sleep. If parking is survivable and restoring is not, the copy or
+ * the write-back is to blame. If parking alone kills it, nothing further up the
+ * stack matters until that is fixed.
+ *
+ * Runs on the calling thread, like a save and unlike a restore, because a park
+ * returns to its caller - there is no rewind to carry it away. */
+int savestate_park(int ms)
+{
+	LARGE_INTEGER pf, t0, t1, t2;
+	int held;
+
+	if (!g_ctl)
+		return 0;
+	if (ms <= 0)
+		ms = 1000;
+	QueryPerformanceFrequency(&pf);
+	ss_log("park: holding the whole process still for %d ms, touching no memory\n", ms);
+	dsh_save();
+	dsh_quiet();
+	QueryPerformanceCounter(&t0);
+	if (alloc_settle())
+		alloc_ranges_init();
+	collect_threads();
+	suspend_all();
+	{
+		int tries = settle_tries(), n = 0;
+		unsigned who = 0, awho = 0;
+		uintptr_t where = 0, arva = 0;
+		int jit, alloc;
+
+		for (;;) {
+			jit = in_the_jit(&who, &where);
+			alloc = alloc_settle() && in_the_allocator(&awho, &arva);
+			if ((!jit && !alloc) || n >= tries)
+				break;
+			resume_all(0);
+			Sleep(2);
+			collect_threads();
+			suspend_all();
+			n++;
+		}
+		if (jit)
+			ss_log("  park: still inside the JIT after %d attempt(s) (thread %u)\n",
+			       n, who);
+		if (alloc)
+			ss_log("  park: thread %u still running ntdll at +%lX after %d "
+			       "attempt(s)\n", awho, (unsigned long)arva, n);
+	}
+	held = g_ctl->nids;
+	QueryPerformanceCounter(&t1);
+	/* The whole experiment. Sleep rather than a spin, because a spinning
+	 * thread is one more thread doing something and the point is that nothing
+	 * is. */
+	Sleep((DWORD)ms);
+	resume_all(0);
+	dsh_play();
+	QueryPerformanceCounter(&t2);
+	ss_log("park: %d thread(s) were held for %.0f ms (%.1f ms to freeze them, %.1f ms "
+	       "total). No memory was read or written. If the game is still playing, the "
+	       "freeze is not what kills restores\n",
+	       held, (double)(t2.QuadPart - t1.QuadPart) * 1000.0 / (double)pf.QuadPart,
+	       (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)pf.QuadPart,
+	       (double)(t2.QuadPart - t0.QuadPart) * 1000.0 / (double)pf.QuadPart);
+	heap_check("after a park with no restore");
+	return 1;
+}
+
 /* How many times to let go and look again before saving anyway.
  *
  * Saving anyway rather than refusing, because a save that silently does not

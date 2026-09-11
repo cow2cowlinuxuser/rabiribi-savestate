@@ -124,6 +124,12 @@ void savestate_probe_census(void);
 int savestate_key_edge(int vk);
 int savestate_key_held(int vk);
 void savestate_chain_probe(void);
+
+/* Hold every thread still for a while and then let them go, copying nothing.
+ * The control experiment for every restore failure: a restore freezes, copies
+ * and writes back, and only the last two have ever been varied. */
+int savestate_park(int ms);
+
 void savestate_soak_arm(void);
 int savestate_soak_action(void);
 
