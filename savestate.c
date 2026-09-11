@@ -6718,7 +6718,7 @@ static void blk_sys_mark(void)
 	uintptr_t lo_all = (uintptr_t)-1, hi_all = 0;
 	unsigned qh = 0, qn = 0, marked = 0, both = 0, i;
 	HANDLE proc = GetProcessHeap();
-	int k, nroot = 0, nteb = 0, nteb_sys = 0;
+	int k, nroot = 0, nteb = 0, nteb_sys = 0, nteb_hits = 0;
 	LARGE_INTEGER t0, t1, pf;
 	BlkWalk w;
 
@@ -6815,56 +6815,42 @@ static void blk_sys_mark(void)
 				nroot++;
 			}
 		}
-		/* Class B: system thread TEBs as veto roots (restore_invariants.md
-		 * invariant 6).
+		/* Class B: system thread TEBs as direct-hit veto
+		 * (restore_invariants.md invariant 6).
 		 *
 		 * audit_present_threads reported ~8 blocks on the game's rewound
 		 * heap held by system thread TEBs every session, but the report
 		 * was advisory only. Those blocks were still written back, and the
 		 * system threads that held them - which keep running forward - used
-		 * the restored contents as present-time state. The crash histogram
-		 * shows workers dying 0 frames after restore with wild pointers
-		 * in CRT and ntdll paths on those same threads.
+		 * the restored contents as present-time state.
 		 *
-		 * For a transient (system) thread, scan the full TEB page and one
-		 * hop of small private allocations reachable from it. This is the
-		 * same scan audit_present_threads does, promoted from advisory to
-		 * veto: any block the system closure reaches from a system TEB is
-		 * marked as system-owned and will not be written back. Game threads
-		 * still get only the activation-context pointer, which is the only
-		 * TEB field pointing at a heap block that the game's side needs. */
+		 * Only the blocks directly pointed at by TEB words are vetoed -
+		 * no transitive closure from their contents. The first version
+		 * fed the full TEB page into the closure walk and doubled the
+		 * system-owned count (3317 -> 7483), because every TEB pointer
+		 * into the heap fanned out through the object graph. The advisory
+		 * reports ~8, which is the right scale: that is how many blocks a
+		 * system thread's TEB literally holds, and it is only those that
+		 * the thread can dereference directly on resume. */
 		if (g_ctl->transient[i]) {
 			const uintptr_t *tw = (const uintptr_t *)teb;
 			unsigned tk;
-			uintptr_t hops[16];
-			int nhops = 0, tj;
 
-			w.root = (uintptr_t)teb;
-			blk_scan_range((uintptr_t)teb, 0x1000, &w);
 			nteb_sys++;
+			for (tk = 0; tk < 0x1000 / sizeof(uintptr_t); tk++) {
+				uintptr_t v = tw[tk];
+				int bi;
 
-			for (tk = 0; tk < 0x1000 / sizeof(uintptr_t) && nhops < 16; tk++) {
-				MEMORY_BASIC_INFORMATION tmbi;
-				uintptr_t tab, tspan;
-
-				if (tw[tk] < 0x10000 ||
-				    VirtualQuery((LPCVOID)tw[tk], &tmbi, sizeof(tmbi)) !=
-					    sizeof(tmbi))
+				if (v < lo_all || v >= hi_all)
 					continue;
-				if (tmbi.State != MEM_COMMIT || tmbi.Type != MEM_PRIVATE ||
-				    (tmbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+				bi = blk_find(v);
+				if (bi < 0)
 					continue;
-				tab = (uintptr_t)tmbi.AllocationBase;
-				tspan = alloc_span(tab);
-				if (!tspan || tspan > 0x10000 || heap_index_of(tab) >= 0)
+				if (exact_only && v != g_blk_save[bi].base)
 					continue;
-				for (tj = 0; tj < nhops; tj++)
-					if (hops[tj] == tab)
-						break;
-				if (tj == nhops) {
-					hops[nhops++] = tab;
-					w.root = tab;
-					blk_scan_range(tab, tspan, &w);
+				if (!g_blk_sys[bi]) {
+					g_blk_sys[bi] = 1;
+					nteb_hits++;
 				}
 			}
 			nroot++;
@@ -6902,14 +6888,15 @@ static void blk_sys_mark(void)
 	 * hole the loader crashes were coming through. Zero means they were not
 	 * coming from here and the next theory is somewhere else. */
 	ss_log("  system reach: %u of %u matched block(s) reachable from %s, %u "
-	       "contested, over %d root(s) (%d system TEBs scanned as veto roots), "
-	       "%u exact hit(s), %.1f ms%s\n",
+	       "contested, over %d root(s), %u exact hit(s), %.1f ms. "
+	       "TEB veto: %d system thread(s) scanned, %d block(s) directly held%s\n",
 	       marked, g_blk_match_n,
 	       mode == 3  ? "ntdll and the audio stack"
 	       : mode < 2 ? "ntdll"
 			  : "everything left in the present",
-	       both, nroot, nteb_sys, g_reach_exact,
+	       both, nroot, g_reach_exact,
 	       (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)pf.QuadPart,
+	       nteb_sys, nteb_hits,
 	       qn >= SS_BLK_QCAP ? " <<< QUEUE FULL, closure is incomplete" : "");
 }
 

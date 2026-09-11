@@ -27,9 +27,12 @@ believes in.
 **Class B TEB veto (the deferred win).** System thread TEBs hold ~8 blocks on
 the game's rewound heap every session. Those TEBs are not in the snapshot but
 the blocks are, so the blocks were being written back while the system threads
-that held them kept running. `blk_sys_mark` now scans every system thread's
-full TEB as a veto root for the block-ownership closure, so those blocks are no
-longer restored. See `restore_invariants.md` invariant 6.
+that held them kept running. `blk_sys_mark` now checks every system thread's
+TEB for pointer-sized words that match a tracked block, and marks those specific
+blocks as system-owned. Only the direct hits are vetoed — the first version fed
+them into the transitive closure and doubled system-owned (3317 → 7483), which
+excluded far more than the ~8-block TEB delta. See `restore_invariants.md`
+invariant 6.
 
 **Thread-set invariant.** The restore already compared thread sets and logged
 divergences, but the counts were buried in the log and no harness checked them.

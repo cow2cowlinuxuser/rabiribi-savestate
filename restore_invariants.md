@@ -79,15 +79,16 @@ suspend time when the JIT is hot, against 34-83 ms when it is quiet).
 
 **Class B, system thread TEBs.** Eight blocks on the game's rewound heap are
 held by system thread TEBs, reported in every session. TEBs are not in the
-snapshot; those blocks are. BUILT: `blk_sys_mark` now scans the full TEB page of
-every transient (system) thread as a veto root, plus one hop of small private
-allocations reachable from the TEB (the same scan `audit_present_threads` was
-already doing as an advisory). Any shared-heap block the closure reaches from a
-system TEB is marked system-owned and will not be written back during the
-restore. Game threads still get only the activation-context pointer. The count
-of system TEBs scanned is logged as "system TEBs scanned as veto roots" in the
-system-reach line. This was deferred four times and is the cheapest identified
-win in the whole project.
+snapshot; those blocks are. BUILT: `blk_sys_mark` now checks each pointer-sized
+word of every transient (system) thread's TEB against the block map. A direct
+hit marks that single block as system-owned; unlike the module and heap-header
+roots, the TEB hits are NOT fed into the transitive closure, because following
+the object graph from them doubled system-owned (3317 → 7483 measured) and
+excluded far more game state than the ~8 TEB-held blocks that motivated the
+change. Game threads still get only the activation-context pointer. The count
+is logged as "TEB veto: N system thread(s) scanned, M block(s) directly held"
+in the system-reach line. This was deferred four times and is the cheapest
+identified win in the whole project.
 
 ### Instances that were theorised and then measured absent
 
@@ -290,18 +291,27 @@ but the report was advisory: those blocks were still written back, and the syste
 threads whose TEBs pointed at them - threads that keep running forward with
 stacks that are never rewound - used the restored contents as present-time state.
 
-BUILT: `blk_sys_mark` now includes every transient thread's full TEB page as a
-system-side root for the reachability closure, plus one hop of small private
-allocations hanging off each TEB (the same chain `audit_present_threads` follows
-to find per-thread runtime state like XInput's). Blocks the closure reaches are
-vetoed and will not be written back. The "system reach" log line now includes
-"N system TEBs scanned as veto roots" so the count is visible and can be
-compared against the `audit_present_threads` advisory that preceded it.
+BUILT: `blk_sys_mark` now checks every aligned word of every transient thread's
+TEB against the block map. A word that matches a tracked block's address marks
+that block as system-owned. This is a direct-hit check only — the block is NOT
+enqueued for the transitive closure walk.
 
-Cost: one VirtualQuery per TEB word that looks like a pointer, bounded by the
-0x1000-byte TEB size and the 16-hop limit per thread. In practice this is a
-handful of queries per system thread, each of which is a single syscall. The
-block scan itself is the same binary-search walk the existing closure uses.
+The first version fed the full TEB page into the closure as a root and followed
+pointers transitively (the same walk modules and heap headers use). MEASURED:
+system-owned doubled from 3317 to 7483 and contested nearly doubled, because
+each TEB pointer into the heap fanned out through the game's entire object graph.
+The advisory reports ~8 blocks, which is the right scale: that is how many blocks
+a system thread's TEB literally holds as pointer-sized words, and those are the
+only ones the thread can dereference directly on resume without going through
+restored game structures. Narrowing to direct hits keeps system-owned near the
+pre-change baseline with only the ~8-block TEB delta on top.
+
+The "system reach" log line now includes "TEB veto: N system thread(s) scanned,
+M block(s) directly held" so the count is visible and can be compared against
+the `audit_present_threads` advisory that preceded it.
+
+Cost: one `blk_find` (binary search) per pointer-looking word in each system
+TEB, bounded by 0x1000 / sizeof(void*) per thread. No VirtualQuery, no closure.
 
 The check that this fires can be constructed: create a system thread (e.g. via
 QueueUserWorkItem) that holds a pointer to a shared-heap block in its TEB via
