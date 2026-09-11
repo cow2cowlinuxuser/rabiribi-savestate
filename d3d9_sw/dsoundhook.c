@@ -112,6 +112,45 @@ enum {
 static unsigned long g_calls[C_MAX];
 
 static Buf g_buf[DSH_MAX];
+
+/* What was audible in the present, immediately before a restore.
+ *
+ * dsh_play restarts what the SAVE recorded as playing, which is right and is
+ * also how the music dies. One save taken during a silent beat - a track
+ * change, a room transition - records silence, and from then on every restore
+ * faithfully reproduces it. The next save then records the silence it just
+ * caused. Measured across one session: eleven restores brought one buffer back,
+ * then nine in a row brought back none, and the music stayed gone until the
+ * game started a new track of its own accord.
+ *
+ * Music is not state. Being one bar out of place is nothing; being silent for
+ * the rest of the session is the failure. So the present gets a vote: anything
+ * audible just before the restore starts playing again afterwards, whether or
+ * not the snapshot agrees it should be.
+ *
+ * Kept by pointer rather than by index, and in memory the snapshot does not
+ * touch. g_buf is an ordinary static and rewinds with the rest of our image, so
+ * an index recorded before the restore names a different buffer after it if any
+ * were created in between - and a note written in rewinding storage would be
+ * erased by the very event it exists to survive. */
+typedef struct {
+	int n;
+	void *p[DSH_MAX];
+} PresentSet;
+
+static PresentSet *g_present;
+
+static int present_has(void *p)
+{
+	int i;
+
+	if (!g_present)
+		return 0;
+	for (i = 0; i < g_present->n; i++)
+		if (g_present->p[i] == p)
+			return 1;
+	return 0;
+}
 static int g_nbuf;
 static CRITICAL_SECTION g_cs;
 static int g_ready, g_armed, g_capped;
@@ -894,6 +933,43 @@ void dsh_install(void)
 	g_pending_dev_vtbl = vtbl;
 }
 
+/* Note what is audible right now, before anything is wound back.
+ *
+ * Called at the top of a restore, while the present is still the present. The
+ * allocation happens here rather than at install because this is the first
+ * moment it is needed, and it is excluded so that the note survives the rewind
+ * it describes. */
+void dsh_mark_present(void)
+{
+	int i;
+
+	if (!g_ready)
+		return;
+	if (!g_present) {
+		g_present = (PresentSet *)VirtualAlloc(NULL, sizeof(PresentSet),
+						       MEM_COMMIT | MEM_RESERVE,
+						       PAGE_READWRITE);
+		if (!g_present)
+			return;
+		savestate_exclude(g_present, sizeof(PresentSet));
+	}
+	g_present->n = 0;
+	EnterCriticalSection(&g_cs);
+	for (i = 0; i < g_nbuf && g_present->n < DSH_MAX; i++) {
+		void **v = *(void ***)g_buf[i].p;
+		DWORD st = 0;
+
+		if (FAILED(((PFN_GETSTATUS)v[DSB_GET_STATUS])(g_buf[i].p, &st)))
+			continue;
+		if (st & DSBSTATUS_PLAYING)
+			g_present->p[g_present->n++] = g_buf[i].p;
+	}
+	LeaveCriticalSection(&g_cs);
+	ss_log("dsound: %d buffer(s) were audible in the present when the restore "
+	       "began; those come back whatever the snapshot says\n",
+	       g_present->n);
+}
+
 /* Where every buffer is, at the instant the rest of the state is captured. */
 void dsh_save(void)
 {
@@ -977,23 +1053,36 @@ void dsh_quiet(void)
  * idle would produce sound the game never asked for. */
 void dsh_play(void)
 {
-	int i, n = 0;
+	int i, n = 0, rescued = 0;
 
 	if (!g_ready)
 		return;
 	EnterCriticalSection(&g_cs);
 	for (i = 0; i < g_nbuf; i++) {
 		void **v;
+		int snap = g_buf[i].held && (g_buf[i].status & DSBSTATUS_PLAYING);
+		int now = present_has(g_buf[i].p);
 
-		if (!g_buf[i].held || !(g_buf[i].status & DSBSTATUS_PLAYING))
+		if (!snap && !now)
 			continue;
 		v = *(void ***)g_buf[i].p;
-		((PFN_SETPOS)v[DSB_SET_POSITION])(g_buf[i].p, g_buf[i].play);
+		/* The cursor is only moved for buffers the snapshot knows about.
+		 * One the present alone vouches for has no saved position worth
+		 * having - dsh_seek has already put every cursor where the game
+		 * expects it, and overwriting that with a stale figure would be
+		 * inventing a position rather than keeping one. */
+		if (snap)
+			((PFN_SETPOS)v[DSB_SET_POSITION])(g_buf[i].p, g_buf[i].play);
 		((PFN_PLAY)v[DSB_PLAY])(g_buf[i].p, 0, 0, DSBPLAY_LOOPING);
 		n++;
+		if (now && !snap)
+			rescued++;
 	}
+	if (g_present)
+		g_present->n = 0;
 	LeaveCriticalSection(&g_cs);
-	ss_log("dsound: %d buffer(s) playing again from where they were stopped\n", n);
+	ss_log("dsound: %d buffer(s) playing again from where they were stopped%s\n", n,
+	       rescued ? " (including ones the snapshot thought were silent)" : "");
 }
 
 /* Move every cursor back, without starting anything.

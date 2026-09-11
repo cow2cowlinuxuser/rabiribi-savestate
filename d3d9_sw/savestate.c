@@ -1787,6 +1787,7 @@ void dsh_save(void);
 void dsh_restore(void);
 void dsh_seek(void);
 void dsh_quiet(void);
+void dsh_mark_present(void);
 void dsh_survey(void);
 void dsh_play(void);
 
@@ -11797,7 +11798,11 @@ static int do_load(int slotno)
 		 * by the hardware while its contents change underneath, and filled
 		 * by the driver into pages we are simultaneously overwriting.
 		 * dsh_restore at the end puts the cursors back and starts the ones
-		 * that were playing again. */
+		 * that were playing again.
+		 *
+		 * The note comes first: once the buffers are stopped there is
+		 * nothing left to observe about what the present sounded like. */
+		dsh_mark_present();
 		dsh_quiet();
 		if (want)
 			blk_lock_all();
