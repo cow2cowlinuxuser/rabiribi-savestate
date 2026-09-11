@@ -1,0 +1,15 @@
+savestate harness: 30 cycles, 4 worker thread(s), mode mono
+installing hooks
+mono: loaded C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\MonoBleedingEdge\EmbedRuntime\mono-2.0-bdwgc.dll at 00007FFD325B0000
+mono: no checked compile; falling back to mono_compile_method, which aborts rather than reporting a bad method
+mono: assemblies C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\OSFE_Data\Managed
+mono: runtime up, domain 000002E298072D20, corlib 000002E296179090, 26114 methoddef row(s)
+mono: 1679 generic-parameter row(s), 455 generic method(s) skipped
+mono: 0 row(s) skipped from earlier failures
+starting workers
+oracle: pinned handle 4 on a 34-byte string
+oracle: managed call works before any save (returned 1234567)
+oracle: managed throw/catch works before any save (FormatException)
+oracle: full collection before any save took 176 us, used 344 -> 336 KB
+mono: 212851 method(s) compiled before the first save
+entering cycle loop

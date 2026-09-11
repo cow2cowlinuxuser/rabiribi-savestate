@@ -1,0 +1,156 @@
+Opened log file 'F:\rbo_fabre_proto\d3d9_sw\imports.txt'
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.015 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [F:\rbo_fabre_proto\d3d9_sw\failfast.dmp]
+User Mini Dump File with Full Memory : Only application data is available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw
+Executable search path is: 
+Windows 10 Version 26200 MP (16 procs) Free x64
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Debug session time: Sun Aug 30 21:26:13.000 2026 (UTC - 4:00)
+System Uptime: 5 days 11:10:02.664
+Process Uptime: 0 days 0:07:11.000
+.NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'
+...............................................................
+....................................
+Loading unloaded module list
+.
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(2188.30dc): Security check failure or stack buffer overrun - code c0000409 (first/second chance not available)
+Subcode: 0x3 FAST_FAIL_CORRUPT_LIST_ENTRY 
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+For analysis of this file, run !analyze -v
+ntdll!RtlAddGrowableFunctionTable+0x208:
+00007ffd`f79cece8 cd29            int     29h
+0:000> .symfix
+SOS_HOSTING: Failed to find runtime directory
+Loading extension C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\winext\sos\extensions\Microsoft.Diagnostics.DataContractReader.dll
+Loading extension C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\winext\sos\extensions\Microsoft.Diagnostics.DataContractReader.Extension.dll
+Loading extension C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\winext\sos\extensions\Microsoft.Diagnostics.DebuggerCommands.dll
+0:000> .sympath+ F:\rbo_fabre_proto\d3d9_sw\symbols
+Symbol search path is: srv*;F:\rbo_fabre_proto\d3d9_sw\symbols
+Expanded Symbol search path is: cache*;SRV*https://msdl.microsoft.com/download/symbols;f:\rbo_fabre_proto\d3d9_sw\symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*
+OK                                             F:\rbo_fabre_proto\d3d9_sw\symbols
+0:000> .reload /f
+.*** WARNING: Unable to verify checksum for OSFE.exe
+................................................*** WARNING: Unable to verify checksum for d3d11.dll
+.*** WARNING: Unable to verify checksum for dxgi.dll
+..............
+....................................
+Loading unloaded module list
+.
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+OSFE                   The system cannot find the file specified
+gameoverlayrenderer64  The system cannot find the file specified
+mono-2.0-bdwgc         The system cannot find the file specified
+MpOAV                  The system cannot find the file specified
+mdnsNSP                The system cannot find the file specified
+steam_api64            The system cannot find the file specified
+steamclient64          The system cannot find the file specified
+vstdlib_s64            The system cannot find the file specified
+tier0_s64              The system cannot find the file specified
+discord_game_sdk       The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:000> .echo ===NTDLL EXPORTS FOR GROWABLE TABLES===
+===NTDLL EXPORTS FOR GROWABLE TABLES===
+0:000> x ntdll!Rtl*FunctionTable*
+00007ffd`f79cf030 ntdll!RtlpInsertOrRemoveScpCfgFunctionTable (RtlpInsertOrRemoveScpCfgFunctionTable)
+00007ffd`f7b67060 ntdll!RtlpDynamicFunctionTable = <no type information>
+00007ffd`f7a68210 ntdll!RtlDeleteGrowableFunctionTable (RtlDeleteGrowableFunctionTable)
+00007ffd`f7a7a8f0 ntdll!RtlGrowFunctionTable (RtlGrowFunctionTable)
+00007ffd`f798f5e0 ntdll!RtlpxLookupFunctionTable (RtlpxLookupFunctionTable)
+00007ffd`f7a68000 ntdll!RtlDeleteFunctionTable (RtlDeleteFunctionTable)
+00007ffd`f7b67070 ntdll!RtlpDynamicFunctionTableTreeMin = <no type information>
+00007ffd`f7a73b70 ntdll!RtlAddFunctionTable (RtlAddFunctionTable)
+00007ffd`f7a75774 ntdll!RtlpRemoveInvertedFunctionTableEntry (RtlpRemoveInvertedFunctionTableEntry)
+00007ffd`f79cb2d4 ntdll!RtlInsertInvertedFunctionTable (RtlInsertInvertedFunctionTable)
+00007ffd`f79cf168 ntdll!RtlRemoveInvertedFunctionTable (RtlRemoveInvertedFunctionTable)
+00007ffd`f7aa0740 ntdll!RtlGetFunctionTableListHead (RtlGetFunctionTableListHead)
+00007ffd`f79ceae0 ntdll!RtlAddGrowableFunctionTable (RtlAddGrowableFunctionTable)
+00007ffd`f79cb370 ntdll!RtlpInsertInvertedFunctionTableEntry (RtlpInsertInvertedFunctionTableEntry)
+00007ffd`f79cf1a0 ntdll!RtlxRemoveInvertedFunctionTable (RtlxRemoveInvertedFunctionTable)
+00007ffd`f798df80 ntdll!RtlLookupFunctionTable (RtlLookupFunctionTable)
+00007ffd`f7b54270 ntdll!RtlpDynamicFunctionTableLock = <no type information>
+00007ffd`f7b67078 ntdll!RtlpDynamicFunctionTableTreeMax = <no type information>
+00007ffd`f7a60710 ntdll!RtlInstallFunctionTableCallback (RtlInstallFunctionTableCallback)
+0:000> .echo ===IMPORT NAME STRINGS INSIDE MONO===
+===IMPORT NAME STRINGS INSIDE MONO===
+0:000> s -a 00007ffda6080000 L0x767000 "GrowableFunctionTable"
+00007ffd`a64bcdce  47 72 6f 77 61 62 6c 65-46 75 6e 63 74 69 6f 6e  GrowableFunction
+00007ffd`a64bce09  47 72 6f 77 61 62 6c 65-46 75 6e 63 74 69 6f 6e  GrowableFunction
+0:000> .echo ===MONO MODULE INFO===
+===MONO MODULE INFO===
+0:000> lm m mono*
+start             end                 module name
+00007ffd`a6080000 00007ffd`a67e7000   mono_2_0_bdwgc   (export symbols)       mono-2.0-bdwgc.dll
+0:000> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

@@ -1,0 +1,153 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.031 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 26332 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+...............
+Loading unloaded module list
+.
+(66dc.23a8): Wake debugger - code 80000007 (first chance)
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\d3d11.dll
+eax=00000001 ebx=69c2c254 ecx=00000000 edx=1c520000 esi=00000000 edi=00000000
+eip=69bccee1 esp=006fed30 ebp=006fed34 iopl=0         nv up ei ng nz ac pe cy
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00200297
+d3d11!D3D11CreateDeviceAndSwapChain+0x18b01:
+69bccee1 ebed            jmp     d3d11!D3D11CreateDeviceAndSwapChain+0x18af0 (69bcced0)
+0:000> cdb: Reading initial command '.echo ==EXPORTS==; x dsound!DirectSound*; .echo ==PROLOGUE==; u dsound!DirectSoundCreate8 L4; .echo ==WHOCALLS==; !chkimg -d dsound; .echo ==IAT==; !dh -f rabiribi; q'
+==EXPORTS==
+6a05c9df          dsound!DirectSoundTelemetry::DirectSoundCaptureCreate8<long &,bool,_GUID const &> (public: static void __stdcall DirectSoundTelemetry::DirectSoundCaptureCreate8<long &,bool,struct _GUID const &>(long &,bool &&,struct _GUID const &))
+6a05c40a          dsound!DirectSoundLogging::Provider (public: static struct _tlgProvider_t const * __stdcall DirectSoundLogging::Provider(void))
+6a041094          dsound!DirectSoundLogging::`vftable' = <no type information>
+6a06d0e0          dsound!DirectSoundFullDuplexCreate (_DirectSoundFullDuplexCreate@40)
+6a05c3e0          dsound!DirectSoundTelemetry::`vector deleting destructor' (public: virtual void * __thiscall DirectSoundTelemetry::`vector deleting destructor'(unsigned int))
+6a05ca76          dsound!DirectSoundTelemetry::DirectSoundCaptureCreate<long &,bool,_GUID const &> (public: static void __stdcall DirectSoundTelemetry::DirectSoundCaptureCreate<long &,bool,struct _GUID const &>(long &,bool &&,struct _GUID const &))
+6a05cb67          dsound!DirectSoundTelemetry::DirectSoundCreate8<long &,bool,_GUID const &> (public: static void __stdcall DirectSoundTelemetry::DirectSoundCreate8<long &,bool,struct _GUID const &>(long &,bool &&,struct _GUID const &))
+6a06cc60          dsound!DirectSoundCaptureCreate (_DirectSoundCaptureCreate@12)
+6a05e800          dsound!DirectSoundCreate8 (_DirectSoundCreate8@12)
+6a05cc95          dsound!DirectSoundTelemetry::DirectSoundEnumerateW<long &> (public: static void __stdcall DirectSoundTelemetry::DirectSoundEnumerateW<long &>(long &))
+6a05c3e0          dsound!DirectSoundTelemetry::`scalar deleting destructor' (public: virtual void * __thiscall DirectSoundTelemetry::`scalar deleting destructor'(unsigned int))
+6a05ccef          dsound!DirectSoundTelemetry::DirectSoundFullDuplexCreate<long &,bool,_GUID const &,bool,_GUID const &> (public: static void __stdcall DirectSoundTelemetry::DirectSoundFullDuplexCreate<long &,bool,struct _GUID const &,bool,struct _GUID const &>(long &,bool &&,struct _GUID const &,bool &&,struct _GUID const &))
+6a05cb0d          dsound!DirectSoundTelemetry::DirectSoundCaptureEnumerateW<long &> (public: static void __stdcall DirectSoundTelemetry::DirectSoundCaptureEnumerateW<long &>(long &))
+6a06caf0          dsound!DirectSoundCaptureCreate8 (_DirectSoundCaptureCreate8@12)
+6a0670f0          dsound!DirectSoundLogging::`vector deleting destructor' (public: virtual void * __thiscall DirectSoundLogging::`vector deleting destructor'(unsigned int))
+6a05cbfe          dsound!DirectSoundTelemetry::DirectSoundCreate<long &,bool,_GUID const &> (public: static void __stdcall DirectSoundTelemetry::DirectSoundCreate<long &,bool,struct _GUID const &>(long &,bool &&,struct _GUID const &))
+6a06d070          dsound!DirectSoundEnumerateW (_DirectSoundEnumerateW@8)
+6a0670f0          dsound!DirectSoundLogging::`scalar deleting destructor' (public: virtual void * __thiscall DirectSoundLogging::`scalar deleting destructor'(unsigned int))
+6a041084          dsound!DirectSoundTelemetry::`vftable' = <no type information>
+6a06ce30          dsound!DirectSoundCaptureEnumerateW (_DirectSoundCaptureEnumerateW@8)
+6a06cdc0          dsound!DirectSoundCaptureEnumerateA (_DirectSoundCaptureEnumerateA@8)
+6a06cea0          dsound!DirectSoundCreate (_DirectSoundCreate@12)
+6a06d000          dsound!DirectSoundEnumerateA (_DirectSoundEnumerateA@8)
+==PROLOGUE==
+dsound!DirectSoundCreate8:
+6a05e800 8bff            mov     edi,edi
+6a05e802 55              push    ebp
+6a05e803 8bec            mov     ebp,esp
+6a05e805 83e4f8          and     esp,0FFFFFFF8h
+==WHOCALLS==
+0 errors : dsound 
+==IAT==
+
+File Type: EXECUTABLE IMAGE
+FILE HEADER VALUES
+     14C machine (i386)
+       7 number of sections
+57D6DCF3 time date stamp Mon Sep 12 12:50:59 2016
+
+       0 file pointer to symbol table
+       0 number of symbols
+      E0 size of optional header
+     102 characteristics
+            Executable
+            32 bit word machine
+
+OPTIONAL HEADER VALUES
+     10B magic #
+   12.00 linker version
+  39FA00 size of code
+  D0A600 size of initialized data
+       0 size of uninitialized data
+ 10AE310 address of entry point
+    1000 base of code
+         ----- new -----
+00850000 image base
+    1000 section alignment
+     200 file alignment
+       2 subsystem (Windows GUI)
+    5.01 operating system version
+    0.00 image version
+    5.01 subsystem version
+ 10CE000 size of image
+     400 size of headers
+       0 checksum
+00100000 size of stack reserve
+00001000 size of stack commit
+00100000 size of heap reserve
+00001000 size of heap commit
+    8140  DLL characteristics
+            Dynamic base
+            NX compatible
+            Terminal server aware
+  435990 [     373] address [size] of Export Directory
+  435D04 [      78] address [size] of Import Directory
+  FD4000 [   A4F50] address [size] of Resource Directory
+       0 [       0] address [size] of Exception Directory
+       0 [       0] address [size] of Security Directory
+ 1079000 [   34864] address [size] of Base Relocation Directory
+  3A1460 [      38] address [size] of Debug Directory
+       0 [       0] address [size] of Description Directory
+       0 [       0] address [size] of Special Directory
+       0 [       0] address [size] of Thread Storage Directory
+  431020 [      40] address [size] of Load Configuration Directory
+       0 [       0] address [size] of Bound Import Directory
+  3A1000 [     3E8] address [size] of Import Address Table Directory
+       0 [       0] address [size] of Delay Import Directory
+       0 [       0] address [size] of COR20 Header Directory
+       0 [       0] address [size] of Reserved Directory
+
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

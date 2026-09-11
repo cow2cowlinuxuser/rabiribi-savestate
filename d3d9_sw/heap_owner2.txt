@@ -1,0 +1,13 @@
+==== block ownership on the process heap, from the recorded allocation stacks ====
+
+  allocated by                 blocks    blk %     bytes    byte %
+  --------------------------------------------------------------------
+  tier0_s                           1    50.0%        0K    50.0%
+  gameoverlayrenderer               1    50.0%        0K    50.0%
+  --------------------------------------------------------------------
+  total                             2                0K
+
+rabiribi.exe accounts for 0.0% of the attributed bytes.
+High means ownership is clean and BLKOWNER's content sniffing has an easy job.
+Low or mixed means the game's state is interleaved with Steam and CRT blocks,
+and only a real allocator hook can separate them.

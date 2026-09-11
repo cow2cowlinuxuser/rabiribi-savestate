@@ -1,0 +1,45 @@
+  shape (after build_world):
+    node table  at 01F766B8  alloc base 01F60000  region     0.42 MB  state 1000 type 20000 prot 4
+    first node  at 01F75F60  alloc base 01F60000  region     0.42 MB  state 1000 type 20000 prot 4
+    last node   at 080673C0  alloc base 08010000  region     0.05 MB  state 1000 type 20000 prot 4
+    bulk table  at 080FE008  alloc base 08010000  region     0.03 MB  state 1000 type 20000 prot 4
+    first bulk  at 081C05B8  alloc base 081C0000  region     0.04 MB  state 1000 type 20000 prot 4
+    last bulk   at 0C5200B0  alloc base 0C040000  region     0.02 MB  state 1000 type 20000 prot 4
+rr harness: 90 cycle(s), 2 restore(s), call-anyway off
+  condition 1  16384 node(s) of 56 bytes on the SHARED process heap
+  condition 2  7 pool worker(s) live on ntdll threads
+  condition 2b 30 thread(s) of our own, which DO rewind, each publishing a node into a TLS slot
+  condition 3  dsound streaming with 64 buffer(s) created after the hook armed, callback pointers inside every node
+  contested    node pointers published into TLS, window user data, a timer-queue context and a registered wait
+  condition 4  4096 bulk block(s) of 16 KB on a private heap (64 MB), plus a 4 MB mapped view
+
+
+[30] fingerprinting and saving
+[30] back from restore
+  ORACLE cycle 30: nodes 0 bad of 16384 checked (magic 0, identity 0, callback 0), mapped view matches, heaps sane
+  ORACLE pool: 378 call(s) from ntdll worker(s), 0 held a pointer that no longer describes its object (none yet)
+
+[60] fingerprinting and saving
+[60] back from restore
+  ORACLE cycle 60: nodes 0 bad of 32768 checked (magic 0, identity 0, callback 0), mapped view matches, heaps sane
+  ORACLE pool: 672 call(s) from ntdll worker(s), 0 held a pointer that no longer describes its object (none yet)
+
+================ result ================
+  restores               2
+  nodes checked          32768
+  nodes wrong magic      0
+  nodes wrong identity   0
+  nodes wrong callback   0
+  pool calls             749
+  pool stale pointers    0
+  pool skipped the call  0
+  pool called anyway     0
+  mapped view mismatches 0
+  heap oracle failures   0
+  dsound buffers / ticks 64 / 91, lost 0
+  our worker calls / bad 9676 / 0
+  pump ticks / file reads 321 / 321
+
+  NOT REPRODUCED. All four conditions held at the game's scale
+  and every oracle passed, so the engine handles this shape and
+  the remaining difference is specific to the game.

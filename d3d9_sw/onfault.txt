@@ -1,0 +1,17 @@
+.echo ===FAULT===
+.lastevent
+.echo ===REGISTERS===
+r
+.echo ===FAULTING_INSTRUCTION===
+u @$scopeip-10 L8
+.echo ===FAILFAST_SUBCODE_IS_RCX===
+.echo ===STACK===
+kv 40
+.echo ===STACK_RAW===
+kb 40
+.echo ===ALLTHREADS===
+~*kb
+.echo ===DUMP===
+.dump /mA F:\rbo_fabre_proto\d3d9_sw\osfe_move.dmp
+.echo ===END===
+qd

@@ -1,0 +1,44 @@
+# Build output and binaries
+build/
+x86/
+x86-lowspec/
+x_reader/
+zoo_run/
+*.exe
+*.dll
+*.pdb
+*.obj
+*.lib
+*.exp
+*.ilk
+*.o
+*.a
+*.elf
+*.dol
+
+# Crash dumps and symbol caches (several GB)
+*.dmp
+symbols/
+symbols-cache/
+_dumps/
+_dumps2/
+session_heap/
+
+# Captured game data and art sources
+Data/
+sd_pack/
+wholesale/
+textures/
+title_bg_src1024/
+assets/
+*.png
+*.gif
+*.bmp
+*.tga
+*.dds
+
+# Engine logs and traces - regenerated every run
+d3d9_sw_savestate_*.txt
+gl_sw.log
+*_frames.csv
+hang_analysis.txt

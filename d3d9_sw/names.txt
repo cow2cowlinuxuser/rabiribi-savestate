@@ -1,0 +1,95 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.016 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+CommandLine: C:\Windows\System32\cmd.exe /c exit 
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw
+Executable search path is: 
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+ModLoad: 00007ff6`b3c10000 00007ff6`b3c7f000   cmd.exe 
+ModLoad: 00007ffd`f7980000 00007ffd`f7be7000   ntdll.dll
+ModLoad: 00007ffd`f72c0000 00007ffd`f7389000   C:\WINDOWS\System32\KERNEL32.DLL
+ModLoad: 00007ffd`f4250000 00007ffd`f4644000   C:\WINDOWS\System32\KERNELBASE.dll
+ModLoad: 00007ffd`f4650000 00007ffd`f479b000   C:\WINDOWS\System32\ucrtbase.dll
+(6b30.6004): Break instruction exception - code 80000003 (first chance)
+ntdll!RtlGetReturnAddressHijackTarget+0x6ed:
+00007ffd`f7a9f56d cc              int     3
+0:000> $$ The recurring chain: mono calls something in ucrtbase's formatting machinery
+0:000> $$ and dies inside it. Naming the ucrtbase frames tells us WHICH entry point mono
+0:000> $$ used, which is the one we can then intercept to capture the format string.
+0:000> .symfix+ f:\rbo_fabre_proto\d3d9_sw\symbols-cache
+0:000> .reload /f ucrtbase.dll
+0:000> .echo ===CALLED BY MONO===
+===CALLED BY MONO===
+0:000> ln ucrtbase+18588
+(00007ffd`f4668460)   ucrtbase!_stdio_common_vsprintf+0x128   |  (00007ffd`f46687f0)   ucrtbase!__stdio_common_vsprintf_s
+0:000> .echo ===FAULT SITES===
+===FAULT SITES===
+0:000> ln ucrtbase+1E1A4
+(00007ffd`f466e130)   ucrtbase!__crt_stdio_output::output_processor<char,__crt_stdio_output::string_output_adapter<char>,__crt_stdio_output::standard_base<char,__crt_stdio_output::string_output_adapter<char> > >::process+0x74   |  (00007ffd`f466e8e0)   ucrtbase!__crt_stdio_output::output_processor<wchar_t,__crt_stdio_output::string_output_adapter<wchar_t>,__crt_stdio_output::format_validation_base<wchar_t,__crt_stdio_output::string_output_adapter<wchar_t> > >::state_case_type
+0:000> ln ucrtbase+1E541
+(00007ffd`f466e130)   ucrtbase!__crt_stdio_output::output_processor<char,__crt_stdio_output::string_output_adapter<char>,__crt_stdio_output::standard_base<char,__crt_stdio_output::string_output_adapter<char> > >::process+0x411   |  (00007ffd`f466e8e0)   ucrtbase!__crt_stdio_output::output_processor<wchar_t,__crt_stdio_output::string_output_adapter<wchar_t>,__crt_stdio_output::format_validation_base<wchar_t,__crt_stdio_output::string_output_adapter<wchar_t> > >::state_case_type
+0:000> ln ucrtbase+19EC1
+(00007ffd`f4669e70)   ucrtbase!__crt_stdio_output::string_output_adapter<char>::write_string+0x51   |  (00007ffd`f4669f30)   ucrtbase!common_vsprintf<__crt_stdio_output::format_validation_base,char>
+0:000> ln ucrtbase+19D0C
+(00007ffd`f4669810)   ucrtbase!__crt_stdio_output::output_processor<char,__crt_stdio_output::string_output_adapter<char>,__crt_stdio_output::standard_base<char,__crt_stdio_output::string_output_adapter<char> > >::state_case_type+0x4fc   |  (00007ffd`f4669e70)   ucrtbase!__crt_stdio_output::string_output_adapter<char>::write_string
+0:000> ln ucrtbase+3CCCB
+(00007ffd`f468cc90)   ucrtbase!strchr+0x3b   |  (00007ffd`f468cd18)   ucrtbase!common_getenv_s<char>
+0:000> ln ucrtbase+451E7
+(00007ffd`f4694ff0)   ucrtbase!__crt_stdio_output::output_processor<char,__crt_stdio_output::string_output_adapter<char>,__crt_stdio_output::standard_base<char,__crt_stdio_output::string_output_adapter<char> > >::type_case_integer<10>+0x1f7   |  (00007ffd`f4695370)   ucrtbase!__crt_stdio_output::output_processor<char,__crt_stdio_output::string_output_adapter<char>,__crt_stdio_output::standard_base<char,__crt_stdio_output::string_output_adapter<char> > >::type_case_integer_parse_into_buffer<unsigned __int64,10>
+0:000> .echo ===NTDLL 1CD14===
+===NTDLL 1CD14===
+0:000> .reload /f ntdll.dll
+0:000> ln ntdll+1CD14
+(00007ffd`f799c240)   ntdll!RtlAllocateHeap+0xad4   |  (00007ffd`f799cd70)   ntdll!RtlpAllocateNTHeapInternal
+0:000> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

@@ -1,0 +1,478 @@
+Opened log file 'F:\rbo_fabre_proto\d3d9_sw\verify_list.txt'
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.000 seconds
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [F:\rbo_fabre_proto\d3d9_sw\failfast.dmp]
+User Mini Dump File with Full Memory : Only application data is available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw
+Executable search path is: 
+Windows 10 Version 26200 MP (16 procs) Free x64
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Debug session time: Sun Aug 30 21:26:13.000 2026 (UTC - 4:00)
+System Uptime: 5 days 11:10:02.664
+Process Uptime: 0 days 0:07:11.000
+.NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'
+...............................................................
+....................................
+Loading unloaded module list
+.
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(2188.30dc): Security check failure or stack buffer overrun - code c0000409 (first/second chance not available)
+Subcode: 0x3 FAST_FAIL_CORRUPT_LIST_ENTRY 
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+For analysis of this file, run !analyze -v
+ntdll!RtlAddGrowableFunctionTable+0x208:
+00007ffd`f79cece8 cd29            int     29h
+0:000> $$ Establish, from the dump rather than by reasoning, which linked list
+0:000> $$ RtlAddGrowableFunctionTable found corrupt and which memory its entries live in.
+0:000> $$ The fix depends entirely on that answer: if the entries sit in memory the
+0:000> $$ rewind replaces while the head sits in memory it holds, the seam is the rewind
+0:000> $$ boundary itself and no heap policy can close it.
+0:000> 
+0:000> .symfix
+SOS_HOSTING: Failed to find runtime directory
+Loading extension C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\winext\sos\extensions\Microsoft.Diagnostics.DataContractReader.dll
+Loading extension C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\winext\sos\extensions\Microsoft.Diagnostics.DataContractReader.Extension.dll
+Loading extension C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\winext\sos\extensions\Microsoft.Diagnostics.DebuggerCommands.dll
+0:000> .sympath+ F:\rbo_fabre_proto\d3d9_sw\symbols
+Symbol search path is: srv*;F:\rbo_fabre_proto\d3d9_sw\symbols
+Expanded Symbol search path is: cache*;SRV*https://msdl.microsoft.com/download/symbols;f:\rbo_fabre_proto\d3d9_sw\symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*
+OK                                             F:\rbo_fabre_proto\d3d9_sw\symbols
+0:000> .reload /f
+.*** WARNING: Unable to verify checksum for OSFE.exe
+.................
+
+Press ctrl-c (cdb, kd, ntsd) or ctrl-break (windbg) to abort symbol loads that take too long.
+Run !sym noisy before .reload to track down problems loading symbols.
+
+...............................*** WARNING: Unable to verify checksum for d3d11.dll
+.*** WARNING: Unable to verify checksum for dxgi.dll
+..............
+....................................
+Loading unloaded module list
+.
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+OSFE                   The system cannot find the file specified
+gameoverlayrenderer64  The system cannot find the file specified
+mono-2.0-bdwgc         The system cannot find the file specified
+MpOAV                  The system cannot find the file specified
+mdnsNSP                The system cannot find the file specified
+steam_api64            The system cannot find the file specified
+steamclient64          The system cannot find the file specified
+vstdlib_s64            The system cannot find the file specified
+tier0_s64              The system cannot find the file specified
+discord_game_sdk       The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:000> 
+.*** WARNING: Unable to verify checksum for OSFE.exe
+................................................*** WARNING: Unable to verify checksum for d3d11.dll
+.*** WARNING: Unable to verify checksum for dxgi.dll
+..............
+....................................
+Loading unloaded module list
+.
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+OSFE                   The system cannot find the file specified
+gameoverlayrenderer64  The system cannot find the file specified
+mono-2.0-bdwgc         The system cannot find the file specified
+MpOAV                  The system cannot find the file specified
+mdnsNSP                The system cannot find the file specified
+steam_api64            The system cannot find the file specified
+steamclient64          The system cannot find the file specified
+vstdlib_s64            The system cannot find the file specified
+tier0_s64              The system cannot find the file specified
+discord_game_sdk       The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:000> .echo ===EXCEPTION===
+===EXCEPTION===
+0:000> .exr -1
+ExceptionAddress: 00007ffdf79cece8 (ntdll!RtlAddGrowableFunctionTable+0x0000000000000208)
+   ExceptionCode: c0000409 (Security check failure or stack buffer overrun)
+  ExceptionFlags: 00000001
+NumberParameters: 1
+   Parameter[0]: 0000000000000003
+Subcode: 0x3 FAST_FAIL_CORRUPT_LIST_ENTRY 
+0:000> 
+ExceptionAddress: 00007ffdf79cece8 (ntdll!RtlAddGrowableFunctionTable+0x0000000000000208)
+   ExceptionCode: c0000409 (Security check failure or stack buffer overrun)
+  ExceptionFlags: 00000001
+NumberParameters: 1
+   Parameter[0]: 0000000000000003
+Subcode: 0x3 FAST_FAIL_CORRUPT_LIST_ENTRY 
+0:000> .echo ===REGISTERS AT THE FAULT===
+===REGISTERS AT THE FAULT===
+0:000> r
+rax=0000021780879470 rbx=00000218456527d0 rcx=0000000000000003
+rdx=00007ffdf7b67060 rsi=000002184ee20000 rdi=0000000000000000
+rip=00007ffdf79cece8 rsp=000000b6cb0fdba0 rbp=0000000000000000
+ r8=00000217f971d318  r9=00000217f971d310 r10=0000000000000000
+r11=00007ffdf7b67078 r12=00000217f63c2d20 r13=0000021845b863b0
+r14=0000021845a4c600 r15=00000217f9ccab98
+iopl=0         nv up ei ng nz na po cy
+cs=0033  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000287
+ntdll!RtlAddGrowableFunctionTable+0x208:
+00007ffd`f79cece8 cd29            int     29h
+0:000> 
+rax=0000021780879470 rbx=00000218456527d0 rcx=0000000000000003
+rdx=00007ffdf7b67060 rsi=000002184ee20000 rdi=0000000000000000
+rip=00007ffdf79cece8 rsp=000000b6cb0fdba0 rbp=0000000000000000
+ r8=00000217f971d318  r9=00000217f971d310 r10=0000000000000000
+r11=00007ffdf7b67078 r12=00000217f63c2d20 r13=0000021845b863b0
+r14=0000021845a4c600 r15=00000217f9ccab98
+iopl=0         nv up ei ng nz na po cy
+cs=0033  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000287
+ntdll!RtlAddGrowableFunctionTable+0x208:
+00007ffd`f79cece8 cd29            int     29h
+0:000> .echo ===THE CHECK ITSELF, so we can see which registers hold the list===
+===THE CHECK ITSELF, so we can see which registers hold the list===
+0:000> u ntdll!RtlAddGrowableFunctionTable+0x1c0 L34
+ntdll!RtlAddGrowableFunctionTable+0x1c0:
+00007ffd`f79ceca0 1f              ???
+00007ffd`f79ceca1 483b4ab0        cmp     rcx,qword ptr [rdx-50h]
+00007ffd`f79ceca5 730d            jae     ntdll!RtlAddGrowableFunctionTable+0x1d4 (00007ffd`f79cecb4)
+00007ffd`f79ceca7 488b02          mov     rax,qword ptr [rdx]
+00007ffd`f79cecaa 4885c0          test    rax,rax
+00007ffd`f79cecad 7411            je      ntdll!RtlAddGrowableFunctionTable+0x1e0 (00007ffd`f79cecc0)
+00007ffd`f79cecaf 488bd0          mov     rdx,rax
+00007ffd`f79cecb2 ebed            jmp     ntdll!RtlAddGrowableFunctionTable+0x1c1 (00007ffd`f79ceca1)
+00007ffd`f79cecb4 488b4208        mov     rax,qword ptr [rdx+8]
+00007ffd`f79cecb8 4885c0          test    rax,rax
+00007ffd`f79cecbb 75f2            jne     ntdll!RtlAddGrowableFunctionTable+0x1cf (00007ffd`f79cecaf)
+00007ffd`f79cecbd 41b001          mov     r8b,1
+00007ffd`f79cecc0 4c8d4b70        lea     r9,[rbx+70h]
+00007ffd`f79cecc4 488d0dad831900  lea     rcx,[ntdll!RtlpDynamicFunctionTableTreeMax (00007ffd`f7b67078)]
+00007ffd`f79ceccb e880010000      call    ntdll!RtlAvlInsertNodeEx (00007ffd`f79cee50)
+00007ffd`f79cecd0 488b0591831900  mov     rax,qword ptr [ntdll!RtlpDynamicFunctionTable+0x8 (00007ffd`f7b67068)]
+00007ffd`f79cecd7 488d1582831900  lea     rdx,[ntdll!RtlpDynamicFunctionTable (00007ffd`f7b67060)]
+00007ffd`f79cecde 483910          cmp     qword ptr [rax],rdx
+00007ffd`f79cece1 742d            je      ntdll!RtlAddGrowableFunctionTable+0x230 (00007ffd`f79ced10)
+00007ffd`f79cece3 b903000000      mov     ecx,3
+00007ffd`f79cece8 cd29            int     29h
+00007ffd`f79cecea 65488b0c2560000000 mov   rcx,qword ptr gs:[60h]
+00007ffd`f79cecf3 488b4930        mov     rcx,qword ptr [rcx+30h]
+00007ffd`f79cecf7 e9dffeffff      jmp     ntdll!RtlAddGrowableFunctionTable+0xfb (00007ffd`f79cebdb)
+00007ffd`f79cecfc 488b02          mov     rax,qword ptr [rdx]
+00007ffd`f79cecff 4885c0          test    rax,rax
+00007ffd`f79ced02 0f8476ffffff    je      ntdll!RtlAddGrowableFunctionTable+0x19e (00007ffd`f79cec7e)
+00007ffd`f79ced08 488bd0          mov     rdx,rax
+00007ffd`f79ced0b e954ffffff      jmp     ntdll!RtlAddGrowableFunctionTable+0x184 (00007ffd`f79cec64)
+00007ffd`f79ced10 488913          mov     qword ptr [rbx],rdx
+00007ffd`f79ced13 488d0d56551800  lea     rcx,[ntdll!RtlpDynamicFunctionTableLock (00007ffd`f7b54270)]
+00007ffd`f79ced1a 48894308        mov     qword ptr [rbx+8],rax
+00007ffd`f79ced1e 488918          mov     qword ptr [rax],rbx
+00007ffd`f79ced21 48891d40831900  mov     qword ptr [ntdll!RtlpDynamicFunctionTable+0x8 (00007ffd`f7b67068)],rbx
+00007ffd`f79ced28 e843e0feff      call    ntdll!RtlReleaseSRWLockExclusive (00007ffd`f79bcd70)
+00007ffd`f79ced2d b901000000      mov     ecx,1
+00007ffd`f79ced32 e8e9c3ffff      call    ntdll!LdrProtectMrdata (00007ffd`f79cb120)
+00007ffd`f79ced37 49891f          mov     qword ptr [r15],rbx
+00007ffd`f79ced3a e8a1eeffff      call    ntdll!LdrControlFlowGuardEnforced (00007ffd`f79cdbe0)
+00007ffd`f79ced3f 85c0            test    eax,eax
+00007ffd`f79ced41 0f8455feffff    je      ntdll!RtlAddGrowableFunctionTable+0xbc (00007ffd`f79ceb9c)
+00007ffd`f79ced47 488d0dfa601800  lea     rcx,[ntdll!LdrpMrdataLock (00007ffd`f7b54e48)]
+00007ffd`f79ced4e e84dd3feff      call    ntdll!RtlAcquireSRWLockExclusive (00007ffd`f79bc0a0)
+00007ffd`f79ced53 488b05c6821900  mov     rax,qword ptr [ntdll!LdrpMrdataHeapUnprotected (00007ffd`f7b67020)]
+00007ffd`f79ced5a 8b08            mov     ecx,dword ptr [rax]
+00007ffd`f79ced5c 85c9            test    ecx,ecx
+00007ffd`f79ced5e 0f84fdfdffff    je      ntdll!RtlAddGrowableFunctionTable+0x81 (00007ffd`f79ceb61)
+00007ffd`f79ced64 e90bfeffff      jmp     ntdll!RtlAddGrowableFunctionTable+0x94 (00007ffd`f79ceb74)
+00007ffd`f79ced69 e872eeffff      call    ntdll!LdrControlFlowGuardEnforced (00007ffd`f79cdbe0)
+00007ffd`f79ced6e 33d2            xor     edx,edx
+00007ffd`f79ced70 4c8bc3          mov     r8,rbx
+00007ffd`f79ced73 85c0            test    eax,eax
+0:000> 
+ntdll!RtlAddGrowableFunctionTable+0x1c0:
+00007ffd`f79ceca0 1f              ???
+00007ffd`f79ceca1 483b4ab0        cmp     rcx,qword ptr [rdx-50h]
+00007ffd`f79ceca5 730d            jae     ntdll!RtlAddGrowableFunctionTable+0x1d4 (00007ffd`f79cecb4)
+00007ffd`f79ceca7 488b02          mov     rax,qword ptr [rdx]
+00007ffd`f79cecaa 4885c0          test    rax,rax
+00007ffd`f79cecad 7411            je      ntdll!RtlAddGrowableFunctionTable+0x1e0 (00007ffd`f79cecc0)
+00007ffd`f79cecaf 488bd0          mov     rdx,rax
+00007ffd`f79cecb2 ebed            jmp     ntdll!RtlAddGrowableFunctionTable+0x1c1 (00007ffd`f79ceca1)
+00007ffd`f79cecb4 488b4208        mov     rax,qword ptr [rdx+8]
+00007ffd`f79cecb8 4885c0          test    rax,rax
+00007ffd`f79cecbb 75f2            jne     ntdll!RtlAddGrowableFunctionTable+0x1cf (00007ffd`f79cecaf)
+00007ffd`f79cecbd 41b001          mov     r8b,1
+00007ffd`f79cecc0 4c8d4b70        lea     r9,[rbx+70h]
+00007ffd`f79cecc4 488d0dad831900  lea     rcx,[ntdll!RtlpDynamicFunctionTableTreeMax (00007ffd`f7b67078)]
+00007ffd`f79ceccb e880010000      call    ntdll!RtlAvlInsertNodeEx (00007ffd`f79cee50)
+00007ffd`f79cecd0 488b0591831900  mov     rax,qword ptr [ntdll!RtlpDynamicFunctionTable+0x8 (00007ffd`f7b67068)]
+00007ffd`f79cecd7 488d1582831900  lea     rdx,[ntdll!RtlpDynamicFunctionTable (00007ffd`f7b67060)]
+00007ffd`f79cecde 483910          cmp     qword ptr [rax],rdx
+00007ffd`f79cece1 742d            je      ntdll!RtlAddGrowableFunctionTable+0x230 (00007ffd`f79ced10)
+00007ffd`f79cece3 b903000000      mov     ecx,3
+00007ffd`f79cece8 cd29            int     29h
+00007ffd`f79cecea 65488b0c2560000000 mov   rcx,qword ptr gs:[60h]
+00007ffd`f79cecf3 488b4930        mov     rcx,qword ptr [rcx+30h]
+00007ffd`f79cecf7 e9dffeffff      jmp     ntdll!RtlAddGrowableFunctionTable+0xfb (00007ffd`f79cebdb)
+00007ffd`f79cecfc 488b02          mov     rax,qword ptr [rdx]
+00007ffd`f79cecff 4885c0          test    rax,rax
+00007ffd`f79ced02 0f8476ffffff    je      ntdll!RtlAddGrowableFunctionTable+0x19e (00007ffd`f79cec7e)
+00007ffd`f79ced08 488bd0          mov     rdx,rax
+00007ffd`f79ced0b e954ffffff      jmp     ntdll!RtlAddGrowableFunctionTable+0x184 (00007ffd`f79cec64)
+00007ffd`f79ced10 488913          mov     qword ptr [rbx],rdx
+00007ffd`f79ced13 488d0d56551800  lea     rcx,[ntdll!RtlpDynamicFunctionTableLock (00007ffd`f7b54270)]
+00007ffd`f79ced1a 48894308        mov     qword ptr [rbx+8],rax
+00007ffd`f79ced1e 488918          mov     qword ptr [rax],rbx
+00007ffd`f79ced21 48891d40831900  mov     qword ptr [ntdll!RtlpDynamicFunctionTable+0x8 (00007ffd`f7b67068)],rbx
+00007ffd`f79ced28 e843e0feff      call    ntdll!RtlReleaseSRWLockExclusive (00007ffd`f79bcd70)
+00007ffd`f79ced2d b901000000      mov     ecx,1
+00007ffd`f79ced32 e8e9c3ffff      call    ntdll!LdrProtectMrdata (00007ffd`f79cb120)
+00007ffd`f79ced37 49891f          mov     qword ptr [r15],rbx
+00007ffd`f79ced3a e8a1eeffff      call    ntdll!LdrControlFlowGuardEnforced (00007ffd`f79cdbe0)
+00007ffd`f79ced3f 85c0            test    eax,eax
+00007ffd`f79ced41 0f8455feffff    je      ntdll!RtlAddGrowableFunctionTable+0xbc (00007ffd`f79ceb9c)
+00007ffd`f79ced47 488d0dfa601800  lea     rcx,[ntdll!LdrpMrdataLock (00007ffd`f7b54e48)]
+00007ffd`f79ced4e e84dd3feff      call    ntdll!RtlAcquireSRWLockExclusive (00007ffd`f79bc0a0)
+00007ffd`f79ced53 488b05c6821900  mov     rax,qword ptr [ntdll!LdrpMrdataHeapUnprotected (00007ffd`f7b67020)]
+00007ffd`f79ced5a 8b08            mov     ecx,dword ptr [rax]
+00007ffd`f79ced5c 85c9            test    ecx,ecx
+00007ffd`f79ced5e 0f84fdfdffff    je      ntdll!RtlAddGrowableFunctionTable+0x81 (00007ffd`f79ceb61)
+00007ffd`f79ced64 e90bfeffff      jmp     ntdll!RtlAddGrowableFunctionTable+0x94 (00007ffd`f79ceb74)
+00007ffd`f79ced69 e872eeffff      call    ntdll!LdrControlFlowGuardEnforced (00007ffd`f79cdbe0)
+00007ffd`f79ced6e 33d2            xor     edx,edx
+00007ffd`f79ced70 4c8bc3          mov     r8,rbx
+00007ffd`f79ced73 85c0            test    eax,eax
+0:000> .echo ===NTDLL GLOBALS THAT COULD BE THE LIST HEAD===
+===NTDLL GLOBALS THAT COULD BE THE LIST HEAD===
+0:000> x /D ntdll!*DynamicFunctionTable*
+ A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+
+00007ffd`f7b67060 ntdll!RtlpDynamicFunctionTable = <no type information>
+00007ffd`f7b67070 ntdll!RtlpDynamicFunctionTableTreeMin = <no type information>
+00007ffd`f7b54270 ntdll!RtlpDynamicFunctionTableLock = <no type information>
+00007ffd`f7b67078 ntdll!RtlpDynamicFunctionTableTreeMax = <no type information>
+0:000> x /D ntdll!*FunctionTable*
+ A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+
+00007ffd`f79cf030 ntdll!RtlpInsertOrRemoveScpCfgFunctionTable (RtlpInsertOrRemoveScpCfgFunctionTable)
+00007ffd`f7b67060 ntdll!RtlpDynamicFunctionTable = <no type information>
+00007ffd`f7a68210 ntdll!RtlDeleteGrowableFunctionTable (RtlDeleteGrowableFunctionTable)
+00007ffd`f7a7a8f0 ntdll!RtlGrowFunctionTable (RtlGrowFunctionTable)
+00007ffd`f7b67430 ntdll!LdrpInvertedFunctionTables = <no type information>
+00007ffd`f798f5e0 ntdll!RtlpxLookupFunctionTable (RtlpxLookupFunctionTable)
+00007ffd`f7b4e3a0 ntdll!LdrpInvertedFunctionTableSRWLock = <no type information>
+00007ffd`f7a68000 ntdll!RtlDeleteFunctionTable (RtlDeleteFunctionTable)
+00007ffd`f7b67070 ntdll!RtlpDynamicFunctionTableTreeMin = <no type information>
+00007ffd`f7a73b70 ntdll!RtlAddFunctionTable (RtlAddFunctionTable)
+00007ffd`f7a75774 ntdll!RtlpRemoveInvertedFunctionTableEntry (RtlpRemoveInvertedFunctionTableEntry)
+00007ffd`f79cb2d4 ntdll!RtlInsertInvertedFunctionTable (RtlInsertInvertedFunctionTable)
+00007ffd`f79cf168 ntdll!RtlRemoveInvertedFunctionTable (RtlRemoveInvertedFunctionTable)
+00007ffd`f7aa0740 ntdll!RtlGetFunctionTableListHead (RtlGetFunctionTableListHead)
+00007ffd`f79ceae0 ntdll!RtlAddGrowableFunctionTable (RtlAddGrowableFunctionTable)
+00007ffd`f79cb370 ntdll!RtlpInsertInvertedFunctionTableEntry (RtlpInsertInvertedFunctionTableEntry)
+00007ffd`f79cf1a0 ntdll!RtlxRemoveInvertedFunctionTable (RtlxRemoveInvertedFunctionTable)
+00007ffd`f798df80 ntdll!RtlLookupFunctionTable (RtlLookupFunctionTable)
+00007ffd`f7b54270 ntdll!RtlpDynamicFunctionTableLock = <no type information>
+00007ffd`f7b67078 ntdll!RtlpDynamicFunctionTableTreeMax = <no type information>
+00007ffd`f7a60710 ntdll!RtlInstallFunctionTableCallback (RtlInstallFunctionTableCallback)
+0:000> 
+ A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+
+00007ffd`f79cf030 ntdll!RtlpInsertOrRemoveScpCfgFunctionTable (RtlpInsertOrRemoveScpCfgFunctionTable)
+00007ffd`f7b67060 ntdll!RtlpDynamicFunctionTable = <no type information>
+00007ffd`f7a68210 ntdll!RtlDeleteGrowableFunctionTable (RtlDeleteGrowableFunctionTable)
+00007ffd`f7a7a8f0 ntdll!RtlGrowFunctionTable (RtlGrowFunctionTable)
+00007ffd`f7b67430 ntdll!LdrpInvertedFunctionTables = <no type information>
+00007ffd`f798f5e0 ntdll!RtlpxLookupFunctionTable (RtlpxLookupFunctionTable)
+00007ffd`f7b4e3a0 ntdll!LdrpInvertedFunctionTableSRWLock = <no type information>
+00007ffd`f7a68000 ntdll!RtlDeleteFunctionTable (RtlDeleteFunctionTable)
+00007ffd`f7b67070 ntdll!RtlpDynamicFunctionTableTreeMin = <no type information>
+00007ffd`f7a73b70 ntdll!RtlAddFunctionTable (RtlAddFunctionTable)
+00007ffd`f7a75774 ntdll!RtlpRemoveInvertedFunctionTableEntry (RtlpRemoveInvertedFunctionTableEntry)
+00007ffd`f79cb2d4 ntdll!RtlInsertInvertedFunctionTable (RtlInsertInvertedFunctionTable)
+00007ffd`f79cf168 ntdll!RtlRemoveInvertedFunctionTable (RtlRemoveInvertedFunctionTable)
+00007ffd`f7aa0740 ntdll!RtlGetFunctionTableListHead (RtlGetFunctionTableListHead)
+00007ffd`f79ceae0 ntdll!RtlAddGrowableFunctionTable (RtlAddGrowableFunctionTable)
+00007ffd`f79cb370 ntdll!RtlpInsertInvertedFunctionTableEntry (RtlpInsertInvertedFunctionTableEntry)
+00007ffd`f79cf1a0 ntdll!RtlxRemoveInvertedFunctionTable (RtlxRemoveInvertedFunctionTable)
+00007ffd`f798df80 ntdll!RtlLookupFunctionTable (RtlLookupFunctionTable)
+00007ffd`f7b54270 ntdll!RtlpDynamicFunctionTableLock = <no type information>
+00007ffd`f7b67078 ntdll!RtlpDynamicFunctionTableTreeMax = <no type information>
+00007ffd`f7a60710 ntdll!RtlInstallFunctionTableCallback (RtlInstallFunctionTableCallback)
+0:000> .echo ===ARG1 AT THE CALL: 00000217f9ccab90===
+===ARG1 AT THE CALL: 00000217f9ccab90===
+0:000> !address 0x00000217f9ccab90
+
+Usage:                  Heap
+Base Address:           00000217`f9cc9000
+End Address:            00000217`f9d15000
+Region Size:            00000000`0004c000 ( 304.000 kB)
+State:                  00001000          MEM_COMMIT
+Protect:                00000004          PAGE_READWRITE
+Type:                   00020000          MEM_PRIVATE
+Allocation Base:        00000217`f8dd0000
+Allocation Protect:     00000004          PAGE_READWRITE
+More info:              heap owning the address: !heap -s -h 0x217f10b0000
+More info:              heap segment
+More info:              heap entry containing the address: !heap -x 0x217f9ccab90
+
+
+Content source: 1 (target), length: 4a470
+0:000> dq 0x00000217f9ccab90 L8
+00000217`f9ccab90  00000000`00000000 00000000`00000000
+00000217`f9ccaba0  00000218`4ee10000 00000218`4ee20000
+00000217`f9ccabb0  00000218`45a4c600 00000201`00000000
+00000217`f9ccabc0  00000000`00000000 8e000d00`3eed2071
+0:000> 
+00000217`f9ccab90  00000000`00000000 00000000`00000000
+00000217`f9ccaba0  00000218`4ee10000 00000218`4ee20000
+00000217`f9ccabb0  00000218`45a4c600 00000201`00000000
+00000217`f9ccabc0  00000000`00000000 8e000d00`3eed2071
+0:000> .echo ===ARG2 AT THE CALL: 000002184ee20000, the fresh Mono code chunk===
+===ARG2 AT THE CALL: 000002184ee20000, the fresh Mono code chunk===
+0:000> !address 0x000002184ee20000
+
+Usage:                  Free
+Base Address:           00000218`4ee20000
+End Address:            00007ff4`d3680000
+Region Size:            00007ddc`84860000 ( 125.861 TB)
+State:                  00010000          MEM_FREE
+Protect:                00000001          PAGE_NOACCESS
+Type:                   <info not present at the target>
+
+
+Content source: 0 (invalid), length: 7ddc84900000
+0:000> 
+
+Usage:                  Free
+Base Address:           00000218`4ee20000
+End Address:            00007ff4`d3680000
+Region Size:            00007ddc`84860000 ( 125.861 TB)
+State:                  00010000          MEM_FREE
+Protect:                00000001          PAGE_NOACCESS
+Type:                   <info not present at the target>
+
+
+Content source: 0 (invalid), length: 7ddc84900000
+0:000> .echo ===MONO SIDE BOOKKEEPING===
+===MONO SIDE BOOKKEEPING===
+0:000> x /D mono_2_0_bdwgc!*dynamic_function_table*
+ A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+
+0:000> x /D mono_2_0_bdwgc!*unwindinfo*
+ A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+
+0:000> 
+ A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+
+0:000> .echo ===HEAP LAYOUT, to name which heap any of the above belongs to===
+===HEAP LAYOUT, to name which heap any of the above belongs to===
+0:000> !heap -s
+
+
+************************************************************************************************************************
+                                              NT HEAP STATS BELOW
+************************************************************************************************************************
+LFH Key                   : 0x050239e9b042eacd
+Termination on corruption : ENABLED
+          Heap     Flags   Reserv  Commit  Virt   Free  List   UCR  Virt  Lock  Fast 
+                            (k)     (k)    (k)     (k) length      blocks cont. heap 
+-------------------------------------------------------------------------------------
+00000217f10b0000 00000002   97696  94792  97304   1700   267    10  112     14   LFH
+00000217f0f70000 00008000      64      4     64      2     1     1    0      0      
+00000217f1570000 00001002      60      8     60      5     1     1    0      0      
+00000217f2d00000 00001002    1472    112   1080     15     2     2    0      0   LFH
+00000217f2cc0000 00001002     452     32     60      1     1     1    0      0   LFH
+00000217f8590000 00001002  389144 378436 388752   2188    49    28  601      0   LFH
+00000217fa690000 00001002     452     68     60     19     3     1    0      0   LFH
+00000217ff880000 00001002     452     68     60     10     2     1    0      0   LFH
+0000021782990000 00001002     452     40     60      5     2     1    0      0   LFH
+0000021782be0000 00001002     452     40     60      5     2     1    0      0   LFH
+-------------------------------------------------------------------------------------
+0:000> 
+
+
+************************************************************************************************************************
+                                              NT HEAP STATS BELOW
+************************************************************************************************************************
+LFH Key                   : 0x050239e9b042eacd
+Termination on corruption : ENABLED
+          Heap     Flags   Reserv  Commit  Virt   Free  List   UCR  Virt  Lock  Fast 
+                            (k)     (k)    (k)     (k) length      blocks cont. heap 
+-------------------------------------------------------------------------------------
+00000217f10b0000 00000002   97696  94792  97304   1700   267    10  112     14   LFH
+00000217f0f70000 00008000      64      4     64      2     1     1    0      0      
+00000217f1570000 00001002      60      8     60      5     1     1    0      0      
+00000217f2d00000 00001002    1472    112   1080     15     2     2    0      0   LFH
+00000217f2cc0000 00001002     452     32     60      1     1     1    0      0   LFH
+00000217f8590000 00001002  389144 378436 388752   2188    49    28  601      0   LFH
+00000217fa690000 00001002     452     68     60     19     3     1    0      0   LFH
+00000217ff880000 00001002     452     68     60     10     2     1    0      0   LFH
+0000021782990000 00001002     452     40     60      5     2     1    0      0   LFH
+0000021782be0000 00001002     452     40     60      5     2     1    0      0   LFH
+-------------------------------------------------------------------------------------
+0:000> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

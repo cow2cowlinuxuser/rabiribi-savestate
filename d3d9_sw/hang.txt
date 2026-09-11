@@ -1,0 +1,131 @@
+
+   AllowParallelInitializationOfLocalRepositories : true
+
+
+
+
+
+
+*** wait with pending attach
+
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 8148 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+....
+(1fd4.757c): Wake debugger - code 80000007 (first chance)
+eax=ad56c29a ebx=00000000 ecx=00000000 edx=00b44e98 esi=0000000a edi=00b40000
+eip=77d93e04 esp=0098e274 ebp=0098e2c0 iopl=0         nv up ei ng nz na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000286
+ntdll!RtlpAnalyzeHeapFailure+0x248:
+77d93e04 83fe0a          cmp     esi,0Ah
+0:000> cdb: Reading initial command '!locks; .echo ===STACKS===; ~*kb; .echo ===HEAP===; !heap -s; q'
+
+CritSec +b40258 at 00b40258
+WaiterWoken        No
+LockCount          7
+RecursionCount     1
+OwningThread       757c
+EntryCount         0
+ContentionCount    d
+*** Locked
+
+Scanned 16 critical sections
+===STACKS===
+
+.  0  Id: 1fd4.757c Suspend: 1 Teb: 0072e000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0098e2c0 77ce0705     00008e2d f9f61f0e 00b44d48 ntdll!RtlpAnalyzeHeapFailure+0x248
+0098e3f4 77d22302     00b44d48 00b44d50 00b44d50 ntdll!RtlpFreeHeap+0x7a5
+0098e444 77cceefa     00000000 f9f61882 070da5c8 ntdll!RtlpFreeNTHeapInternal+0x6b5
+0098e478 76f5b284     00b40000 00000000 00b44d50 ntdll!RtlFreeHeap+0xca
+0098e494 76f5f6b4     00b44d50 0000003d c9012e41 gdi32full!UspFreeMem+0x74
+0098e53c 76f5f112     0098e608 0000003d c9012e41 gdi32full!GetFaceAndSizeMetrics+0x294
+0098e648 76efba0e     070d65c0 76efb880 070d66e4 gdi32full!FindOrCreateSizeCacheWithoutRealizationID+0x35
+0098e6a0 76efbf32     c9012e41 070d66e4 c9012e41 gdi32full!FindOrCreateSizeCacheUsingRealizationID+0x18e
+0098e71c 76efd017     c9012e41 0700aa30 00000024 gdi32full!ScriptStringAnalyse+0x3d2
+0098e880 76efb854     76f895c8 ba6f9e37 00000040 gdi32full!LpkCharsetDraw+0xae7
+0098e8c8 76c145c9     c9012e41 00000009 00000000 gdi32full!LpkDrawTextEx+0x254
+0098e92c 76c14457     00000000 0700aa30 00000024 USER32!DT_DrawStr+0x6a
+0098e98c 76c13fb1     00000058 00000810 0098e9d8 USER32!DT_GetLineBreak+0x173
+0098ea5c 76c4e3b6     00000058 0098ebf4 00000810 USER32!DrawTextExWorker+0x1c7
+0098ea98 76c4e2ba     c9012e41 0098eaf4 ffffffff USER32!DrawTextExA+0xe6
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\d3d11.dll
+0098ead8 6a05e30a     c9012e41 0098eaf4 ffffffff USER32!DrawTextA+0x5a
+WARNING: Stack unwind information not available. Following frames may be wrong.
+0098ec18 6a05e1ec     c9012e41 00000500 00000028 d3d11!D3D11CreateDeviceAndSwapChain+0x29f2a
+0098eca0 6a03ba47     0098eee0 00a801a0 44a00000 d3d11!D3D11CreateDeviceAndSwapChain+0x29e0c
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\rabiribi.exe
+0098f088 00cf79b2     0d4eebc0 00000001 00000000 d3d11!D3D11CreateDeviceAndSwapChain+0x7667
+0098f09c 00d27d25     0d4eebc0 00000001 00000000 rabiribi+0x779b2
+0098f53c 00cab70c     00000000 00000000 00000000 rabiribi+0xa7d25
+0098fa08 00c8fc89     01d2e310 71cb7340 00000000 rabiribi+0x2b70c
+0098fa34 00d7a05b     45f32360 01d2e310 71cb7340 rabiribi+0xfc89
+0098fa60 00f3f016     0000000a 00000020 00000004 rabiribi+0xfa05b
+0098fa74 00feb11c     00c80000 00000000 00b50b1f rabiribi+0x2bf016
+0098fac0 76dd5d49     0072b000 76dd5d30 0098fb28 rabiribi!opus_multistream_decoder_destroy+0x8687c
+0098fad0 77cfd83b     0072b000 f9f607d2 00000000 KERNEL32!BaseThreadInitThunk+0x19
+0098fb28 77cfd7c1     ffffffff 77d44829 00000000 ntdll!__RtlUserThreadStart+0x2b
+0098fb38 00000000     01d2e310 0072b000 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   1  Id: 1fd4.8550 Suspend: 1 Teb: 00732000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+01fef590 77d23e0e     00b40258 00000000 00b40258 ntdll!NtWaitForAlertByThreadId+0xc
+01fef5c4 77cfa390     00000000 00000000 00b40258 ntdll!RtlpWaitOnAddressWithTimeout+0xca
+01fef664 77d1f41c     00732000 00b40258 00000000 ntdll!RtlpWaitOnCriticalSection+0x2c0
+01fef694 77ce4263     00b40000 00b40258 00b40258 ntdll!RtlpEnterCriticalSectionContended+0x1dc
+01fef6a8 77ce0156     00b40258 f8900b26 00b4da60 ntdll!RtlEnterCriticalSection+0x63
+01fef7dc 77d22302     00b4da60 00b4da68 00b4da68 ntdll!RtlpFreeHeap+0x1f6
+01fef82c 77cceefa     002c0000 f890049a 00b506d8 ntdll!RtlpFreeNTHeapInternal+0x6b5
+01fef860 77d039b7     00b40000 002c0000 00b4da68 ntdll!RtlFreeHeap+0xca
+01fef870 77ce6fb9     77ce66d0 f89006de 77ce62c0 ntdll!TppFreeThreadData+0x22
+01fef874 77ce66d0     f89006de 77ce62c0 77ce62c0 ntdll!TppWorkerThread+0xcf9
+01fefa24 76dd5d49     00b506d8 76dd5d30 01fefa8c ntdll!TppWorkerThread+0x410
+01fefa34 77cfd83b     00b506d8 f8900676 00000000 KERNEL32!BaseThreadInitThunk+0x19
+01fefa8c 77cfd7c1     ffffffff 77d44829 00000000 ntdll!__RtlUserThreadStart+0x2b
+01fefa9c 00000000     77ce62c0 00b506d8 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   2  Id: 1fd4.7f18 Suspend: 1 Teb: 00736000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0212fa00 77d23e0e     00b40258 00000000 00b40258 ntdll!NtWaitForAlertByThreadId+0xc
+0212fa34 77cfa390     00000000 00000000 00b40258 ntdll!RtlpWaitOnAddressWithTimeout+0xca
+0212fad0 77d1f41c     00736000 00b40258 00000000 ntdll!RtlpWaitOnCriticalSection+0x2c0
+0212fb00 77ce4263     00b40000 00b40258 00b40258 ntdll!RtlpEnterCriticalSectionContended+0x1dc
+0212fb14 77ce0156     00b40258 fb7c00b2 00b4e760 ntdll!RtlEnterCriticalSection+0x63
+0212fc48 77d22302     00b4e760 00b4e768 00b4e768 ntdll!RtlpFreeHeap+0x1f6
+0212fc98 77cceefa     002c0000 fb7c0036 00b506d8 ntdll!RtlpFreeNTHeapInternal+0x6b5
+0212fccc 77d039b7     00b40000 002c0000 00b4e768 ntdll!RtlFreeHeap+0xca
+0212fcdc 77ce6fb9     77ce66d0 fb7c026a 77ce62c0 ntdll!TppFreeThreadData+0x22
+0212fce0 77ce66d0     fb7c026a 77ce62c0 77ce62c0 ntdll!TppWorkerThread+0xcf9
+0212fe90 76dd5d49     00b506d8 76dd5d30 0212fef8 ntdll!TppWorkerThread+0x410
+0212fea0 77cfd83b     00b506d8 fb7c0202 00000000 KERNEL32!BaseThreadInitThunk+0x19
+0212fef8 77cfd7c1     ffffffff 77d44829 00000000 ntdll!__RtlUserThreadStart+0x2b
+0212ff08 00000000     77ce62c0 00b506d8 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   3  Id: 1fd4.33d4 Suspend: 1 Teb: 0073a000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0226f928 77d23e0e     00b40258 00000000 00b40258 ntdll!NtWaitForAlertByThreadId+0xc
+0226f95c 77cfa390     00000000 00000000 00b40258 ntdll!RtlpWaitOnAddressWithTimeout+0xca
+0226f9f8 77d1f41c     0073a000 00b40258 00000000 ntdll!RtlpWaitOnCriticalSection+0x2c0
+0226fa28 77ce4263     00b40000 00b40258 00b40258 ntdll!RtlpEnterCriticalSectionContended+0x1dc
+0226fa3c 77ce0156     00b40258 fb48078a 00b4eb78 ntdll!RtlEnterCriticalSection+0x63
+0226fb70 77d22302     00b4eb78 00b4eb80 00b4eb80 ntdll!RtlpFreeHeap+0x1f6
+0226fbc0 77cceefa     002c0000 fb48070e 00b506d8 ntdll!RtlpFreeNTHeapInternal+0x6b5
+0226fbf4 77d039b7     00b40000 002c0000 00b4eb80 ntdll!RtlFreeHeap+0xca
+0226fc04 77ce6fb9     77ce66d0 fb480142 77ce62c0 ntdll!TppFreeThreadData+0x22
+0226fc08 77ce66d0     fb480142 77ce62c0 77ce62c0 ntdll!TppWorkerThread+0xcf9
+0226fdb8 76dd5d49     00b506d8 76dd5d30 0226fe20 ntdll!TppWorkerThread+0x410
+0226fdc8 77cfd83b     00b506d8 fb4802da 00000000 KERNEL32!BaseThreadInitThunk+0x19
+0226fe20 77cfd7c1     ffffffff 77d44829 00000000 ntdll!__RtlUserThreadStart+0x2b
+0226fe30 00000000     77ce62c0 00b506d8 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   4  Id: 1fd4.2674 Suspend: 2 Teb: 0073e000 Unfrozen
+GetContextState failed, 0x800703E6
+Unable to get current machine context, Win32 error 0n998
+                                      ^ Illegal thread error in '!locks; .echo ===STACKS===; ~*kb; .echo ===HEAP===; !heap -s; q'

@@ -1,0 +1,213 @@
+Opened log file 'F:\rbo_fabre_proto\d3d9_sw\imports2.txt'
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.000 seconds
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [F:\rbo_fabre_proto\d3d9_sw\failfast.dmp]
+User Mini Dump File with Full Memory : Only application data is available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw
+Executable search path is: 
+Windows 10 Version 26200 MP (16 procs) Free x64
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Debug session time: Sun Aug 30 21:26:13.000 2026 (UTC - 4:00)
+System Uptime: 5 days 11:10:02.664
+Process Uptime: 0 days 0:07:11.000
+.NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'
+...............................................................
+....................................
+Loading unloaded module list
+.
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(2188.30dc): Security check failure or stack buffer overrun - code c0000409 (first/second chance not available)
+Subcode: 0x3 FAST_FAIL_CORRUPT_LIST_ENTRY 
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+For analysis of this file, run !analyze -v
+ntdll!RtlAddGrowableFunctionTable+0x208:
+00007ffd`f79cece8 cd29            int     29h
+0:000> .reload /f
+.*** WARNING: Unable to verify checksum for OSFE.exe
+................................................*** WARNING: Unable to verify checksum for d3d11.dll
+.*** WARNING: Unable to verify checksum for dxgi.dll
+..............
+....................................
+Loading unloaded module list
+.
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+OSFE                   The system cannot find the file specified
+ntdll                  The system cannot find the file specified
+kernel32               The system cannot find the file specified
+KERNELBASE             The system cannot find the file specified
+UnityPlayer            The system cannot find the file specified
+user32                 The system cannot find the file specified
+win32u                 The system cannot find the file specified
+gdi32                  The system cannot find the file specified
+gdi32full              The system cannot find the file specified
+msvcp_win              The system cannot find the file specified
+ucrtbase               The system cannot find the file specified
+ole32                  The system cannot find the file specified
+combase                The system cannot find the file specified
+version                The system cannot find the file specified
+rpcrt4                 The system cannot find the file specified
+msvcrt                 The system cannot find the file specified
+shlwapi                The system cannot find the file specified
+Windows.Storage        The system cannot find the file specified
+advapi32               The system cannot find the file specified
+sechost                The system cannot find the file specified
+setupapi               The system cannot find the file specified
+shell32                The system cannot find the file specified
+WinTypes               The system cannot find the file specified
+ws2_32                 The system cannot find the file specified
+oleaut32               The system cannot find the file specified
+opengl32               The system cannot find the file specified
+winmm                  The system cannot find the file specified
+imm32                  The system cannot find the file specified
+crypt32                The system cannot find the file specified
+glu32                  The system cannot find the file specified
+winhttp                The system cannot find the file specified
+bcrypt                 The system cannot find the file specified
+hid                    The system cannot find the file specified
+WindowsCodecs          The system cannot find the file specified
+wsock32                The system cannot find the file specified
+dwmapi                 The system cannot find the file specified
+DXCore                 The system cannot find the file specified
+gameoverlayrenderer64  The system cannot find the file specified
+psapi                  The system cannot find the file specified
+cfgmgr32               The system cannot find the file specified
+kernel.appcore         The system cannot find the file specified
+bcryptPrimitives       The system cannot find the file specified
+uxtheme                The system cannot find the file specified
+SHCore                 The system cannot find the file specified
+profapi                The system cannot find the file specified
+mono-2.0-bdwgc         The system cannot find the file specified
+mswsock                The system cannot find the file specified
+msctf                  The system cannot find the file specified
+clbcatq                The system cannot find the file specified
+wbemprox               The system cannot find the file specified
+wbemcomn               The system cannot find the file specified
+wbemsvc                The system cannot find the file specified
+fastprox               The system cannot find the file specified
+amsi                   The system cannot find the file specified
+userenv                The system cannot find the file specified
+MpOAV                  The system cannot find the file specified
+MMDevAPI               The system cannot find the file specified
+devobj                 The system cannot find the file specified
+AudioSes               The system cannot find the file specified
+resourcepolicyclient   The system cannot find the file specified
+powrprof               The system cannot find the file specified
+umpdc                  The system cannot find the file specified
+xinput1_3              The system cannot find the file specified
+wintrust               The system cannot find the file specified
+msasn1                 The system cannot find the file specified
+textinputframework     The system cannot find the file specified
+cryptsp                The system cannot find the file specified
+rsaenh                 The system cannot find the file specified
+CRYPTBASE              The system cannot find the file specified
+IPHLPAPI               The system cannot find the file specified
+nsi                    The system cannot find the file specified
+dhcpcsvc6              The system cannot find the file specified
+dhcpcsvc               The system cannot find the file specified
+dnsapi                 The system cannot find the file specified
+mdnsNSP                The system cannot find the file specified
+rasadhlp               The system cannot find the file specified
+FWPUCLNT               The system cannot find the file specified
+gpapi                  The system cannot find the file specified
+bthprops               The system cannot find the file specified
+comctl32               The system cannot find the file specified
+bluetoothapis          The system cannot find the file specified
+xinput1_4              The system cannot find the file specified
+inputhost              The system cannot find the file specified
+CoreMessaging          The system cannot find the file specified
+xinput1_2              The system cannot find the file specified
+xinput1_1              The system cannot find the file specified
+xinput9_1_0            The system cannot find the file specified
+deviceaccess           The system cannot find the file specified
+steam_api64            The system cannot find the file specified
+steamclient64          The system cannot find the file specified
+imagehlp               The system cannot find the file specified
+vstdlib_s64            The system cannot find the file specified
+tier0_s64              The system cannot find the file specified
+secur32                The system cannot find the file specified
+sspicli                The system cannot find the file specified
+discord_game_sdk       The system cannot find the file specified
+ktmw32                 The system cannot find the file specified
+dbghelp                The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:000> .echo ===EXACT IMPORT NAME STRINGS===
+===EXACT IMPORT NAME STRINGS===
+0:000> da 00007ffda64bcdc0 L20
+00007ffd`a64bcdc0  "l"
+0:000> da 00007ffda64bce00 L20
+00007ffd`a64bce00  "RtlDeleteGrowableFunctionTable"
+0:000> .echo ===DOES MONO IMPORT RtlGrowFunctionTable===
+===DOES MONO IMPORT RtlGrowFunctionTable===
+0:000> s -a 00007ffda6080000 L0x767000 "GrowFunctionTable"
+00007ffd`a64bcdeb  47 72 6f 77 46 75 6e 63-74 69 6f 6e 54 61 62 6c  GrowFunctionTabl
+0:000> .echo ===AND RtlInstallFunctionTableCallback===
+===AND RtlInstallFunctionTableCallback===
+0:000> s -a 00007ffda6080000 L0x767000 "InstallFunctionTable"
+00007ffd`a650dd79  49 6e 73 74 61 6c 6c 46-75 6e 63 74 69 6f 6e 54  InstallFunctionT
+0:000> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

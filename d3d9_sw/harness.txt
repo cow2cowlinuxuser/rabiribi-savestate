@@ -1,0 +1,129 @@
+Opened log file 'harness.txt'
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.015 seconds
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+CommandLine: .\ss_harness.exe 25 4 mono
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw
+Executable search path is: 
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+ModLoad: 00007ff6`a67f0000 00007ff6`a6834000   ss_harness.exe
+ModLoad: 00007ffd`f7980000 00007ffd`f7be7000   ntdll.dll
+ModLoad: 00007ffd`f72c0000 00007ffd`f7389000   C:\WINDOWS\System32\KERNEL32.DLL
+ModLoad: 00007ffd`f4250000 00007ffd`f4644000   C:\WINDOWS\System32\KERNELBASE.dll
+ModLoad: 00007ffd`f4650000 00007ffd`f479b000   C:\WINDOWS\System32\ucrtbase.dll
+(1b5c.2a54): Break instruction exception - code 80000003 (first chance)
+ntdll!RtlGetReturnAddressHijackTarget+0x6ed:
+00007ffd`f7a9f56d cc              int     3
+0:000> $$ Run the savestate harness under the debugger and name whatever kills it.
+0:000> $$
+0:000> $$ The harness crashes on its first cycle in about a second, so unlike the game
+0:000> $$ there is no repro to perform - launch it, let it die, read the stack.
+0:000> 
+0:000> .symfix+ f:\rbo_fabre_proto\d3d9_sw\symbols-cache
+0:000> .sympath+ f:\rbo_fabre_proto\d3d9_sw
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw;srv*
+Expanded Symbol search path is: f:\rbo_fabre_proto\d3d9_sw;SRV*f:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Deferred                                       srv*
+0:000> .sympath+ f:\rbo_fabre_proto\d3d9_sw\symbols
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw;srv*;f:\rbo_fabre_proto\d3d9_sw\symbols
+Expanded Symbol search path is: f:\rbo_fabre_proto\d3d9_sw;SRV*f:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://msdl.microsoft.com/download/symbols;f:\rbo_fabre_proto\d3d9_sw\symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Deferred                                       srv*
+OK                                             f:\rbo_fabre_proto\d3d9_sw\symbols
+0:000> .reload
+Reloading current modules
+.....
+0:000> 
+Reloading current modules
+.....
+0:000> $$ First chance on access violation and on the two fail-fast codes, because a
+0:000> $$ second-chance-only trap loses the state that explains a corrupted list.
+0:000> sxe -c ".echo ===AV===; r; kv; ~*k; .echo ===END===" av
+0:000> sxe -c ".echo ===FAILFAST===; r; kv; ~*k; .echo ===END===" c0000409
+0:000> sxe -c ".echo ===HEAP===; r; kv; ~*k; .echo ===END===" c0000374
+0:000> 
+0:000> g
+ModLoad: 00007ffd`319a0000 00007ffd`32107000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\MonoBleedingEdge\EmbedRuntime\mono-2.0-bdwgc.dll
+ModLoad: 00007ffd`f7440000 00007ffd`f74c0000   C:\WINDOWS\System32\WS2_32.dll
+ModLoad: 00007ffd`f34f0000 00007ffd`f355c000   C:\WINDOWS\SYSTEM32\MSWSOCK.dll
+ModLoad: 00007ffd`f60f0000 00007ffd`f6208000   C:\WINDOWS\System32\RPCRT4.dll
+ModLoad: 00007ffd`f6b50000 00007ffd`f6ce7000   C:\WINDOWS\System32\ole32.dll
+ModLoad: 00007ffd`f4910000 00007ffd`f49b3000   C:\WINDOWS\System32\msvcp_win.dll
+ModLoad: 00007ffd`f7390000 00007ffd`f73bb000   C:\WINDOWS\System32\GDI32.dll
+ModLoad: 00007ffd`f54f0000 00007ffd`f5517000   C:\WINDOWS\System32\win32u.dll
+ModLoad: 00007ffd`f55e0000 00007ffd`f570b000   C:\WINDOWS\System32\gdi32full.dll
+ModLoad: 00007ffd`f6210000 00007ffd`f63d5000   C:\WINDOWS\System32\USER32.dll
+ModLoad: 00007ffd`f5710000 00007ffd`f5a92000   C:\WINDOWS\System32\combase.dll
+ModLoad: 00007ffd`f5f40000 00007ffd`f6018000   C:\WINDOWS\System32\OLEAUT32.dll
+ModLoad: 00007ffd`f7590000 00007ffd`f7598000   C:\WINDOWS\System32\PSAPI.DLL
+ModLoad: 00007ffd`f5ca0000 00007ffd`f5d56000   C:\WINDOWS\System32\ADVAPI32.dll
+ModLoad: 00007ffd`e60b0000 00007ffd`e60bb000   C:\WINDOWS\SYSTEM32\VERSION.dll
+ModLoad: 00007ffd`f7780000 00007ffd`f7829000   C:\WINDOWS\System32\msvcrt.dll
+ModLoad: 00007ffd`f6cf0000 00007ffd`f6d97000   C:\WINDOWS\System32\sechost.dll
+ModLoad: 00007ffd`f63e0000 00007ffd`f6b47000   C:\WINDOWS\System32\SHELL32.dll
+ModLoad: 00007ffd`e97d0000 00007ffd`e9806000   C:\WINDOWS\SYSTEM32\WINMM.dll
+ModLoad: 00007ffd`f47a0000 00007ffd`f490a000   C:\WINDOWS\System32\wintypes.dll
+ModLoad: 00007ffd`f5c60000 00007ffd`f5c92000   C:\WINDOWS\System32\IMM32.DLL
+ModLoad: 00007ffd`f4c80000 00007ffd`f54e8000   C:\WINDOWS\System32\windows.storage.dll
+ModLoad: 00007ffd`f5ad0000 00007ffd`f5bc8000   C:\WINDOWS\System32\SHCORE.dll
+ModLoad: 00007ffd`f73c0000 00007ffd`f7426000   C:\WINDOWS\System32\shlwapi.dll
+ModLoad: 00007ffd`f4170000 00007ffd`f4199000   C:\WINDOWS\SYSTEM32\profapi.dll
+ModLoad: 00007ffd`f2fa0000 00007ffd`f2fbb000   C:\WINDOWS\SYSTEM32\kernel.appcore.dll
+ModLoad: 00007ffd`f4a50000 00007ffd`f4af5000   C:\WINDOWS\System32\bcryptPrimitives.dll

@@ -1,0 +1,484 @@
+Opened log file 'F:\rbo_fabre_proto\d3d9_sw\failfast.txt'
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.000 seconds
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+ModLoad: 00007ff6`61470000 00007ff6`61513000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\OSFE.exe
+ModLoad: 00007ffd`f7980000 00007ffd`f7be7000   C:\WINDOWS\SYSTEM32\ntdll.dll
+ModLoad: 00007ffd`f72c0000 00007ffd`f7389000   C:\WINDOWS\System32\KERNEL32.DLL
+ModLoad: 00007ffd`f4250000 00007ffd`f4644000   C:\WINDOWS\System32\KERNELBASE.dll
+ModLoad: 00007ffd`29310000 00007ffd`2aa33000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\UnityPlayer.dll
+ModLoad: 00007ffd`f6210000 00007ffd`f63d5000   C:\WINDOWS\System32\USER32.dll
+ModLoad: 00007ffd`f54f0000 00007ffd`f5517000   C:\WINDOWS\System32\win32u.dll
+ModLoad: 00007ffd`f7390000 00007ffd`f73bb000   C:\WINDOWS\System32\GDI32.dll
+ModLoad: 00007ffd`f55e0000 00007ffd`f570b000   C:\WINDOWS\System32\gdi32full.dll
+ModLoad: 00007ffd`f4910000 00007ffd`f49b3000   C:\WINDOWS\System32\msvcp_win.dll
+ModLoad: 00007ffd`f4650000 00007ffd`f479b000   C:\WINDOWS\System32\ucrtbase.dll
+ModLoad: 00007ffd`f6b50000 00007ffd`f6ce7000   C:\WINDOWS\System32\ole32.dll
+ModLoad: 00007ffd`f5710000 00007ffd`f5a92000   C:\WINDOWS\System32\combase.dll
+ModLoad: 00007ffd`e60b0000 00007ffd`e60bb000   C:\WINDOWS\SYSTEM32\VERSION.dll
+ModLoad: 00007ffd`f60f0000 00007ffd`f6208000   C:\WINDOWS\System32\RPCRT4.dll
+ModLoad: 00007ffd`f7780000 00007ffd`f7829000   C:\WINDOWS\System32\msvcrt.dll
+ModLoad: 00007ffd`f73c0000 00007ffd`f7426000   C:\WINDOWS\System32\SHLWAPI.dll
+ModLoad: 00007ffd`f4c80000 00007ffd`f54e8000   C:\WINDOWS\System32\Windows.Storage.dll
+ModLoad: 00007ffd`f5ca0000 00007ffd`f5d56000   C:\WINDOWS\System32\advapi32.dll
+ModLoad: 00007ffd`f6cf0000 00007ffd`f6d97000   C:\WINDOWS\System32\sechost.dll
+ModLoad: 00007ffd`f6e30000 00007ffd`f72b7000   C:\WINDOWS\System32\SETUPAPI.dll
+ModLoad: 00007ffd`f63e0000 00007ffd`f6b47000   C:\WINDOWS\System32\SHELL32.dll
+ModLoad: 00007ffd`f47a0000 00007ffd`f490a000   C:\WINDOWS\System32\wintypes.dll
+ModLoad: 00007ffd`f7440000 00007ffd`f74c0000   C:\WINDOWS\System32\WS2_32.dll
+ModLoad: 00007ffd`e97d0000 00007ffd`e9806000   C:\WINDOWS\SYSTEM32\WINMM.dll
+ModLoad: 00007ffd`f5f40000 00007ffd`f6018000   C:\WINDOWS\System32\OLEAUT32.dll
+ModLoad: 00007ffd`60f50000 00007ffd`6105f000   C:\WINDOWS\SYSTEM32\OPENGL32.dll
+ModLoad: 00007ffd`f5c60000 00007ffd`f5c92000   C:\WINDOWS\System32\IMM32.dll
+ModLoad: 00007ffd`60f20000 00007ffd`60f4d000   C:\WINDOWS\SYSTEM32\GLU32.dll
+ModLoad: 00007ffd`f4b00000 00007ffd`f4c77000   C:\WINDOWS\System32\CRYPT32.dll
+ModLoad: 00007ffd`ee860000 00007ffd`ee98d000   C:\WINDOWS\SYSTEM32\WINHTTP.dll
+ModLoad: 00007ffd`f4140000 00007ffd`f416a000   C:\WINDOWS\SYSTEM32\bcrypt.dll
+ModLoad: 00007ffd`f2670000 00007ffd`f267f000   C:\WINDOWS\SYSTEM32\HID.DLL
+ModLoad: 00007ffd`efd40000 00007ffd`eff6e000   C:\WINDOWS\SYSTEM32\WindowsCodecs.dll
+ModLoad: 00007ffd`f1a30000 00007ffd`f1a3a000   C:\WINDOWS\SYSTEM32\WSOCK32.dll
+ModLoad: 00007ffd`f1fc0000 00007ffd`f1fef000   C:\WINDOWS\SYSTEM32\dwmapi.dll
+ModLoad: 00007ffd`f1e00000 00007ffd`f1e43000   C:\WINDOWS\SYSTEM32\dxcore.dll
+ModLoad: 00007ffd`a6c40000 00007ffd`a6df7000   C:\Program Files (x86)\Steam\gameoverlayrenderer64.dll
+ModLoad: 00007ffd`f7590000 00007ffd`f7598000   C:\WINDOWS\System32\PSAPI.DLL
+ModLoad: 00007ffd`f3dc0000 00007ffd`f3e11000   C:\WINDOWS\SYSTEM32\CFGMGR32.dll
+ModLoad: 00007ffd`f2fa0000 00007ffd`f2fbb000   C:\WINDOWS\SYSTEM32\kernel.appcore.dll
+ModLoad: 00007ffd`f4a50000 00007ffd`f4af5000   C:\WINDOWS\System32\bcryptPrimitives.dll
+ModLoad: 00007ffd`f1d00000 00007ffd`f1da9000   C:\WINDOWS\system32\uxtheme.dll
+ModLoad: 00007ffd`f5ad0000 00007ffd`f5bc8000   C:\WINDOWS\System32\shcore.dll
+ModLoad: 00007ffd`f4170000 00007ffd`f4199000   C:\WINDOWS\SYSTEM32\profapi.dll
+ModLoad: 00007ffd`319a0000 00007ffd`32107000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\MonoBleedingEdge\EmbedRuntime\mono-2.0-bdwgc.dll
+ModLoad: 00007ffd`f34f0000 00007ffd`f355c000   C:\WINDOWS\SYSTEM32\MSWSOCK.dll
+ModLoad: 00007ffd`f75a0000 00007ffd`f76fc000   C:\WINDOWS\System32\MSCTF.dll
+ModLoad: 00007ffd`b1e70000 00007ffd`b1ed5000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\d3d11.dll
+ModLoad: 00007ffd`c8e60000 00007ffd`c8e8f000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\dxgi.dll
+ModLoad: 00007ffd`f74d0000 00007ffd`f757e000   C:\WINDOWS\System32\clbcatq.dll
+ModLoad: 00007ffd`e5520000 00007ffd`e5532000   C:\WINDOWS\system32\wbem\wbemprox.dll
+ModLoad: 00007ffd`e55a0000 00007ffd`e561a000   C:\WINDOWS\SYSTEM32\wbemcomn.dll
+ModLoad: 00007ffd`e3690000 00007ffd`e36a5000   C:\WINDOWS\system32\wbem\wbemsvc.dll
+ModLoad: 00007ffd`e3980000 00007ffd`e3a70000   C:\WINDOWS\system32\wbem\fastprox.dll
+ModLoad: 00007ffd`e2bc0000 00007ffd`e2bdd000   C:\WINDOWS\SYSTEM32\amsi.dll
+ModLoad: 00007ffd`f35a0000 00007ffd`f35d3000   C:\WINDOWS\SYSTEM32\USERENV.dll
+ModLoad: 00007ffd`e2af0000 00007ffd`e2b93000   C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.26070.9-0\MpOav.dll
+ModLoad: 00007ffd`e8eb0000 00007ffd`e8f47000   C:\WINDOWS\System32\MMDevApi.dll
+ModLoad: 00007ffd`f3d90000 00007ffd`f3dbd000   C:\WINDOWS\System32\DEVOBJ.dll
+ModLoad: 00007ffd`e0450000 00007ffd`e0602000   C:\WINDOWS\SYSTEM32\AUDIOSES.DLL
+ModLoad: 00007ffd`f2250000 00007ffd`f2264000   C:\WINDOWS\SYSTEM32\resourcepolicyclient.dll
+ModLoad: 00007ffd`f40b0000 00007ffd`f410e000   C:\WINDOWS\SYSTEM32\powrprof.dll
+ModLoad: 00007ffd`f4090000 00007ffd`f40a4000   C:\WINDOWS\SYSTEM32\UMPDC.dll
+ModLoad: 00000000`00400000 00000000`0041e000   C:\WINDOWS\SYSTEM32\xinput1_3.dll
+ModLoad: 00007ffd`f49c0000 00007ffd`f4a42000   C:\WINDOWS\System32\WINTRUST.dll
+ModLoad: 00007ffd`f3950000 00007ffd`f3963000   C:\WINDOWS\SYSTEM32\MSASN1.dll
+ModLoad: 00007ffd`dadd0000 00007ffd`daf18000   C:\WINDOWS\SYSTEM32\textinputframework.dll
+ModLoad: 00007ffd`f38f0000 00007ffd`f390b000   C:\WINDOWS\SYSTEM32\CRYPTSP.dll
+ModLoad: 00007ffd`f2f00000 00007ffd`f2f39000   C:\WINDOWS\system32\rsaenh.dll
+ModLoad: 00007ffd`f3750000 00007ffd`f375c000   C:\WINDOWS\SYSTEM32\CRYPTBASE.dll
+ModLoad: 00007ffd`f2980000 00007ffd`f29b2000   C:\WINDOWS\SYSTEM32\IPHLPAPI.DLL
+ModLoad: 00007ffd`f5c50000 00007ffd`f5c5a000   C:\WINDOWS\System32\NSI.dll
+ModLoad: 00007ffd`ee840000 00007ffd`ee85d000   C:\WINDOWS\SYSTEM32\dhcpcsvc6.DLL
+ModLoad: 00007ffd`ee810000 00007ffd`ee835000   C:\WINDOWS\SYSTEM32\dhcpcsvc.DLL
+ModLoad: 00007ffd`f2a10000 00007ffd`f2b42000   C:\WINDOWS\SYSTEM32\DNSAPI.dll
+ModLoad: 00000000`5d260000 00000000`5d286000   C:\Program Files\Bonjour\mdnsNSP.dll
+ModLoad: 00007ffd`e7230000 00007ffd`e723b000   C:\Windows\System32\rasadhlp.dll
+ModLoad: 00007ffd`ecaa0000 00007ffd`ecb26000   C:\WINDOWS\System32\fwpuclnt.dll
+ModLoad: 00007ffd`f3560000 00007ffd`f3590000   C:\WINDOWS\SYSTEM32\gpapi.dll
+ModLoad: 00007ffd`bef60000 00007ffd`befa5000   C:\WINDOWS\SYSTEM32\bthprops.cpl
+ModLoad: 00007ffd`d8ee0000 00007ffd`d9173000   C:\WINDOWS\WinSxS\amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.26100.8115_none_3e075c82e3354f9c\comctl32.dll
+ModLoad: 00007ffd`e0610000 00007ffd`e064c000   C:\WINDOWS\SYSTEM32\bluetoothapis.dll
+ModLoad: 00007ffd`e3560000 00007ffd`e357e000   C:\WINDOWS\SYSTEM32\xinput1_4.dll
+ModLoad: 00007ffd`e1fa0000 00007ffd`e2183000   C:\WINDOWS\SYSTEM32\inputhost.dll
+ModLoad: 00007ffd`f1660000 00007ffd`f1787000   C:\WINDOWS\SYSTEM32\CoreMessaging.dll
+ModLoad: 00000000`006f0000 00000000`00708000   C:\WINDOWS\SYSTEM32\xinput1_2.dll
+ModLoad: 00000000`00710000 00000000`00728000   C:\WINDOWS\SYSTEM32\xinput1_1.dll
+ModLoad: 00007ffd`d6a50000 00007ffd`d6a59000   C:\WINDOWS\SYSTEM32\xinput9_1_0.dll
+ModLoad: 00007ffd`d8640000 00007ffd`d8686000   C:\Windows\System32\deviceaccess.dll
+ModLoad: 00007ffd`a0980000 00007ffd`a09cc000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\OSFE_Data\Plugins\steam_api64.dll
+ModLoad: 00007ffd`44d90000 00007ffd`466f4000   C:\Program Files (x86)\Steam\steamclient64.dll
+ModLoad: 00007ffd`f5aa0000 00007ffd`f5ac0000   C:\WINDOWS\System32\imagehlp.dll
+ModLoad: 00007ffd`d8b80000 00007ffd`d8c43000   C:\Program Files (x86)\Steam\vstdlib_s64.dll
+ModLoad: 00007ffd`af0d0000 00007ffd`af3de000   C:\Program Files (x86)\Steam\tier0_s64.dll
+ModLoad: 00007ffd`f1b40000 00007ffd`f1b4d000   C:\WINDOWS\SYSTEM32\Secur32.dll
+ModLoad: 00007ffd`f3240000 00007ffd`f3289000   C:\WINDOWS\SYSTEM32\SSPICLI.DLL
+ModLoad: 00007ffd`49490000 00007ffd`4983a000   C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\OSFE_Data\Plugins\discord_game_sdk.dll
+ModLoad: 00007ffd`e0c80000 00007ffd`e0c8b000   C:\WINDOWS\SYSTEM32\ktmw32.dll
+ModLoad: 00007ffd`ed370000 00007ffd`ed5b2000   C:\WINDOWS\SYSTEM32\dbghelp.dll
+(1774.5018): Break instruction exception - code 80000003 (first chance)
+ntdll!DbgBreakPoint:
+00007ffd`f7aa0ac0 cc              int     3
+0:071> $$ Commands for catch_failfast.ps1. Kept in a file rather than passed with -c
+0:071> $$ because the command string has to contain quotes, and a quoted argument
+0:071> $$ containing quotes does not survive PowerShell handing it to cdb - the outer
+0:071> $$ quotes are stripped and cdb reads the remainder as a program to launch. A
+0:071> $$ script file has no shell in the path, so cdb's own parser sees it intact.
+0:071> 
+0:071> .symfix
+0:071> 
+0:071> $$ Unity publishes symbols for shipped players, and this build's are already
+0:071> $$ downloaded and expanded under symbols\. Without them a fail-fast stack is a
+0:071> $$ column of UnityPlayer+hex, which is how five offsets sat in the logs for days
+0:071> $$ while the crash they named - GfxDeviceD3D11Base::PresentFrame walking a
+0:071> $$ std::list<ID3D11Query *> - went unrecognised. The local path is first so a
+0:071> $$ cached copy is used before the network is touched.
+0:071> .sympath+ F:\rbo_fabre_proto\d3d9_sw\symbols
+Symbol search path is: srv*;F:\rbo_fabre_proto\d3d9_sw\symbols
+Expanded Symbol search path is: cache*;SRV*https://msdl.microsoft.com/download/symbols;f:\rbo_fabre_proto\d3d9_sw\symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*
+OK                                             F:\rbo_fabre_proto\d3d9_sw\symbols
+0:071> .sympath+ SRV*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://symbolserver.unity3d.com/
+Symbol search path is: srv*;F:\rbo_fabre_proto\d3d9_sw\symbols;SRV*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://symbolserver.unity3d.com/
+Expanded Symbol search path is: cache*;SRV*https://msdl.microsoft.com/download/symbols;f:\rbo_fabre_proto\d3d9_sw\symbols;srv*f:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://symbolserver.unity3d.com/
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*
+OK                                             F:\rbo_fabre_proto\d3d9_sw\symbols
+Deferred                                       SRV*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://symbolserver.unity3d.com/
+0:071> .reload /f
+Reloading current modules
+.....*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\OSFE.exe
+..........*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\d3d11.dll
+..*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\dxgi.dll
+....................................
+
+Press ctrl-c (cdb, kd, ntsd) or ctrl-break (windbg) to abort symbol loads that take too long.
+Run !sym noisy before .reload to track down problems loading symbols.
+
+...........
+....................................
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+mdnsNSP                The system cannot find the file specified
+steamclient64          The system cannot find the file specified
+discord_game_sdk       The system cannot find the file specified
+steam_api64            The system cannot find the file specified
+gameoverlayrenderer64  The system cannot find the file specified
+tier0_s64              The system cannot find the file specified
+vstdlib_s64            The system cannot find the file specified
+MpOav                  The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:071> .echo === symbol state for the modules that matter ===
+=== symbol state for the modules that matter ===
+0:071> lm m UnityPlayer
+start             end                 module name
+00007ffd`29310000 00007ffd`2aa33000   UnityPlayer   (private pdb symbols)  C:\ProgramData\dbg\sym\UnityPlayer_Win64_mono_x64.pdb\D054B822B8034D129B71B8AE87CFBF151\UnityPlayer_Win64_mono_x64.pdb
+0:071> lm m mono*
+start             end                 module name
+00007ffd`319a0000 00007ffd`32107000   mono_2_0_bdwgc   (private pdb symbols)  C:\ProgramData\dbg\sym\mono-2.0-bdwgc.pdb\0A83CFFA5DEB45F3AFBD5D45EA002FB21\mono-2.0-bdwgc.pdb
+0:071> lm m d3d11
+start             end                 module name
+00007ffd`b1e70000 00007ffd`b1ed5000   d3d11    C (private pdb symbols)  C:\ProgramData\dbg\sym\d3d11.pdb\8BCFE2D8AECA0CFA4C4C44205044422E1\d3d11.pdb
+0:071> 
+start             end                 module name
+00007ffd`b1e70000 00007ffd`b1ed5000   d3d11    C (private pdb symbols)  C:\ProgramData\dbg\sym\d3d11.pdb\8BCFE2D8AECA0CFA4C4C44205044422E1\d3d11.pdb
+0:071> $$ Fail-fast. Windows reports every one of these as 0xc0000409,
+0:071> $$ STATUS_STACK_BUFFER_OVERRUN, whatever the real check was; the subcode in rcx
+                                                                     ^ pass count must be preceeded by whitespace error in '$$ STATUS_STACK_BUFFER_OVERRUN, whatever the real check was; the subcode in rcx'
+0:071> $$ is what names it, and 3 is FAST_FAIL_CORRUPT_LIST_ENTRY. kv is the point of
+0:071> $$ the whole exercise: the call site tells us which list ntdll was walking.
+0:071> $$ A full dump is written too. The stack in this log names the site, but the dump
+0:071> $$ is the only way to ask a question we did not think of before the process died
+0:071> $$ - which has happened twice now - and it can be reopened with the same symbols
+0:071> $$ afterwards using analyze_dump.cdb.
+0:071> $$ Armed on BOTH chances. int 29h is noncontinuable, so the first real one of
+0:071> $$ these arrived as a second-chance event and walked straight past a first-chance
+0:071> $$ -c: we got the header line and none of the report, with the process frozen at a
+0:071> $$ prompt holding everything we had asked for.
+0:071> sxe -c ".echo ===FAILFAST===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/failfast.dmp" -c2 ".echo ===FAILFAST-2ND===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/failfast.dmp" 0xc0000409
+0:071> 
+0:071> $$ Heap corruption, the other way a bad restore announces itself.
+0:071> sxe -c ".echo ===HEAPCORRUPT===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/heapcorrupt.dmp" -c2 ".echo ===HEAPCORRUPT-2ND===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/heapcorrupt.dmp" 0xc0000374
+0:071> 
+0:071> $$ Ordinary access violations, second chance only. Mono raises first-chance
+0:071> $$ exceptions as routine control flow, so acting on those would never finish.
+0:071> $$ sxd passes the first chance through to the program's own handler and reports
+0:071> $$ only if nothing handled it, which is the case that actually kills the process.
+0:071> sxd -c2 ".echo ===AV===; .exr -1; .echo ---STACK---; kv; .echo ---END---" av
+0:071> 
+0:071> g
+[d3d11_sw] perf 4.7 fps (213.2 ms/frame) raster 203.5 ms/frame tris 629 flushes 2 bins 30180 shaded 93.19 Mpx/frame bbox 113.86 Mpx/frame
+[d3d11_sw] perf mix% tex=199 bilin=32 over=170 add=0 otherblend=28 atest=0 ztest=0 flat=199 linear=0
+[d3d11_sw] perf simd% ok=93 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=7 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 8.8 (raster 0.9 nested) decode 0.0 present 1.0 | flush elsewhere 202.6 | game 0.7 of 213.2
+[d3d11_sw] perf geom: 89 draws/frame, 5130 verts/frame (57.6/draw), tris 1710 in -> 1710 out (100% kept), batch 88% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 56.62 Mpx/frame (15.4x target) 41 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.29 Mpx/frame (1.2x target) 48 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 14.75 Mpx/frame 14 draws/frame
+[d3d11_sw] perf tex #113 1024x1024 blend=0602 0.10 Mpx/frame 15 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.07 Mpx/frame 6 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.04 Mpx/frame 4 draws/frame
+[d3d11_sw] perf 31.4 fps (31.8 ms/frame) raster 22.5 ms/frame tris 629 flushes 2 bins 30180 shaded 93.19 Mpx/frame bbox 113.86 Mpx/frame
+[d3d11_sw] perf mix% tex=199 bilin=32 over=170 add=0 otherblend=28 atest=0 ztest=0 flat=199 linear=0
+[d3d11_sw] perf simd% ok=93 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=7 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 8.5 (raster 0.8 nested) decode 0.0 present 1.0 | flush elsewhere 21.7 | game 0.6 of 31.8
+[d3d11_sw] perf geom: 89 draws/frame, 5130 verts/frame (57.6/draw), tris 1710 in -> 1710 out (100% kept), batch 89% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 56.62 Mpx/frame (15.4x target) 41 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.29 Mpx/frame (1.2x target) 48 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 14.75 Mpx/frame 14 draws/frame
+[d3d11_sw] perf tex #113 1024x1024 blend=0602 0.10 Mpx/frame 15 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.07 Mpx/frame 6 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.04 Mpx/frame 4 draws/frame
+[d3d11_sw] perf 31.2 fps (32.1 ms/frame) raster 22.1 ms/frame tris 554 flushes 2 bins 29779 shaded 95.99 Mpx/frame bbox 112.84 Mpx/frame
+[d3d11_sw] perf mix% tex=206 bilin=32 over=178 add=0 otherblend=28 atest=0 ztest=0 flat=206 linear=0
+[d3d11_sw] perf simd% ok=93 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=7 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 9.1 (raster 0.8 nested) decode 0.0 present 1.0 | flush elsewhere 21.3 | game 0.7 of 32.1
+[d3d11_sw] perf geom: 104 draws/frame, 5620 verts/frame (54.0/draw), tris 1873 in -> 1873 out (100% kept), batch 90% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 56.10 Mpx/frame (15.2x target) 54 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.29 Mpx/frame (1.3x target) 50 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 14.99 Mpx/frame 15 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.08 Mpx/frame 7 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #113 1024x1024 blend=0602 0.06 Mpx/frame 17 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.04 Mpx/frame 4 draws/frame
+[d3d11_sw] perf 27.4 fps (36.4 ms/frame) raster 20.3 ms/frame tris 604 flushes 2 bins 27226 shaded 87.66 Mpx/frame bbox 102.37 Mpx/frame
+[d3d11_sw] perf mix% tex=280 bilin=38 over=245 add=0 otherblend=34 atest=1 ztest=0 flat=280 linear=0
+[d3d11_sw] perf simd% ok=92 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=8 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 13.5 (raster 0.8 nested) decode 0.0 present 1.1 | flush elsewhere 19.5 | game 2.4 of 36.4
+[d3d11_sw] perf geom: 196 draws/frame, 8774 verts/frame (44.6/draw), tris 2924 in -> 2924 out (100% kept), batch 92% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 50.85 Mpx/frame (13.8x target) 138 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.30 Mpx/frame (1.3x target) 59 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 12.91 Mpx/frame 21 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.13 Mpx/frame 14 draws/frame
+[d3d11_sw] perf tex #113 1024x1024 blend=0602 0.09 Mpx/frame 32 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 0.07 Mpx/frame 1 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.04 Mpx/frame 4 draws/frame
+[d3d11_sw] perf 23.9 fps (41.8 ms/frame) raster 25.7 ms/frame tris 1061 flushes 2 bins 29585 shaded 73.72 Mpx/frame bbox 105.31 Mpx/frame
+[d3d11_sw] perf mix% tex=314 bilin=46 over=270 add=0 otherblend=44 atest=1 ztest=0 flat=314 linear=0
+[d3d11_sw] perf simd% ok=88 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=12 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 14.9 (raster 0.8 nested) decode 0.0 present 1.1 | flush elsewhere 24.9 | game 1.0 of 41.8
+[d3d11_sw] perf geom: 248 draws/frame, 10305 verts/frame (41.4/draw), tris 3435 in -> 3435 out (100% kept), batch 93% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 52.31 Mpx/frame (14.2x target) 190 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.31 Mpx/frame (1.3x target) 59 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 11.40 Mpx/frame 25 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 0.86 Mpx/frame 2 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 0.86 Mpx/frame 3 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.45 Mpx/frame 7 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.41 Mpx/frame 7 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.15 Mpx/frame 16 draws/frame
+[d3d11_sw] savestate saved slot 0, 466.2 MB in 584.1 ms
+[d3d11_sw] perf 15.2 fps (65.6 ms/frame) raster 28.1 ms/frame tris 1009 flushes 2 bins 30121 shaded 74.40 Mpx/frame bbox 107.30 Mpx/frame
+[d3d11_sw] perf mix% tex=315 bilin=46 over=268 add=0 otherblend=47 atest=1 ztest=0 flat=315 linear=0
+[d3d11_sw] perf simd% ok=86 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=14 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 17.1 (raster 0.8 nested) decode 0.0 present 1.0 | flush elsewhere 27.4 | game 20.1 of 65.6
+[d3d11_sw] perf geom: 265 draws/frame, 10225 verts/frame (38.6/draw), tris 3408 in -> 3408 out (100% kept), batch 85% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 53.31 Mpx/frame (14.5x target) 206 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.30 Mpx/frame (1.3x target) 59 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 11.31 Mpx/frame 27 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 1.22 Mpx/frame 2 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 1.22 Mpx/frame 4 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.15 Mpx/frame 16 draws/frame
+[d3d11_sw] savestate restored slot 0 in 608.7 ms, resumed through the save it was taking
+[d3d11_sw] perf 14.9 fps (66.9 ms/frame) raster 28.1 ms/frame tris 1011 flushes 2 bins 30124 shaded 74.40 Mpx/frame bbox 107.31 Mpx/frame
+[d3d11_sw] perf mix% tex=315 bilin=46 over=268 add=0 otherblend=47 atest=1 ztest=0 flat=315 linear=0
+[d3d11_sw] perf simd% ok=86 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=14 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 17.1 (raster 0.8 nested) decode 0.0 present 1.0 | flush elsewhere 27.4 | game 21.4 of 66.9
+[d3d11_sw] perf geom: 265 draws/frame, 10222 verts/frame (38.6/draw), tris 3407 in -> 3407 out (100% kept), batch 83% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 53.31 Mpx/frame (14.5x target) 206 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.30 Mpx/frame (1.3x target) 59 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 11.31 Mpx/frame 27 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 1.22 Mpx/frame 2 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 1.22 Mpx/frame 4 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.15 Mpx/frame 16 draws/frame
+[d3d11_sw] perf 22.1 fps (45.2 ms/frame) raster 28.2 ms/frame tris 1014 flushes 2 bins 30128 shaded 74.42 Mpx/frame bbox 107.33 Mpx/frame
+[d3d11_sw] perf mix% tex=315 bilin=46 over=268 add=0 otherblend=47 atest=1 ztest=0 flat=315 linear=0
+[d3d11_sw] perf simd% ok=86 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=14 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 15.3 (raster 0.8 nested) decode 0.0 present 1.0 | flush elsewhere 27.5 | game 1.4 of 45.2
+[d3d11_sw] perf geom: 265 draws/frame, 10219 verts/frame (38.6/draw), tris 3406 in -> 3406 out (100% kept), batch 93% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 53.32 Mpx/frame (14.5x target) 206 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.31 Mpx/frame (1.3x target) 59 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 11.31 Mpx/frame 27 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 1.22 Mpx/frame 2 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 1.22 Mpx/frame 4 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.15 Mpx/frame 16 draws/frame
+[d3d11_sw] perf 22.5 fps (44.5 ms/frame) raster 28.1 ms/frame tris 1011 flushes 2 bins 30120 shaded 74.43 Mpx/frame bbox 107.35 Mpx/frame
+[d3d11_sw] perf mix% tex=315 bilin=45 over=268 add=0 otherblend=47 atest=1 ztest=0 flat=315 linear=0
+[d3d11_sw] perf simd% ok=86 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=14 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 15.3 (raster 0.8 nested) decode 0.0 present 1.0 | flush elsewhere 27.4 | game 0.8 of 44.5
+[d3d11_sw] perf geom: 265 draws/frame, 10218 verts/frame (38.6/draw), tris 3406 in -> 3406 out (100% kept), batch 93% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 53.34 Mpx/frame (14.5x target) 206 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.30 Mpx/frame (1.3x target) 59 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 11.31 Mpx/frame 27 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 1.22 Mpx/frame 2 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 1.22 Mpx/frame 4 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.15 Mpx/frame 16 draws/frame
+[d3d11_sw] savestate restored slot 0 in 598.6 ms, resumed through the save it was taking
+[d3d11_sw] perf 16.7 fps (59.9 ms/frame) raster 28.2 ms/frame tris 1010 flushes 2 bins 30099 shaded 74.43 Mpx/frame bbox 107.36 Mpx/frame
+[d3d11_sw] perf mix% tex=315 bilin=45 over=268 add=0 otherblend=47 atest=1 ztest=0 flat=315 linear=0
+[d3d11_sw] perf simd% ok=86 | noavx2=0 notex=0 notflat=0 depth=0 mask=0 blend=14 npot=0 addr=0 other=0
+[d3d11_sw] perf split ms/frame: draw 15.2 (raster 0.8 nested) decode 0.0 present 1.0 | flush elsewhere 27.4 | game 16.3 of 59.9
+[d3d11_sw] perf geom: 265 draws/frame, 10222 verts/frame (38.6/draw), tris 3407 in -> 3407 out (100% kept), batch 93% of draw
+[d3d11_sw] perf rt #28 2560x1440 bb=1 53.34 Mpx/frame (14.5x target) 206 draws/frame
+[d3d11_sw] perf rt #1694 640x360 bb=0 0.30 Mpx/frame (1.3x target) 59 draws/frame
+[d3d11_sw] perf tex #106 200x200 blend=0605 11.31 Mpx/frame 27 draws/frame
+[d3d11_sw] perf tex #651 40x25 blend=0602 1.22 Mpx/frame 2 draws/frame
+[d3d11_sw] perf tex #654 40x25 blend=0602 1.22 Mpx/frame 4 draws/frame
+[d3d11_sw] perf tex #647 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #650 40x25 blend=0602 0.61 Mpx/frame 8 draws/frame
+[d3d11_sw] perf tex #461 200x200 blend=0605 0.15 Mpx/frame 16 draws/frame
+(1774.2ad0): Access violation - code c0000005 (first chance)
+[d3d11_sw] FAULT access violation on write of 000002820A711490 at pc 00007FFD31A0DCF5 (+0x6dcf5 in C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden\MonoBleedingEdge\EmbedRuntime\mono-2.0-bdwgc.dll) after 809 presents
+(1774.2ad0): Access violation - code c0000005 (!!! second chance !!!)
+===AV===
+ExceptionAddress: 00007ffd31a0dcf5 (mono_2_0_bdwgc!jit_info_table_copy_and_split_chunk+0x00000000000000a5)
+   ExceptionCode: c0000005 (Access violation)
+  ExceptionFlags: 00000000
+NumberParameters: 2
+   Parameter[0]: 0000000000000001
+   Parameter[1]: 000002820a711490
+Attempt to write to address 000002820a711490
+---STACK---
+Child-SP          RetAddr               : Args to Child                                                           : Call Site
+000000d5`b7d0e070 00007ffd`31a0d8f0     : 00000280`c623cbf0 00000280`c5efc238 00000280`54b42d20 00000000`00000000 : mono_2_0_bdwgc!jit_info_table_copy_and_split_chunk+0xa5
+(Inline Function) --------`--------     : --------`-------- --------`-------- --------`-------- --------`-------- : mono_2_0_bdwgc!jit_info_table_chunk_overflow+0x77 (Inline Function @ 00007ffd`31a0d8f0)
+000000d5`b7d0e0b0 00007ffd`31a0e9dc     : 00000280`54b42d20 00000280`c5e148d0 00000280`c5e147b0 00000280`c5efc238 : mono_2_0_bdwgc!jit_info_table_add+0xf0
+000000d5`b7d0e0e0 00007ffd`31ac2c9c     : 00000280`c5e14690 00000280`c5e14690 00000280`c5e147b0 00000280`585396d0 : mono_2_0_bdwgc!mono_jit_info_table_add+0x5c
+000000d5`b7d0e110 00007ffd`31ac6841     : 00000280`00000010 00000000`121169ff 00000280`54b42d20 00007ffd`00000001 : mono_2_0_bdwgc!mini_method_compile+0x18ac
+000000d5`b7d0e240 00007ffd`31acac62     : 00000280`611f4548 00000000`00000000 00000000`00000000 00000000`00000000 : mono_2_0_bdwgc!mono_jit_compile_method_inner+0x3a1
+000000d5`b7d0e2e0 00007ffd`31ba53d6     : 00000280`54b42d20 00000280`611f4548 000000d5`b7d0e420 00000000`00000001 : mono_2_0_bdwgc!mono_jit_compile_method_with_opt+0x3b2
+000000d5`b7d0e330 00007ffd`31ba73f4     : 000000d5`b7d0e4f0 00000280`611f4548 3ff00000`00000000 00000000`00000000 : mono_2_0_bdwgc!common_call_trampoline+0x606
+000000d5`b7d0e3f0 00000280`527703a3     : 00000000`00000005 00000280`603cb320 00000280`6046d6e0 00000280`6046d6e0 : mono_2_0_bdwgc!mono_magic_trampoline+0x74
+000000d5`b7d0e4a0 00000280`6111be73     : 00000280`6135cbb8 00000000`00000005 00000000`00000005 00000000`30d74c32 : 0x00000280`527703a3
+000000d5`b7d0e6c0 00000280`61114b4b     : 00000280`6032ac60 00000000`00000000 00000000`00000000 00000280`6032ac60 : 0x00000280`6111be73
+000000d5`b7d0e750 00000280`6101b3ab     : 00000280`55160db0 00000280`603c8e40 00000000`00000000 00000280`603d8b80 : 0x00000280`61114b4b
+000000d5`b7d0e840 00000280`61019513     : 000000d5`b7d0e900 00000280`61018d4b 446a8000`443a4000 00000000`00000000 : 0x00000280`6101b3ab
+000000d5`b7d0e890 00000280`61017fe3     : 446a8000`443a4000 00000000`00000000 446a8000`443a4000 00000280`00000000 : 0x00000280`61019513
+000000d5`b7d0e960 00000280`61019103     : 80000000`c246ccd0 3f800000`80000000 42115554`c2b25555 00007ffd`319bf570 : 0x00000280`61017fe3
+000000d5`b7d0ea00 00000280`5dfbd440     : 00000000`00000000 00007ffd`319bbe09 00000000`00000000 00007ffd`319bf570 : 0x00000280`61019103
+000000d5`b7d0ea40 00007ffd`31acb7b0     : 00000000`a50f4077 000000d5`b7d0ed30 000000d5`00000000 00000280`57fa8b60 : 0x00000280`5dfbd440
+000000d5`b7d0ead0 00007ffd`31a51892     : 00000000`00000000 00000000`0000000a 00000000`00000000 00000280`586cb2e0 : mono_2_0_bdwgc!mono_jit_runtime_invoke+0x530
+000000d5`b7d0ecb0 00007ffd`31a5a88f     : 000000d5`b7d0ef80 00000280`6035eb90 000000d5`b7d0eea0 00000000`00000050 : mono_2_0_bdwgc!do_runtime_invoke+0x82
+(Inline Function) --------`--------     : --------`-------- --------`-------- --------`-------- --------`-------- : mono_2_0_bdwgc!mono_runtime_try_invoke+0x47 (Inline Function @ 00007ffd`31a5a88f)
+000000d5`b7d0ed00 00007ffd`29c11674     : 00000280`6035eb90 000000d5`b7d0f030 000000d5`b7d0ee20 00000000`00000000 : mono_2_0_bdwgc!mono_runtime_invoke+0x6f
+000000d5`b7d0edb0 00007ffd`29c0eea0     : 000000d5`b7d0ef90 000000d5`b7d0ef80 00000000`00000000 00007ffd`2973b4cf : UnityPlayer!scripting_method_invoke+0x34
+000000d5`b7d0ede0 00007ffd`29bfa4a9     : 00000280`592f9130 00000280`592f9130 00000000`00000000 00000000`00000000 : UnityPlayer!ScriptingInvocation::Invoke+0x50
+(Inline Function) --------`--------     : --------`-------- --------`-------- --------`-------- --------`-------- : UnityPlayer!ScriptingInvocation::Invoke+0x30 (Inline Function @ 00007ffd`29bfa4a9)
+000000d5`b7d0ee20 00007ffd`29bfa663     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : UnityPlayer!MonoBehaviour::CallMethodIfAvailable+0xc9
+000000d5`b7d0ef80 00007ffd`299e8620     : 00000280`6035eb90 00000280`52904e10 00000000`00000000 00000000`00000000 : UnityPlayer!MonoBehaviour::CallUpdateMethod+0x73
+(Inline Function) --------`--------     : --------`-------- --------`-------- --------`-------- --------`-------- : UnityPlayer!BehaviourManager::UpdateBehaviour+0x9 (Inline Function @ 00007ffd`299e8620)
+000000d5`b7d0efb0 00007ffd`29b18b67     : 00000280`5718de58 00000280`5718dec0 00000000`00000000 00000280`00000000 : UnityPlayer!BaseBehaviourManager::CommonUpdate<BehaviourManager>+0x180
+000000d5`b7d0f040 00007ffd`29b18c09     : 00000000`00000001 00000000`00000000 00000000`00000000 00000280`5718de58 : UnityPlayer!ExecutePlayerLoop+0x57
+000000d5`b7d0f1f0 00007ffd`29b1abbf     : 00000280`5e725680 000000d5`b7d0f400 00000000`00000000 00000000`00000838 : UnityPlayer!ExecutePlayerLoop+0xf9
+000000d5`b7d0f3a0 00007ffd`298f3bd5     : 00000000`00000838 00000000`00000000 00000000`00000001 000000d5`b7d0f5c0 : UnityPlayer!PlayerLoop+0x7f
+000000d5`b7d0f420 00007ffd`298f220a     : 00000000`00000838 00000000`00000001 000000d5`b7d0f5c0 00000000`00000001 : UnityPlayer!PerformMainLoop+0x1c5
+000000d5`b7d0f450 00007ffd`298f6a90     : 00000000`00000001 00000000`00000000 000000d5`b7d0f5c0 00000000`00000001 : UnityPlayer!MainMessageLoop+0xda
+000000d5`b7d0f4c0 00007ffd`298faccb     : 00000000`0000000a 00000000`00000000 00000000`00000000 00007ff6`6147b288 : UnityPlayer!UnityMainImpl+0x1010
+000000d5`b7d0f7e0 00007ff6`614711fa     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : UnityPlayer!UnityMain+0xb
+(Inline Function) --------`--------     : --------`-------- --------`-------- --------`-------- --------`-------- : OSFE!invoke_main+0x21 (Inline Function @ 00007ff6`614711fa)
+000000d5`b7d0f810 00007ffd`f72ee8d7     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : OSFE!__scrt_common_main_seh+0x10a
+000000d5`b7d0f850 00007ffd`f7a0c3fc     : 00000000`00000000 00000000`00000000 00000000`00000000 000000d5`b7d0f8a0 : KERNEL32!BaseThreadInitThunk+0x17
+000000d5`b7d0f880 00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+---END---
+mono_2_0_bdwgc!jit_info_table_copy_and_split_chunk+0xa5:
+00007ffd`31a0dcf5 ff00            inc     dword ptr [rax] ds:00000282`0a711490=????????
+0:000> !address 000002820A711490
+
+Usage:                  Free
+Base Address:           00000280`d0321000
+End Address:            00007ff4`b3d40000
+Region Size:            00007d73`e3a1f000 ( 125.453 TB)
+State:                  00010000          MEM_FREE
+Protect:                00000001          PAGE_NOACCESS
+Type:                   <info not present at the target>
+
+
+Content source: 0 (invalid), length: 7d72a962eb70
+0:000> !address 0000028062120908
+
+Usage:                  Heap
+Base Address:           00000280`62116000
+End Address:            00000280`6213f000
+Region Size:            00000000`00029000 ( 164.000 kB)
+State:                  00001000          MEM_COMMIT
+Protect:                00000004          PAGE_READWRITE
+Type:                   00020000          MEM_PRIVATE
+Allocation Base:        00000280`61170000
+Allocation Protect:     00000004          PAGE_READWRITE
+More info:              heap owning the address: !heap -s -h 0x2804f840000
+More info:              heap segment
+More info:              heap entry containing the address: !heap -x 0x28062120908
+
+
+Content source: 1 (target), length: 1e6f8
+0:000> dq 00000280C6355050 L8
+00000280`c6355050  00000280`54b42d20 000030cb`0000017d
+00000280`c6355060  00000280`5e641330 00000280`5e640010
+00000280`c6355070  00000280`5e640670 00000280`5e640cd0
+00000280`c6355080  00000280`5e641dd0 00000280`5e640ef0
+0:000> dq 0000028062120030 L8
+00000280`62120030  00000280`54b42d20 000030cb`0000017c
+00000280`62120040  00000280`5e641330 00000280`5e640010
+00000280`62120050  00000280`5e640670 00000280`5e640cd0
+00000280`62120060  00000280`5e641dd0 00000280`5e640ef0

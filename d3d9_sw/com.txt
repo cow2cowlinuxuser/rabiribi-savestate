@@ -1,0 +1,299 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.000 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [c:\dumps\default.exe(1).12252.dmp]
+User Mini Dump File: Only registers, stack and portions of memory are available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+Windows 10 Version 26200 MP (16 procs) Free x86 compatible
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Debug session time: Fri Aug 28 00:33:06.000 2026 (UTC - 4:00)
+System Uptime: 2 days 14:16:48.358
+Process Uptime: 0 days 0:06:18.000
+................................................................
+..................
+Loading unloaded module list
+...............................
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(2fdc.4ab8): Access violation - code c0000005 (first/second chance not available)
+For analysis of this file, run !analyze -v
+eax=00000001 ebx=77d0978c ecx=cfc6c121 edx=00000000 esi=00000001 edi=00000000
+eip=00000000 esp=0b42fbd4 ebp=ffffffff iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00010202
+00000000 ??              ???
+0:010> .echo ===EXCEPTION
+===EXCEPTION
+0:010> .ecxr
+eax=00000001 ebx=77d0978c ecx=cfc6c121 edx=00000000 esi=00000001 edi=00000000
+eip=00000000 esp=0b42fbd4 ebp=ffffffff iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00010202
+00000000 ??              ???
+0:010> .echo ===FAULTING
+===FAULTING
+0:010> kb 24
+ChildEBP RetAddr      Args to Child              
+WARNING: Frame IP not in any known module. Following frames may be wrong.
+0b42fbd0 7558b87f     b1e36fb1 00000000 0b42fd1c 0x0
+0b42fbe0 75c8b535     00000002 0b42fc18 00000000 KERNELBASE!ValidateLocalCookies+0x3f
+0b42fd1c 75c8b387     02a24290 00007530 00007530 combase!WaitCoalesced+0xad
+0b42fd64 75c8ae8f     75c8ae70 75c8ae70 0b42fd84 combase!CRpcThread::WorkerLoop+0x138
+0b42fd74 76dd5d49     02a24290 76dd5d30 0b42fddc combase!CRpcThreadCache::RpcWorkerThreadEntry+0x1f
+0b42fd84 77cfd83b     02a24290 ee664277 00000000 kernel32!BaseThreadInitThunk+0x19
+0b42fddc 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b42fdec 00000000     75c8ae70 02a24290 00000000 ntdll!_RtlUserThreadStart+0x1b
+0:010> .echo ===ALL
+===ALL
+0:010> ~*kb 10
+
+   0  Id: 2fdc.ab4 Suspend: 0 Teb: 0044b000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+003cf32c 75578088     000006ec 00000000 00000000 ntdll!NtWaitForSingleObject+0xc
+003cf39c 75577ff2     000006ec ffffffff 00000000 KERNELBASE!WaitForSingleObjectEx+0x88
+*** WARNING: Unable to verify checksum for d3d9.dll
+003cf3b0 71abfb10     000006ec ffffffff 71afece0 KERNELBASE!WaitForSingleObject+0x12
+WARNING: Stack unwind information not available. Following frames may be wrong.
+003cf3f8 71ab456d     2ea84040 00000006 00f6ba60 d3d9!swrast_thread_count+0x410
+003cf40c 71c29572     06c9f4c0 00000000 06c97400 d3d9!d3d9_sw_dump_device+0x2d4d
+003cf43c 71c29915     00f6bacc 046aae00 046aae20 d3dx9_43!D3DXEffects::CEffect::ApplySamplerAssignments+0xf2
+003cf464 71c299b8     00f6bacc 00000000 000000d8 d3dx9_43!D3DXEffects::CEffect::ApplyShaderBlock+0x353
+003cf480 71c2a707     00f6bacc 0000ffff 00f6ee40 d3dx9_43!D3DXEffects::CEffect::ApplyBlock+0x97
+003cf640 71c299d4     00f6b9f4 046aace0 0000ffff d3dx9_43!D3DXEffects::CEffect::ApplyAssignment+0xcdd
+003cf664 71c2af17     046aace0 0000ffff 0c232d80 d3dx9_43!D3DXEffects::CEffect::ApplyBlock+0xb3
+003cf680 000a37c1     00f6bbb4 00000000 003cf788 d3dx9_43!D3DXEffects::CEffect::BeginPass+0x111
+003cf6bc 77cf27f1     003cf718 003cf71c 00000000 default+0x937c1
+003cf788 000ae20f     06ac9e38 06ab0048 06b66e50 ntdll!RtlWow64GetProcessMachines+0x161
+003cf81c 6a9834ce     0000043c fffffffe 00000000 default+0x9e20f
+003cfa78 7125f27e     7127b180 003cfa90 7125e782 steamclient!Steam_NotifyMissingInterface+0x19595e
+003cfa84 7125e782     7127d180 003cfa9c 71259c5b steam_api!VR_Shutdown+0x723e
+
+   1  Id: 2fdc.51d4 Suspend: 0 Teb: 0044f000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+00b5f630 77ce6607     000000cc 007adec0 00000010 ntdll!NtWaitForWorkViaWorkerFactory+0xc
+00b5f7f4 76dd5d49     007b06b0 76dd5d30 00b5f85c ntdll!TppWorkerThread+0x347
+00b5f804 77cfd83b     007b06b0 e59147f7 00000000 kernel32!BaseThreadInitThunk+0x19
+00b5f85c 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+00b5f86c 00000000     77ce62c0 007b06b0 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   2  Id: 2fdc.5f04 Suspend: 0 Teb: 00453000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+00c9f5cc 77ce6607     000000cc 007ae100 00000010 ntdll!NtWaitForWorkViaWorkerFactory+0xc
+00c9f790 76dd5d49     007b06b0 76dd5d30 00c9f7f8 ntdll!TppWorkerThread+0x347
+00c9f7a0 77cfd83b     007b06b0 e5ed4853 00000000 kernel32!BaseThreadInitThunk+0x19
+00c9f7f8 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+00c9f808 00000000     77ce62c0 007b06b0 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   3  Id: 2fdc.3230 Suspend: 0 Teb: 00457000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+00ddfabc 77ce6607     000000cc 007ae690 00000010 ntdll!NtWaitForWorkViaWorkerFactory+0xc
+00ddfc80 76dd5d49     007b06b0 76dd5d30 00ddfce8 ntdll!TppWorkerThread+0x347
+00ddfc90 77cfd83b     007b06b0 e5f94343 00000000 kernel32!BaseThreadInitThunk+0x19
+00ddfce8 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+00ddfcf8 00000000     77ce62c0 007b06b0 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   4  Id: 2fdc.25cc Suspend: 0 Teb: 0045b000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0143fbcc 77ce6607     0000005c 007b69e0 00000010 ntdll!NtWaitForWorkViaWorkerFactory+0xc
+0143fd90 76dd5d49     007a1870 76dd5d30 0143fdf8 ntdll!TppWorkerThread+0x347
+0143fda0 77cfd83b     007a1870 e4674253 00000000 kernel32!BaseThreadInitThunk+0x19
+0143fdf8 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0143fe08 00000000     77ce62c0 007a1870 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   5  Id: 2fdc.51f0 Suspend: 0 Teb: 0045f000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0468f1e8 75578eff     00000001 007ce890 00000001 ntdll!NtWaitForMultipleObjects+0xc
+0468f378 7159aaea     00000001 007ce890 00000000 KERNELBASE!WaitForMultipleObjectsEx+0x18f
+0468f410 71557162     007ce890 00000000 ffffffff CoreMessaging!Microsoft::CoreUI::Dispatch::WaitController::Callback_WaitAny+0xb8
+0468f490 71556947     00000000 00000000 ffffffff CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_DoWait+0xeb
+0468f4d8 7158cb93     00000000 00000000 ffffffff CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_Wait+0xe7
+0468f54c 7158dd2a     00000000 00000000 ffffffff CoreMessaging!Microsoft::CoreUI::Dispatch::WaitCollection::Callback_DoGeneralWait+0x102
+0468f5b0 7155560b     0fe390c3 007cb9d0 007b5ee0 CoreMessaging!Microsoft::CoreUI::Dispatch::WaitController::Callback_OnDispatch+0x8a
+0468f5f4 71554eb0     00000000 0fe3937b 71556d90 CoreMessaging!Microsoft::CoreUI::Dispatch::Dispatcher::Callback_DispatchNextItem+0x149
+0468f64c 7154a9d2     00000000 0fe393a3 007c4ca8 CoreMessaging!Microsoft::CoreUI::Dispatch::Dispatcher::Callback_DispatchLoop+0xcd
+0468f694 71556585     00000001 0fe393df 715564e0 CoreMessaging!Microsoft::CoreUI::Dispatch::EventLoop::Callback_RunCoreLoop+0x104
+0468f6e8 7154a866     00000001 0fe3927f 71534d44 CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_Run+0xa5
+0468f748 715815a4     00000001 00000002 00000000 CoreMessaging!Microsoft::CoreUI::Dispatch::EventLoop::Callback_Run+0x105
+0468f77c 7157873b     007b2a28 00000000 007b2a28 CoreMessaging!Microsoft::CoreUI::Messaging::MessageSession::InterfaceImplementation$::_Microsoft_CoreUI_IExportMessageSession::Dispatcher::Run+0x34
+0468f78c 71576f7d     0fe392f7 007be690 71576f00 CoreMessaging!Microsoft::CoreUI::IExportMessageSession::Interface$::StaticDispatcher::Run+0x24
+0468f7c0 6b700eed     00891618 3a8ea77f 6b700cd0 CoreMessaging!Microsoft::CoreUI::IExportMessageSession::ExportAdapter$::Run+0x7d
+0468f7f4 6b700cdd     0468f80c 76dd5d49 007be690 inputhost!MessagingThread::ThreadProc+0xae
+
+   6  Id: 2fdc.3c28 Suspend: 0 Teb: 00463000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0af9f9c0 75578eff     00000003 0b029398 00000001 ntdll!NtWaitForMultipleObjects+0xc
+0af9fb50 75578d58     00000003 0b029398 00000000 KERNELBASE!WaitForMultipleObjectsEx+0x18f
+*** WARNING: Unable to verify timestamp for XAudio2_7.dll
+0af9fb6c 69dea5e0     00000003 0b029398 00000000 KERNELBASE!WaitForMultipleObjects+0x18
+0af9fb90 69de94f0     ffffffff 0b029380 000009d6 XAudio2_7!CThreadBase::ThreadSleep+0x20
+0af9fc54 69dea6ab     0b029380 0af9fc70 76dd5d49 XAudio2_7!LEAPCORE::CGraphManager::ThreadProc+0x230
+0af9fc60 76dd5d49     0b029380 76dd5d30 0af9fcc8 XAudio2_7!CThreadBase::StaticThreadProc+0x3b
+0af9fc70 77cfd83b     0b029380 efdd4363 00000000 kernel32!BaseThreadInitThunk+0x19
+0af9fcc8 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0af9fcd8 00000000     69dea670 0b029380 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   7  Id: 2fdc.6660 Suspend: 0 Teb: 00467000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0b12fa10 77ce6607     0000005c 02a4bdc8 00000010 ntdll!NtWaitForWorkViaWorkerFactory+0xc
+0b12fbd4 76dd5d49     007a1870 76dd5d30 0b12fc3c ntdll!TppWorkerThread+0x347
+0b12fbe4 77cfd83b     007a1870 ee364397 00000000 kernel32!BaseThreadInitThunk+0x19
+0b12fc3c 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b12fc4c 00000000     77ce62c0 007a1870 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   8  Id: 2fdc.63b0 Suspend: 0 Teb: 0046b000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0b22f988 77d22579     00000000 0b22f9ec 00000000 ntdll!NtDelayExecution+0xc
+0b22f9a8 75582d50     00000000 0b22f9ec cfa6c089 ntdll!RtlDelayExecution+0xe9
+0b22fa10 75582cef     0000000a 00000000 0b22fa2c KERNELBASE!SleepEx+0x50
+0b22fa20 000177ad     0000000a 0b22fa58 000b1f96 KERNELBASE!Sleep+0xf
+WARNING: Stack unwind information not available. Following frames may be wrong.
+0b22fa68 70efc556     00ebeed0 0d5bedee 70efc59c default+0x77ad
+0b22faa0 70efc600     70efc59c 0b22fabc 76dd5d49 MSVCR100!_endthreadex+0x3f
+0b22faac 76dd5d49     06b65810 76dd5d30 0b22fb14 MSVCR100!_endthreadex+0xce
+0b22fabc 77cfd83b     06b65810 ee0644bf 00000000 kernel32!BaseThreadInitThunk+0x19
+0b22fb14 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b22fb24 00000000     70efc59c 06b65810 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+   9  Id: 2fdc.56f8 Suspend: 0 Teb: 0046f000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0b32f678 77d22579     00000000 0b32f6dc 00000000 ntdll!NtDelayExecution+0xc
+0b32f698 75582d50     00000000 0b32f6dc cfb6cd99 ntdll!RtlDelayExecution+0xe9
+0b32f700 75582cef     00000001 00000000 0b32f71c KERNELBASE!SleepEx+0x50
+0b32f710 000177ad     00000001 0b32f764 000b14de KERNELBASE!Sleep+0xf
+WARNING: Stack unwind information not available. Following frames may be wrong.
+0b32f774 70efc556     00ebef50 0d4be0e2 70efc59c default+0x77ad
+0b32f7ac 70efc600     70efc59c 0b32f7c8 76dd5d49 MSVCR100!_endthreadex+0x3f
+0b32f7b8 76dd5d49     06b65a30 76dd5d30 0b32f820 MSVCR100!_endthreadex+0xce
+0b32f7c8 77cfd83b     06b65a30 ee16478b 00000000 kernel32!BaseThreadInitThunk+0x19
+0b32f820 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b32f830 00000000     70efc59c 06b65a30 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+# 10  Id: 2fdc.4ab8 Suspend: 0 Teb: 00473000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+WARNING: Frame IP not in any known module. Following frames may be wrong.
+0b42fbd0 7558b87f     b1e36fb1 00000000 0b42fd1c 0x0
+0b42fbe0 75c8b535     00000002 0b42fc18 00000000 KERNELBASE!ValidateLocalCookies+0x3f
+0b42fd1c 75c8b387     02a24290 00007530 00007530 combase!WaitCoalesced+0xad
+0b42fd64 75c8ae8f     75c8ae70 75c8ae70 0b42fd84 combase!CRpcThread::WorkerLoop+0x138
+0b42fd74 76dd5d49     02a24290 76dd5d30 0b42fddc combase!CRpcThreadCache::RpcWorkerThreadEntry+0x1f
+0b42fd84 77cfd83b     02a24290 ee664277 00000000 kernel32!BaseThreadInitThunk+0x19
+0b42fddc 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b42fdec 00000000     75c8ae70 02a24290 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  11  Id: 2fdc.1e28 Suspend: 0 Teb: 00477000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0b56f8e0 77ce6607     00000290 067b1780 00000010 ntdll!NtWaitForWorkViaWorkerFactory+0xc
+0b56faa4 76dd5d49     007cfa10 76dd5d30 0b56fb0c ntdll!TppWorkerThread+0x347
+0b56fab4 77cfd83b     007cfa10 ee7244a7 00000000 kernel32!BaseThreadInitThunk+0x19
+0b56fb0c 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b56fb1c 00000000     77ce62c0 007cfa10 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  12  Id: 2fdc.3240 Suspend: 0 Teb: 0047b000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0b6afbb0 77ce6607     00000290 067b3b10 00000010 ntdll!NtWaitForWorkViaWorkerFactory+0xc
+0b6afd74 76dd5d49     007cfa10 76dd5d30 0b6afddc ntdll!TppWorkerThread+0x347
+0b6afd84 77cfd83b     007cfa10 ee4e4277 00000000 kernel32!BaseThreadInitThunk+0x19
+0b6afddc 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b6afdec 00000000     77ce62c0 007cfa10 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  13  Id: 2fdc.6a4c Suspend: 0 Teb: 0047f000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+0b82fc04 76c07e31     00000000 00000000 ffffffff win32u!NtUserMsgWaitForMultipleObjectsEx+0xc
+0b82fc28 71221ad1     00000000 00000000 ffffffff user32!MsgWaitForMultipleObjectsEx+0x51
+0b82fc6c 76dd5d49     029afa80 76dd5d30 0b82fcd4 dinput8!CEm_LL_ThreadProc+0xc1
+0b82fc7c 77cfd83b     029afa80 eea6437f 00000000 kernel32!BaseThreadInitThunk+0x19
+0b82fcd4 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0b82fce4 00000000     71221a10 029afa80 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  14  Id: 2fdc.4fdc Suspend: 0 Teb: 00517000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+12fffc58 77d22579     00000000 12fffcc0 00000000 ntdll!NtDelayExecution+0xc
+12fffc7c 75582d50     00000000 12fffcc0 d67bc67d ntdll!RtlDelayExecution+0xe9
+12fffce4 75582cef     00000001 00000000 12ffff34 KERNELBASE!SleepEx+0x50
+12fffcf4 71ac71f7     00000001 3eb23ec0 00000000 KERNELBASE!Sleep+0xf
+WARNING: Stack unwind information not available. Following frames may be wrong.
+12ffff34 76dd5d49     00000000 76dd5d30 12ffff9c d3d9!swrast_thread_count+0x7af7
+12ffff44 77cfd83b     00000000 f7db4037 00000000 kernel32!BaseThreadInitThunk+0x19
+12ffff9c 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+12ffffac 00000000     71ac7190 00000000 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  15  Id: 2fdc.3878 Suspend: 0 Teb: 0040a000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+WARNING: Stack unwind information not available. Following frames may be wrong.
+0f8ef928 71ac16b4     000001bf 00000001 00000001 d3d9!swrast_thread_count+0x4cf5
+0f8efd78 71ac38b5     71ac3880 71ac3880 00000000 d3d9!swrast_thread_count+0x1fb4
+0f8efd8c 76dd5d49     00000000 76dd5d30 0f8efdf4 d3d9!swrast_thread_count+0x41b5
+0f8efd9c 77cfd83b     00000000 eaaa425f 00000000 kernel32!BaseThreadInitThunk+0x19
+0f8efdf4 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+0f8efe04 00000000     71ac3880 00000000 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  16  Id: 2fdc.101c Suspend: 0 Teb: 0040e000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+WARNING: Stack unwind information not available. Following frames may be wrong.
+1323f7b8 71ac16b4     0000017d 00000001 00000001 d3d9!swrast_thread_count+0x4d22
+1323fc04 71ac38b5     71ac3880 71ac3880 00000001 d3d9!swrast_thread_count+0x1fb4
+1323fc18 76dd5d49     00000001 76dd5d30 1323fc80 d3d9!swrast_thread_count+0x41b5
+1323fc28 77cfd83b     00000001 f607432b 00000000 kernel32!BaseThreadInitThunk+0x19
+1323fc80 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+1323fc90 00000000     71ac3880 00000001 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  17  Id: 2fdc.1568 Suspend: 0 Teb: 00412000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+WARNING: Stack unwind information not available. Following frames may be wrong.
+1333f6d8 71ac16b4     0000013f 00000001 00000001 d3d9!swrast_thread_count+0x45e9
+1333fb20 71ac38b5     71ac3880 71ac3880 00000002 d3d9!swrast_thread_count+0x1fb4
+1333fb34 76dd5d49     00000002 76dd5d30 1333fb9c d3d9!swrast_thread_count+0x41b5
+1333fb44 77cfd83b     00000002 f6174437 00000000 kernel32!BaseThreadInitThunk+0x19
+1333fb9c 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+1333fbac 00000000     71ac3880 00000002 00000000 ntdll!_RtlUserThreadStart+0x1b
+
+  18  Id: 2fdc.2f68 Suspend: 0 Teb: 00416000 Unfrozen
+ChildEBP RetAddr      Args to Child              
+WARNING: Stack unwind information not available. Following frames may be wrong.
+1343f848 71ac16b4     000001ff 00000001 00000001 d3d9!swrast_thread_count+0x4cd0
+1343fc8c 71ac38b5     71ac3880 71ac3880 00000003 d3d9!swrast_thread_count+0x1fb4
+1343fca0 76dd5d49     00000003 76dd5d30 1343fd08 d3d9!swrast_thread_count+0x41b5
+1343fcb0 77cfd83b     00000003 f66742a3 00000000 kernel32!BaseThreadInitThunk+0x19
+1343fd08 77cfd7c1     ffffffff 77d4483b 00000000 ntdll!__RtlUserThreadStart+0x2b
+1343fd18 00000000     71ac3880 00000003 00000000 ntdll!_RtlUserThreadStart+0x1b
+0:010> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

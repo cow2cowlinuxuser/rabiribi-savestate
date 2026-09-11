@@ -1,0 +1,163 @@
+$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+$zig = "C:\zig\zig.exe"
+$warn = @(
+  "-O2",
+  "-Wall",
+  "-Wno-incompatible-function-pointer-types"
+)
+
+$src = @("d3d9_sw.c", "swrast.c", "savestate.c", "vsinterp.c", "trace.c", "tramp.c", "allocwatch.c", "dsoundhook.c", "d3d9.def")
+
+& $zig cc @warn -DD3D9SW_VARIANT=stock -target x86_64-windows-gnu -shared -o d3d9_sw.dll @src -lgdi32 -luser32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $zig cc @warn -target x86_64-windows-gnu -o d3d9_sw_test.exe test.c -luser32 -lgdi32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# The savestate harness drives savestate.c directly, with no wrapper and no game,
+# so an invariant can be asserted after every restore instead of waiting to see
+# whether something dies. Built from the same source the game loads - a harness
+# against a copy of the engine would prove nothing about the engine.
+& $zig cc @warn -target x86_64-windows-gnu -o ss_harness.exe ss_harness.c savestate.c dsoundhook.c -luser32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Write-Host "built ss_harness.exe (savestate engine, no game)"
+
+# The same harness at 32 bits, because that is the width the engine actually
+# runs at in the games it is aimed at - Rabi-Ribi and DDPR are both PE32. The
+# x64 build alone left every pointer-width assumption in the engine untested
+# outside the game itself, which is the worst place to find one.
+& $zig cc @warn -target x86-windows-gnu -o ss_harness32.exe ss_harness.c savestate.c dsoundhook.c -luser32
+
+# A DirectSound streaming loop with no game attached, to find out whether the
+# negative-length copy is a property of the arrangement or of how this game
+# uses it. 32-bit to match the title.
+& $zig cc @warn -target x86-windows-gnu -o ds_harness32.exe ds_harness.c savestate.c dsoundhook.c -luser32 -lwinmm
+if ($LASTEXITCODE -eq 0) { "built ds_harness32.exe (DirectSound rewind test, no game)" }
+
+# All four of the game's conditions at once - shared-heap objects, present-time
+# ntdll pool threads holding pointers across the rewind, callbacks and COM
+# vtables, and enough bulk that the by-block path actually engages. The other
+# two harnesses each cover at most two of those and both report "0 by block".
+& $zig cc @warn -target x86-windows-gnu -o rr_harness32.exe rr_harness.c savestate.c dsoundhook.c -luser32 -lwinmm
+if ($LASTEXITCODE -eq 0) { "built rr_harness32.exe (all four conditions, no game)" }
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Write-Host "built ss_harness32.exe (savestate engine, PE32)"
+
+# test_simd.exe only compares the scalar rasteriser against the vector one, so a
+# convention error both share passes it. This one has no reference to compare
+# against: it renders additively so each pixel counts how many triangles claimed
+# it, and blits 1:1 from a texture whose every texel is distinct, so coverage
+# gaps, double-hits and wrong texels are all named rather than eyeballed.
+& $zig cc @warn -target x86_64-windows-gnu -o test_seam.exe test_seam.c swrast.c -luser32 -lgdi32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Write-Host "built test_seam.exe (absolute coverage and sampling audit)"
+
+New-Item -ItemType Directory -Force -Path "x86" | Out-Null
+& $zig cc @warn -DD3D9SW_VARIANT=stock -target x86-windows-gnu -shared -o x86\d3d9.dll @src -lgdi32 -luser32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Copy-Item -Force x86\d3d9.dll x86\d3d9_sw.dll
+& $zig cc @warn -target x86-windows-gnu -o x86\d3d9_sw_test.exe test.c -luser32 -lgdi32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# A second 32-bit DLL, same name, different folder, so swapping it in is one
+# file copy and the known-good one is never touched.
+#
+# What it changes is only what an environment variable cannot: code generation.
+# -march=haswell lets the whole translation unit use AVX2 rather than just the
+# hand-written kernels that carry a target attribute, which mainly helps the
+# scalar fallback and the per-pixel blend paths the vector kernel declines.
+#
+# That also makes the binary refuse to start on anything older than Haswell,
+# with an illegal instruction rather than a clean message. That is the entire
+# reason it is a separate file: the stock DLL stays runnable everywhere.
+#
+# -ffp-contract=off is not optional here. Once FMA is available the compiler may
+# contract the scalar span arithmetic into a single rounding while the vector
+# kernel keeps two, and the two paths stop agreeing bit for bit. Both seam
+# audits flag that divergence as dormant precisely because the stock build has
+# no FMA to contract into; -march=haswell would wake it up.
+$low = @(
+  "-O3",
+  "-Wall",
+  "-Wno-incompatible-function-pointer-types",
+  "-march=haswell",
+  "-mtune=skylake",
+  "-ffp-contract=off"
+)
+New-Item -ItemType Directory -Force -Path "x86-lowspec" | Out-Null
+& $zig cc @low -DD3D9SW_VARIANT=lowspec -target x86-windows-gnu -shared -o x86-lowspec\d3d9.dll @src -lgdi32 -luser32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Copy-Item -Force x86-lowspec\d3d9.dll x86-lowspec\d3d9_sw.dll
+
+$d3d11src = @("d3d11_sw.c", "dxbc.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "d3d11.def")
+# This backend rasterises far more per frame than the D3D9 title, so the pool
+# scales past that build's four threads; but it shares the CPU with the game's
+# own logic thread, and measurement put the crossover at one thread per physical
+# core rather than per logical one. D3D9SW_THREADS still overrides at runtime.
+& $zig cc @warn -DD3D9SW_VARIANT=d3d11 -DSWRAST_DEFAULT_THREADS=32 -DSWRAST_THREADS_PHYSICAL -target x86_64-windows-gnu -shared -o d3d11.dll @d3d11src -lgdi32 -luser32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $zig cc @warn -target x86_64-windows-gnu -shared -o dxgi.dll dxgi_fwd.c dxgi.def
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# The same backend as PE32. Plenty of D3D11 titles are still 32-bit - Rabi-Ribi
+# is - and the x64 build cannot load into them at all. Nothing in the source
+# needed changing for this; savestate.c and swrast.c were already building
+# 32-bit for the D3D9 wrapper, and the rest followed on a target triple alone.
+& $zig cc @warn -DD3D9SW_VARIANT=d3d11 -DSWRAST_DEFAULT_THREADS=32 -DSWRAST_THREADS_PHYSICAL -target x86-windows-gnu -shared -o x86\d3d11.dll @d3d11src -lgdi32 -luser32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $zig cc @warn -target x86-windows-gnu -shared -o x86\dxgi.dll dxgi_fwd.c dxgi.def
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# The wrapper is only testable in situ, so drop it next to the game and clear
+# the previous log; a stale log is worse than none when reading a new run.
+$osfe = "C:\Program Files (x86)\Steam\steamapps\common\One Step From Eden"
+if (Test-Path $osfe) {
+  Copy-Item -Force d3d11.dll (Join-Path $osfe "d3d11.dll")
+  Copy-Item -Force dxgi.dll (Join-Path $osfe "dxgi.dll")
+  # The PDB travels with the DLL it describes.
+  #
+  # A dump of a hang is only as useful as the symbols that match the binary in
+  # it, and a rebuild replaces d3d11.pdb in this directory while the dump still
+  # refers to the previous DLL. That happened once: a live deadlock, still
+  # standing and dumpable, and every frame in our own wrapper resolved to the
+  # nearest export because two rebuilds had moved the PDB on underneath it.
+  # Deployed alongside, the debugger finds the right one from the module path.
+  Copy-Item -Force d3d11.pdb (Join-Path $osfe "d3d11.pdb")
+# Renamed rather than deleted. Deleting it destroyed the wrapper-side record of
+# the session being investigated at the moment a fix for that very session was
+# deployed - twice in one afternoon, during the sprite-loss investigation. The
+# savestate log learned this already; this one had not.
+$log = Join-Path $osfe "d3d11_sw.log"
+if (Test-Path $log) {
+    $keep = Join-Path $osfe ("d3d11_sw_prev_" + (Get-Item $log).LastWriteTime.ToString("yyyyMMdd_HHmmss") + ".log")
+    Move-Item -Force $log $keep
+    # Two is enough to compare against; more than that is clutter nobody reads.
+    Get-ChildItem $osfe -Filter "d3d11_sw_prev_*.log" |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 3 |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Write-Host "deployed d3d11.dll dxgi.dll d3d11.pdb to OSFE, kept previous log as $(Split-Path $keep -Leaf)"
+} else {
+    Write-Host "deployed d3d11.dll dxgi.dll d3d11.pdb to OSFE"
+}
+}
+
+python "$PSScriptRoot\gen_gl.py"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$glsrc = @("gl_sw.c", "gl_stubs.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "opengl32.def")
+New-Item -ItemType Directory -Force -Path "x86" | Out-Null
+& $zig cc @warn -Wno-inconsistent-dllimport -DD3D9SW_VARIANT=gl -DSWRAST_DEFAULT_THREADS=8 -target x86-windows-gnu -shared -o x86\opengl32.dll @glsrc -lgdi32 -luser32
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$haydee = "C:\Program Files (x86)\Steam\steamapps\common\Haydee"
+if (Test-Path $haydee) {
+  Copy-Item -Force x86\opengl32.dll (Join-Path $haydee "opengl32.dll")
+  Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $haydee "gl_sw.log")
+  Write-Host "deployed x86 opengl32.dll to Haydee, cleared gl_sw.log"
+}
+
+Write-Host "built d3d9_sw.dll d3d9_sw_test.exe"
+Write-Host "built x86\d3d9.dll x86\d3d9_sw_test.exe (PE32 Steam drop-in name)"
+Write-Host "built x86-lowspec\d3d9.dll (PE32, -O3 -march=haswell, needs AVX2)"
+Write-Host "built d3d11.dll dxgi.dll (x64 software D3D11, drop next to OSFE.exe)"
+Write-Host "built x86\d3d11.dll x86\dxgi.dll (PE32 software D3D11, for 32-bit titles)"
+Write-Host "built x86\opengl32.dll (PE32 software OpenGL, drop next to Haydee launcher.exe)"

@@ -1,0 +1,241 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.016 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [f:\Archipelago\default.DMP]
+User Mini Dump File with Full Memory : Only application data is available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+Windows 10 Version 18362 MP (4 procs) Free x64
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 18362.1.amd64fre.19h1_release.190318-1202
+Debug session time: Thu Aug 27 23:45:06.000 2026 (UTC - 4:00)
+System Uptime: 0 days 1:59:11.274
+Process Uptime: 0 days 0:06:11.000
+................................................................
+..........................
+For analysis of this file, run !analyze -v
+wow64cpu!CpupSyscallStub+0xc:
+00000000`77021cbc c3              ret
+0:000> .echo ===THREADS
+===THREADS
+0:000> ~*kb 14
+
+.  0  Id: bd0.6f8 Suspend: 0 Teb: 00000000`00c45000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b99     : 00000023`770a1fac 00007ffc`dfc70023 00000000`c0000005 00000000`00eff37c : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`00effa80 00007ffc`de5bc864 00000000`00b4ee50 00007ffc`de5bbf58 : wow64cpu!Thunk2ArgNSpNSpReloadState+0xc
+00007ffc`de5bc77a     : 00000000`00c44000 00000000`008a0130 00000000`00000000 00000000`00b4f6b0 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00f823c8 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfcf3fb3     : 00000000`00c43000 00000000`00c43000 00007ffc`dfd4d4c0 00000000`00000010 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfce1db5     : 00000000`00000001 00000000`00000000 00000000`00000000 00000000`00000001 : ntdll!LdrpInitializeProcess+0x186b
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c45000 : ntdll!_LdrpInitialize+0x50549
+00007ffc`dfc917fe     : 00000000`00b4f6b0 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   1  Id: bd0.1570 Suspend: 0 Teb: 00000000`00c54000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021816     : 00000023`770a341c 00000000`00000023 00000000`00000000 00000000`0300fa70 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0300f7a4 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!WaitForMultipleObjects32+0x1d
+00007ffc`de5bc77a     : 00000000`01118e38 00000000`00000000 00000000`00000000 00000000`010ff700 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c54000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`010ff700 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   2  Id: bd0.f98 Suspend: 0 Teb: 00000000`00c57000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021816     : 00000023`770a1d9c 00000000`00000023 00000000`00000001 00000000`0b59f900 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0b59f634 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!WaitForMultipleObjects32+0x1d
+00007ffc`de5bc77a     : 00000000`0b499380 00000000`00000000 00000000`00000000 00000000`070ef6d0 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c57000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`070ef6d0 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   3  Id: bd0.1534 Suspend: 0 Teb: 00000000`00c5d000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b99     : 00000023`770a20bc 00000000`00000023 00000000`00000202 00000000`0b79fc68 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0b79fb1c 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!Thunk2ArgNSpNSpReloadState+0xc
+00007ffc`de5bc77a     : 00000000`06fd3910 00000000`00000000 00000000`00000000 00000000`0716f520 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c5d000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0716f520 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   4  Id: bd0.c80 Suspend: 0 Teb: 00000000`00c60000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b99     : 00000023`770a20bc 00000000`00000023 00000000`00000206 00000000`0b89f774 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0b89f644 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!Thunk2ArgNSpNSpReloadState+0xc
+00007ffc`de5bc77a     : 00000000`06fd3b30 00000000`00000000 00000000`00000000 00000000`0b40f6a0 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c60000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0b40f6a0 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   5  Id: bd0.368 Suspend: 0 Teb: 00000000`00c63000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021816     : 00000023`770a380c 00000000`00000023 00000000`00000000 00000000`0b99f820 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0b99f554 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!WaitForMultipleObjects32+0x1d
+00007ffc`de5bc77a     : 00000000`011eacb8 00000000`00000000 00000000`00000000 00000000`0b46f6f0 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c63000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0b46f6f0 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   6  Id: bd0.1d2c Suspend: 0 Teb: 00000000`00c69000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ffc`de5bacee     : 00000000`00000004 00007ffc`debe70e8 00000000`00000000 00007ffc`de5b1883 : ntdll!NtWaitForWorkViaWorkerFactory+0x14
+00007ffc`de5b7123     : 00000000`00c69000 00000000`00c69000 00007ffc`de5babd0 00000000`00c6b000 : wow64!whNtWaitForWorkViaWorkerFactory+0x11e
+00000000`77021783     : 00000023`770a370c 00000000`00000023 00000000`05906808 00000000`0bc1f644 : wow64!Wow64SystemServiceEx+0x153
+00000000`77021199     : 00000000`0bc1fb10 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!ServiceNoTurbo+0xb
+00007ffc`de5bc77a     : 00000000`01138570 00000000`00000000 00000000`00000000 00000000`0bb1f230 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c69000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0bb1f230 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   7  Id: bd0.3d4 Suspend: 0 Teb: 00000000`00c6c000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ffc`debe580a     : 00000010`0000000e 00000000`6b556528 00000010`00000001 00000000`00000000 : wow64win!NtUserMsgWaitForMultipleObjectsEx+0x14
+00007ffc`de5b7123     : 00000000`00c6c000 00007ffc`debe5780 00000000`00c6e000 00000000`00c6e000 : wow64win!whNtUserMsgWaitForMultipleObjectsEx+0x8a
+00000000`77021783     : 00000023`75b22cfc 00000000`00000023 00000000`00000002 00000000`0be6fa40 : wow64!Wow64SystemServiceEx+0x153
+00000000`77021199     : 00000000`0be6fc90 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!ServiceNoTurbo+0xb
+00007ffc`de5bc77a     : 00000000`0117b8a8 00000000`00000000 00000000`00000000 00000000`0bd6f800 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00c6c000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0bd6f800 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   8  Id: bd0.430 Suspend: 0 Teb: 00000000`00cde000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b99     : 00000023`770a20bc 00000000`00000023 00000000`00000008 00000000`014cfbc0 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`014cf8f4 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!Thunk2ArgNSpNSpReloadState+0xc
+00007ffc`de5bc77a     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00bbf700 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00cde000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`00bbf700 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+   9  Id: bd0.5b4 Suspend: 0 Teb: 00000000`00cfc000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b1d     : 00000023`770a1d9c 00000000`00000023 00000000`00000202 00000000`015cff8c : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`015cfcc0 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!Thunk0ArgReloadState+0x5
+00007ffc`de5bc77a     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00bff110 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00cfc000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`00bff110 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+  10  Id: bd0.1c50 Suspend: 0 Teb: 00000000`00cff000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b1d     : 00000023`770a1d9c 00000000`00000023 00000000`00000202 00000000`0b69ff10 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0b69fc44 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!Thunk0ArgReloadState+0x5
+00007ffc`de5bc77a     : 00000000`00000001 00000000`00000000 00000000`00000000 00000000`00f3f5e0 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00cff000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`00f3f5e0 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+  11  Id: bd0.f54 Suspend: 0 Teb: 00000000`00d02000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b1d     : 00000023`770a1d9c 00000000`00000023 00000000`00000202 00000000`0ba9f860 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0ba9f594 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!Thunk0ArgReloadState+0x5
+00007ffc`de5bc77a     : 00000000`00000002 00000000`00000000 00000000`00000000 00000000`00f7f410 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00d02000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`00f7f410 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+  12  Id: bd0.d80 Suspend: 0 Teb: 00000000`00d05000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00000000`77021b1d     : 00000023`770a1e3c 00000000`00000023 00000000`00000202 00000000`0f3bfb00 : wow64cpu!CpupSyscallStub+0xc
+00000000`77021199     : 00000000`0f3bf834 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!Thunk0ArgReloadState+0x5
+00007ffc`de5bc77a     : 00000000`00000003 00000000`00000000 00000000`00000000 00000000`0160f680 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00d05000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0160f680 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+  13  Id: bd0.980 Suspend: 0 Teb: 00000000`00d08000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ffc`de5bacee     : 0000014c`00010000 00000000`0712fff8 00000000`00d08000 00007ffc`de5bf045 : ntdll!NtWaitForWorkViaWorkerFactory+0x14
+00007ffc`de5b7123     : 00000000`00d08000 00000000`00d08000 00007ffc`de5babd0 00000000`00d0a000 : wow64!whNtWaitForWorkViaWorkerFactory+0x11e
+00000000`77021783     : 00000023`770a334c 00000000`00000023 00000000`011155b8 00000000`130afee8 : wow64!Wow64SystemServiceEx+0x153
+00000000`77021199     : 00000000`130afc1c 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!ServiceNoTurbo+0xb
+00007ffc`de5bc77a     : 00000000`011107c0 00000000`00000000 00000000`00000000 00000000`0712f7f0 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00d08000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0712f7f0 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+
+  14  Id: bd0.1a80 Suspend: 0 Teb: 00000000`00d0b000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ffc`de5bacee     : 0000014c`00010000 00000000`0badfff8 00000000`00d0b000 00007ffc`de5bf045 : ntdll!NtWaitForWorkViaWorkerFactory+0x14
+00007ffc`de5b7123     : 00000000`00000000 00000000`00d0b000 00007ffc`de5babd0 00000000`00d0d000 : wow64!whNtWaitForWorkViaWorkerFactory+0x11e
+00000000`77021783     : 00000023`770a1d6c 00000000`00000023 00000000`00000000 00000000`1324fb40 : wow64!Wow64SystemServiceEx+0x153
+00000000`77021199     : 00000000`1324f874 00007ffc`de5bc864 00000000`00000000 00007ffc`de5bbf58 : wow64cpu!ServiceNoTurbo+0xb
+00007ffc`de5bc77a     : 00000000`01138570 00000000`00000000 00000000`00000000 00000000`0badf4a0 : wow64cpu!BTCpuSimulate+0x9
+00007ffc`de5bc637     : 00000000`00000000 00000000`00000001 00000000`00000000 00000000`00000000 : wow64!RunCpuSimulation+0xa
+00007ffc`dfc9196b     : 00000000`00000000 00000000`00000000 00000000`00000001 00000000`00000000 : wow64!Wow64LdrpInitialize+0x127
+00007ffc`dfc91853     : 00000000`00000000 00007ffc`dfc20000 00000000`00000000 00000000`00d0b000 : ntdll!_LdrpInitialize+0xff
+00007ffc`dfc917fe     : 00000000`0badf4a0 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrpInitialize+0x3b
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!LdrInitializeThunk+0xe
+0:000> .echo ===LOCKS
+===LOCKS
+0:000> !ntsdexts.locks
+
+Scanned 3 critical sections
+0:000> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

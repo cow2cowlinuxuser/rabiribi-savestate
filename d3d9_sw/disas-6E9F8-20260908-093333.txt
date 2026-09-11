@@ -1,0 +1,180 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.031 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 3884 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+..............
+Loading unloaded module list
+....
+(f2c.6d70): Wake debugger - code 80000007 (first chance)
+eax=00000001 ebx=00000000 ecx=00000000 edx=00000000 esi=00000000 edi=0731b618
+eip=77d09abc esp=01cff044 ebp=01cff098 iopl=0         nv up ei pl nz na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00200206
+ntdll!NtAlpcSendWaitReceivePort+0xc:
+77d09abc c22000          ret     20h
+0:000> cdb: Reading initial command '.echo ===== module =====; lm m rabiribi; .echo ===== resolved =====; ? rabiribi+6E9F8; .echo ===== leading up to it (this is where the length is computed) =====; ub rabiribi+6E9F8 L40; .echo ===== at and after =====; u rabiribi+6E9F8 L24; .echo ===== whole function, if cdb can find the bounds =====; uf rabiribi+6E9F8; .echo ===== done =====; qd'
+===== module =====
+start    end        module name
+00850000 0191e000   rabiribi   (deferred)             
+===== resolved =====
+Evaluate expression: 9169400 = 008be9f8
+===== leading up to it (this is where the length is computed) =====
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\rabiribi.exe
+rabiribi+0x6e97a:
+008be97a 5d              pop     ebp
+008be97b c3              ret
+008be97c cc              int     3
+008be97d cc              int     3
+008be97e cc              int     3
+008be97f cc              int     3
+008be980 55              push    ebp
+008be981 8bec            mov     ebp,esp
+008be983 8b4d10          mov     ecx,dword ptr [ebp+10h]
+008be986 83ec0c          sub     esp,0Ch
+008be989 85c9            test    ecx,ecx
+008be98b 7506            jne     rabiribi+0x6e993 (008be993)
+008be98d 33c0            xor     eax,eax
+008be98f 8be5            mov     esp,ebp
+008be991 5d              pop     ebp
+008be992 c3              ret
+008be993 8b4508          mov     eax,dword ptr [ebp+8]
+008be996 8945fc          mov     dword ptr [ebp-4],eax
+008be999 8b450c          mov     eax,dword ptr [ebp+0Ch]
+008be99c 56              push    esi
+008be99d 57              push    edi
+008be99e 8945f8          mov     dword ptr [ebp-8],eax
+008be9a1 894df4          mov     dword ptr [ebp-0Ch],ecx
+008be9a4 fc              cld
+008be9a5 33c0            xor     eax,eax
+008be9a7 8b75fc          mov     esi,dword ptr [ebp-4]
+008be9aa 8b7df8          mov     edi,dword ptr [ebp-8]
+008be9ad 8b4df4          mov     ecx,dword ptr [ebp-0Ch]
+008be9b0 f3a6            repe cmps byte ptr [esi],byte ptr es:[edi]
+008be9b2 894510          mov     dword ptr [ebp+10h],eax
+008be9b5 7408            je      rabiribi+0x6e9bf (008be9bf)
+008be9b7 b801000000      mov     eax,1
+008be9bc 894510          mov     dword ptr [ebp+10h],eax
+008be9bf 8b4510          mov     eax,dword ptr [ebp+10h]
+008be9c2 5f              pop     edi
+008be9c3 5e              pop     esi
+008be9c4 8be5            mov     esp,ebp
+008be9c6 5d              pop     ebp
+008be9c7 c3              ret
+008be9c8 cc              int     3
+008be9c9 cc              int     3
+008be9ca cc              int     3
+008be9cb cc              int     3
+008be9cc cc              int     3
+008be9cd cc              int     3
+008be9ce cc              int     3
+008be9cf cc              int     3
+008be9d0 55              push    ebp
+008be9d1 8bec            mov     ebp,esp
+008be9d3 8b4d10          mov     ecx,dword ptr [ebp+10h]
+008be9d6 83ec08          sub     esp,8
+008be9d9 85c9            test    ecx,ecx
+008be9db 741f            je      rabiribi+0x6e9fc (008be9fc)
+008be9dd 8b4508          mov     eax,dword ptr [ebp+8]
+008be9e0 8945fc          mov     dword ptr [ebp-4],eax
+008be9e3 8b450c          mov     eax,dword ptr [ebp+0Ch]
+008be9e6 56              push    esi
+008be9e7 57              push    edi
+008be9e8 894510          mov     dword ptr [ebp+10h],eax
+008be9eb 894df8          mov     dword ptr [ebp-8],ecx
+008be9ee fc              cld
+008be9ef 8b7510          mov     esi,dword ptr [ebp+10h]
+008be9f2 8b7dfc          mov     edi,dword ptr [ebp-4]
+008be9f5 8b4df8          mov     ecx,dword ptr [ebp-8]
+===== at and after =====
+rabiribi+0x6e9f8:
+008be9f8 f3a4            rep movs byte ptr es:[edi],byte ptr [esi]
+008be9fa 5f              pop     edi
+008be9fb 5e              pop     esi
+008be9fc 8be5            mov     esp,ebp
+008be9fe 5d              pop     ebp
+008be9ff c3              ret
+008bea00 55              push    ebp
+008bea01 8bec            mov     ebp,esp
+008bea03 8b4d10          mov     ecx,dword ptr [ebp+10h]
+008bea06 83ec08          sub     esp,8
+008bea09 85c9            test    ecx,ecx
+008bea0b 742d            je      rabiribi+0x6ea3a (008bea3a)
+008bea0d 8b4508          mov     eax,dword ptr [ebp+8]
+008bea10 8945fc          mov     dword ptr [ebp-4],eax
+008bea13 8b450c          mov     eax,dword ptr [ebp+0Ch]
+008bea16 56              push    esi
+008bea17 57              push    edi
+008bea18 894510          mov     dword ptr [ebp+10h],eax
+008bea1b 894df8          mov     dword ptr [ebp-8],ecx
+008bea1e fc              cld
+008bea1f 8b7510          mov     esi,dword ptr [ebp+10h]
+008bea22 8b7dfc          mov     edi,dword ptr [ebp-4]
+008bea25 8b4df8          mov     ecx,dword ptr [ebp-8]
+008bea28 3bf7            cmp     esi,edi
+008bea2a 740b            je      rabiribi+0x6ea37 (008bea37)
+008bea2c 7707            ja      rabiribi+0x6ea35 (008bea35)
+008bea2e fd              std
+008bea2f 49              dec     ecx
+008bea30 03f1            add     esi,ecx
+008bea32 03f9            add     edi,ecx
+008bea34 41              inc     ecx
+008bea35 f3a4            rep movs byte ptr es:[edi],byte ptr [esi]
+008bea37 fc              cld
+008bea38 5f              pop     edi
+008bea39 5e              pop     esi
+008bea3a 8be5            mov     esp,ebp
+===== whole function, if cdb can find the bounds =====
+rabiribi+0x6e9f8:
+008be9f8 f3a4            rep movs byte ptr es:[edi],byte ptr [esi]
+008be9fa 5f              pop     edi
+008be9fb 5e              pop     esi
+008be9fc 8be5            mov     esp,ebp
+008be9fe 5d              pop     ebp
+008be9ff c3              ret
+===== done =====
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

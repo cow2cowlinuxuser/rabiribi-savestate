@@ -1,0 +1,100 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.000 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [f:\Archipelago\default.exe.6592.dmp]
+User Mini Dump File: Only registers, stack and portions of memory are available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+Windows 10 Version 18362 MP (4 procs) Free x86 compatible
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 18362.239.x86fre.19h1_release_svc_prod1.190628-1641
+Debug session time: Fri Aug 28 01:36:11.000 2026 (UTC - 4:00)
+System Uptime: not available
+Process Uptime: 0 days 0:12:18.000
+................................................................
+....................
+Loading unloaded module list
+...............................
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(19c0.2290): Unknown exception - code c0000374 (first/second chance not available)
+For analysis of this file, run !analyze -v
+eax=00000000 ebx=00000000 ecx=0b6df7f8 edx=7714b960 esi=00000000 edi=00000002
+eip=770a232c esp=0b6df018 ebp=0b6df058 iopl=0         nv up ei pl nz na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000206
+ntdll!NtWaitForMultipleObjects+0xc:
+770a232c c21400          ret     14h
+0:007> .echo ===EXCEPTION
+===EXCEPTION
+0:007> .ecxr
+eax=0b6df7c8 ebx=00000000 ecx=0b6df7f8 edx=7714b960 esi=00000002 edi=01137288
+eip=7710f94d esp=0b6df7a0 ebp=0b6df7d8 iopl=0         nv up ei pl zr na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000246
+ntdll!RtlReportFatalFailure+0x16:
+7710f94d eb33            jmp     ntdll!RtlReportFatalFailure+0x4b (7710f982)
+0:007> .echo ===FAULTING
+===FAULTING
+0:007> kb 24
+ChildEBP RetAddr      Args to Child              
+0b6df7d8 7710f925     fd242558 01137288 00000002 ntdll!RtlReportFatalFailure+0x16
+0b6df86c 77118367     00000001 7714b990 77116259 ntdll!RtlReportCriticalFailure+0x84
+0b6df878 77116259     fd24259c 01137288 01137288 ntdll!RtlpReportHeapFailure+0x2f
+0b6df8a8 77120d52     00000008 01130000 01137288 ntdll!RtlpHpHeapHandleError+0x89
+0b6df8c0 770b6652     01137288 00000000 00000000 ntdll!RtlpLogHeapFailure+0x43
+0b6df924 7706dc16     00000000 00000000 00000000 ntdll!RtlpFreeHeapInternal+0xfa
+0b6df940 00408de6     01130000 00000000 01137290 ntdll!RtlFreeHeap+0x46
+0b6df97c 00408c09     01137290 00000015 069138f8 XINPUT1_3!free+0x6b
+0b6df9b4 770b5e0a     01137290 069138f8 007e3000 XINPUT1_3!_freefls+0x124
+0b6df9e4 770b6260     00000001 0b6dfa98 77074134 ntdll!RtlpFlsDataCleanup+0xa8
+0b6df9f0 77074134     069138f8 00000001 fd2427ac ntdll!RtlProcessFlsData+0x10
+0b6dfa98 7709a4cc     00c307c0 00000000 00c307ec ntdll!LdrShutdownThread+0x34
+0b6dfb74 7708704d     00000000 fd242014 770863b0 ntdll!RtlExitUserThread+0x4c
+0b6dfd20 75d76359     00c307c0 75d76340 0b6dfd8c ntdll!TppWorkerThread+0xc9d
+0b6dfd30 77097b74     00c307c0 fd2420b8 00000000 kernel32!BaseThreadInitThunk+0x19
+0b6dfd8c 77097b44     ffffffff 770b8f05 00000000 ntdll!__RtlUserThreadStart+0x2f
+0b6dfd9c 00000000     770863b0 00c307c0 00000000 ntdll!_RtlUserThreadStart+0x1b
+0:007> .echo ===HEAPCHK
+===HEAPCHK
+0:007> !heap -s
+Invalid type information
+0:007> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

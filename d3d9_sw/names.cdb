@@ -1,0 +1,18 @@
+$$ The recurring chain: mono calls something in ucrtbase's formatting machinery
+$$ and dies inside it. Naming the ucrtbase frames tells us WHICH entry point mono
+$$ used, which is the one we can then intercept to capture the format string.
+.symfix+ f:\rbo_fabre_proto\d3d9_sw\symbols-cache
+.reload /f ucrtbase.dll
+.echo ===CALLED BY MONO===
+ln ucrtbase+18588
+.echo ===FAULT SITES===
+ln ucrtbase+1E1A4
+ln ucrtbase+1E541
+ln ucrtbase+19EC1
+ln ucrtbase+19D0C
+ln ucrtbase+3CCCB
+ln ucrtbase+451E7
+.echo ===NTDLL 1CD14===
+.reload /f ntdll.dll
+ln ntdll+1CD14
+q

@@ -1,0 +1,88 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.015 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 32552 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+...
+Loading unloaded module list
+..
+(7f28.8274): Wake debugger - code 80000007 (first chance)
+eax=00000000 ebx=00000000 ecx=00000000 edx=00000000 esi=00000008 edi=00004770
+eip=77d091fc esp=01a1e900 ebp=01a1e96c iopl=0         nv up ei pl nz ac pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000216
+ntdll!NtWaitForSingleObject+0xc:
+77d091fc c20c00          ret     0Ch
+0:000> cdb: Reading initial command '.echo ==STACK==; ~~[0x80e8]s; kv 18; q'
+==STACK==
+eax=00000000 ebx=50bfe998 ecx=00000008 edx=07129000 esi=0066e000 edi=50bfe998
+eip=77d0951c esp=50bfe934 ebp=50bfe954 iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000202
+ntdll!NtDelayExecution+0xc:
+77d0951c c20800          ret     8
+ChildEBP RetAddr      Args to Child              
+50bfe930 77d22579     00000000 50bfe998 00000000 ntdll!NtDelayExecution+0xc (FPO: [2,0,0])
+50bfe954 75582d50     00000000 50bfe998 8446e586 ntdll!RtlDelayExecution+0xe9 (FPO: [2,2,0])
+50bfe9bc 75582cef     000003e8 00000000 50bfea10 KERNELBASE!SleepEx+0x50 (FPO: [SEH])
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\d3d11.dll
+50bfe9cc 6a03f017     000003e8 0000001c 00000000 KERNELBASE!Sleep+0xf (FPO: [Non-Fpo])
+WARNING: Stack unwind information not available. Following frames may be wrong.
+50bfea10 6a03b366     c0000005 07129000 06f50000 d3d11!D3D11CreateDeviceAndSwapChain+0x1ac37
+50bfea9c 77d0382f     50bfeab8 50bfebec 50bfeb9c d3d11!D3D11CreateDeviceAndSwapChain+0x16f86
+50bfeaec 77cfec64     00000000 00000009 00000018 ntdll!RtlpCallVectoredHandlers+0xf8 (FPO: [Non-Fpo])
+50bfeb84 77d0b5af     50bfeb9c 50bfebec 50bfeb9c ntdll!RtlDispatchException+0x67 (FPO: [Non-Fpo])
+50bfeb84 77cd3cb7     50bfeb9c 50bfebec 50bfeb9c ntdll!KiUserExceptionDispatcher+0xf (FPO: [2,0,0]) (CONTEXT @ 50bfebec)
+50bff6cc 77cd2724     07128520 00000010 00078000 ntdll!RtlpSubSegmentInitialize+0xe7 (FPO: [Non-Fpo])
+50bff72c 77d20c96     00000010 000c0000 03abba00 ntdll!RtlpLowFragHeapAllocFromContext+0x254 (FPO: [Non-Fpo])
+50bff768 77ccf949     000c0000 dadca9d0 03abba00 ntdll!RtlpAllocateNTHeapInternal+0xfc (FPO: [Non-Fpo])
+50bff79c 77cc5e83     01d00000 000c0000 00000010 ntdll!RtlAllocateHeap+0xa9 (FPO: [Non-Fpo])
+50bff808 77ccaea2     dadca6ec 00740000 00000000 ntdll!LdrpAllocateTls+0xa9 (FPO: [Non-Fpo])
+50bff8a0 77cc4554     dadca6bc 00000000 00000002 ntdll!LdrpInitializeThread+0x98 (FPO: [Non-Fpo])
+50bff8f0 77d3fa33     00000000 00000000 00000007 ntdll!_LdrpInitialize+0x284 (FPO: [Non-Fpo])
+50bff91c 77cc4271     00000000 00000000 00000000 ntdll!LdrpInitializeInternal+0xaf (FPO: [0,5,4])
+50bff928 00000000     50bff93c 77c90000 00000000 ntdll!LdrInitializeThunk+0x11 (FPO: [Non-Fpo])
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

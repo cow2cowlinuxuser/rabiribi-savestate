@@ -1,0 +1,9 @@
+.reload /f
+.echo ===EXACT IMPORT NAME STRINGS===
+da 00007ffda64bcdc0 L20
+da 00007ffda64bce00 L20
+.echo ===DOES MONO IMPORT RtlGrowFunctionTable===
+s -a 00007ffda6080000 L0x767000 "GrowFunctionTable"
+.echo ===AND RtlInstallFunctionTableCallback===
+s -a 00007ffda6080000 L0x767000 "InstallFunctionTable"
+q

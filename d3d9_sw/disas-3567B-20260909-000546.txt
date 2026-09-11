@@ -1,0 +1,426 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.016 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.015 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 6712 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+..............
+Loading unloaded module list
+...
+(1a38.589c): Wake debugger - code 80000007 (first chance)
+eax=00000000 ebx=00000000 ecx=00000000 edx=00000000 esi=00000008 edi=00004920
+eip=77d091fc esp=01cfea90 ebp=01cfeafc iopl=0         nv up ei pl nz ac pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00200216
+ntdll!NtWaitForSingleObject+0xc:
+77d091fc c20c00          ret     0Ch
+0:000> cdb: Reading initial command '.echo ===== module =====; lm m rabiribi; .echo ===== 3567B : leading up to it =====; ub rabiribi+3567B L60; .echo ===== 3567B : at and after =====; u rabiribi+3567B L50; .echo ===== 3D5C4 : leading up to it =====; ub rabiribi+3D5C4 L60; .echo ===== 3D5C4 : at and after =====; u rabiribi+3D5C4 L50; .echo ===== done =====; qd'
+===== module =====
+start    end        module name
+00850000 0191e000   rabiribi   (deferred)             
+===== 3567B : leading up to it =====
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\rabiribi.exe
+rabiribi+0x355b9:
+008855b9 6834eef900      push    offset rabiribi!opus_strerror+0x3b6404 (00f9ee34)
+008855be e80db90200      call    rabiribi+0x60ed0 (008b0ed0)
+008855c3 6834eef900      push    offset rabiribi!opus_strerror+0x3b6404 (00f9ee34)
+008855c8 c687d024000001  mov     byte ptr [edi+24D0h],1
+008855cf e85cb90200      call    rabiribi+0x60f30 (008b0f30)
+008855d4 53              push    ebx
+008855d5 56              push    esi
+008855d6 e865e2ffff      call    rabiribi+0x33840 (00883840)
+008855db 83c428          add     esp,28h
+008855de 5f              pop     edi
+008855df 5e              pop     esi
+008855e0 33c0            xor     eax,eax
+008855e2 5b              pop     ebx
+008855e3 8be5            mov     esp,ebp
+008855e5 5d              pop     ebp
+008855e6 c3              ret
+008855e7 83c8ff          or      eax,0FFFFFFFFh
+008855ea 8be5            mov     esp,ebp
+008855ec 5d              pop     ebp
+008855ed c3              ret
+008855ee cc              int     3
+008855ef cc              int     3
+008855f0 55              push    ebp
+008855f1 8bec            mov     ebp,esp
+008855f3 8b4508          mov     eax,dword ptr [ebp+8]
+008855f6 833800          cmp     dword ptr [eax],0
+008855f9 7505            jne     rabiribi+0x35600 (00885600)
+008855fb 83c8ff          or      eax,0FFFFFFFFh
+008855fe 5d              pop     ebp
+008855ff c3              ret
+00885600 833d8ce1d50000  cmp     dword ptr [rabiribi!opus_strerror+0x17575c (00d5e18c)],0
+00885607 7405            je      rabiribi+0x3560e (0088560e)
+00885609 8b4050          mov     eax,dword ptr [eax+50h]
+0088560c 5d              pop     ebp
+0088560d c3              ret
+0088560e 894508          mov     dword ptr [ebp+8],eax
+00885611 5d              pop     ebp
+00885612 e9e9880100      jmp     rabiribi+0x4df00 (0089df00)
+00885617 cc              int     3
+00885618 cc              int     3
+00885619 cc              int     3
+0088561a cc              int     3
+0088561b cc              int     3
+0088561c cc              int     3
+0088561d cc              int     3
+0088561e cc              int     3
+0088561f cc              int     3
+00885620 55              push    ebp
+00885621 8bec            mov     ebp,esp
+00885623 ff7510          push    dword ptr [ebp+10h]
+00885626 8b450c          mov     eax,dword ptr [ebp+0Ch]
+00885629 ff7048          push    dword ptr [eax+48h]
+0088562c ff7044          push    dword ptr [eax+44h]
+0088562f 50              push    eax
+00885630 6a00            push    0
+00885632 6a00            push    0
+00885634 ff7508          push    dword ptr [ebp+8]
+00885637 e824010000      call    rabiribi+0x35760 (00885760)
+0088563c 83c41c          add     esp,1Ch
+0088563f 5d              pop     ebp
+00885640 c3              ret
+00885641 cc              int     3
+00885642 cc              int     3
+00885643 cc              int     3
+00885644 cc              int     3
+00885645 cc              int     3
+00885646 cc              int     3
+00885647 cc              int     3
+00885648 cc              int     3
+00885649 cc              int     3
+0088564a cc              int     3
+0088564b cc              int     3
+0088564c cc              int     3
+0088564d cc              int     3
+0088564e cc              int     3
+0088564f cc              int     3
+00885650 55              push    ebp
+00885651 8bec            mov     ebp,esp
+00885653 56              push    esi
+00885654 8b7508          mov     esi,dword ptr [ebp+8]
+00885657 833e00          cmp     dword ptr [esi],0
+0088565a 7506            jne     rabiribi+0x35662 (00885662)
+0088565c 83c8ff          or      eax,0FFFFFFFFh
+0088565f 5e              pop     esi
+00885660 5d              pop     ebp
+00885661 c3              ret
+00885662 833d8ce1d50000  cmp     dword ptr [rabiribi!opus_strerror+0x17575c (00d5e18c)],0
+00885669 53              push    ebx
+0088566a 8b5d0c          mov     ebx,dword ptr [ebp+0Ch]
+0088566d 57              push    edi
+0088566e 8b7d10          mov     edi,dword ptr [ebp+10h]
+00885671 751c            jne     rabiribi+0x3568f (0088568f)
+00885673 57              push    edi
+00885674 53              push    ebx
+00885675 56              push    esi
+00885676 e895890100      call    rabiribi+0x4e010 (0089e010)
+===== 3567B : at and after =====
+rabiribi+0x3567b:
+0088567b 83c40c          add     esp,0Ch
+0088567e 83f802          cmp     eax,2
+00885681 740c            je      rabiribi+0x3568f (0088568f)
+00885683 85c0            test    eax,eax
+00885685 7928            jns     rabiribi+0x356af (008856af)
+00885687 5f              pop     edi
+00885688 5b              pop     ebx
+00885689 83c8ff          or      eax,0FFFFFFFFh
+0088568c 5e              pop     esi
+0088568d 5d              pop     ebp
+0088568e c3              ret
+0088568f 85db            test    ebx,ebx
+00885691 740c            je      rabiribi+0x3569f (0088569f)
+00885693 8b4e54          mov     ecx,dword ptr [esi+54h]
+00885696 0fb7463c        movzx   eax,word ptr [esi+3Ch]
+0088569a 0fafc8          imul    ecx,eax
+0088569d 890b            mov     dword ptr [ebx],ecx
+0088569f 85ff            test    edi,edi
+008856a1 740c            je      rabiribi+0x356af (008856af)
+008856a3 8b4e54          mov     ecx,dword ptr [esi+54h]
+008856a6 0fb7463c        movzx   eax,word ptr [esi+3Ch]
+008856aa 0fafc8          imul    ecx,eax
+008856ad 890f            mov     dword ptr [edi],ecx
+008856af 5f              pop     edi
+008856b0 5b              pop     ebx
+008856b1 33c0            xor     eax,eax
+008856b3 5e              pop     esi
+008856b4 5d              pop     ebp
+008856b5 c3              ret
+008856b6 cc              int     3
+008856b7 cc              int     3
+008856b8 cc              int     3
+008856b9 cc              int     3
+008856ba cc              int     3
+008856bb cc              int     3
+008856bc cc              int     3
+008856bd cc              int     3
+008856be cc              int     3
+008856bf cc              int     3
+008856c0 55              push    ebp
+008856c1 8bec            mov     ebp,esp
+008856c3 56              push    esi
+008856c4 8b7508          mov     esi,dword ptr [ebp+8]
+008856c7 833e00          cmp     dword ptr [esi],0
+008856ca 7506            jne     rabiribi+0x356d2 (008856d2)
+008856cc 83c8ff          or      eax,0FFFFFFFFh
+008856cf 5e              pop     esi
+008856d0 5d              pop     ebp
+008856d1 c3              ret
+008856d2 833d8ce1d50000  cmp     dword ptr [rabiribi!opus_strerror+0x17575c (00d5e18c)],0
+008856d9 57              push    edi
+008856da 8b7d0c          mov     edi,dword ptr [ebp+0Ch]
+008856dd 751a            jne     rabiribi+0x356f9 (008856f9)
+008856df 57              push    edi
+008856e0 56              push    esi
+008856e1 e85a890100      call    rabiribi+0x4e040 (0089e040)
+008856e6 83c408          add     esp,8
+008856e9 83f802          cmp     eax,2
+008856ec 740b            je      rabiribi+0x356f9 (008856f9)
+008856ee 85c0            test    eax,eax
+008856f0 7913            jns     rabiribi+0x35705 (00885705)
+008856f2 5f              pop     edi
+008856f3 83c8ff          or      eax,0FFFFFFFFh
+008856f6 5e              pop     esi
+008856f7 5d              pop     ebp
+008856f8 c3              ret
+008856f9 8b4628          mov     eax,dword ptr [esi+28h]
+008856fc 85c0            test    eax,eax
+008856fe 7903            jns     rabiribi+0x35703 (00885703)
+00885700 8b4634          mov     eax,dword ptr [esi+34h]
+00885703 8907            mov     dword ptr [edi],eax
+00885705 5f              pop     edi
+00885706 33c0            xor     eax,eax
+00885708 5e              pop     esi
+00885709 5d              pop     ebp
+0088570a c3              ret
+0088570b cc              int     3
+0088570c cc              int     3
+0088570d cc              int     3
+0088570e cc              int     3
+===== 3D5C4 : leading up to it =====
+rabiribi+0x3d4bd:
+0088d4bd cc              int     3
+0088d4be cc              int     3
+0088d4bf cc              int     3
+0088d4c0 55              push    ebp
+0088d4c1 8bec            mov     ebp,esp
+0088d4c3 56              push    esi
+0088d4c4 6aff            push    0FFFFFFFFh
+0088d4c6 ff7510          push    dword ptr [ebp+10h]
+0088d4c9 6a03            push    3
+0088d4cb e8a03e0300      call    rabiribi+0x71370 (008c1370)
+0088d4d0 8bf0            mov     esi,eax
+0088d4d2 83c40c          add     esp,0Ch
+0088d4d5 83feff          cmp     esi,0FFFFFFFFh
+0088d4d8 7505            jne     rabiribi+0x3d4df (0088d4df)
+0088d4da 0bc0            or      eax,eax
+0088d4dc 5e              pop     esi
+0088d4dd 5d              pop     ebp
+0088d4de c3              ret
+0088d4df 833df0edf90000  cmp     dword ptr [rabiribi!opus_strerror+0x3b63c0 (00f9edf0)],0
+0088d4e6 57              push    edi
+0088d4e7 0f8488000000    je      rabiribi+0x3d575 (0088d575)
+0088d4ed 85f6            test    esi,esi
+0088d4ef 0f8880000000    js      rabiribi+0x3d575 (0088d575)
+0088d4f5 250000007c      and     eax,7C000000h
+0088d4fa 3b0518eef900    cmp     eax,dword ptr [rabiribi!opus_strerror+0x3b63e8 (00f9ee18)]
+0088d500 7573            jne     rabiribi+0x3d575 (0088d575)
+0088d502 8bfe            mov     edi,esi
+0088d504 81e7ffff0000    and     edi,0FFFFh
+0088d50a 3b3d20eef900    cmp     edi,dword ptr [rabiribi!opus_strerror+0x3b63f0 (00f9ee20)]
+0088d510 7d63            jge     rabiribi+0x3d575 (0088d575)
+0088d512 a1f4edf900      mov     eax,dword ptr [rabiribi!opus_strerror+0x3b63c4 (00f9edf4)]
+0088d517 8b3cb8          mov     edi,dword ptr [eax+edi*4]
+0088d51a 85ff            test    edi,edi
+0088d51c 7457            je      rabiribi+0x3d575 (0088d575)
+0088d51e 8b0f            mov     ecx,dword ptr [edi]
+0088d520 8bc6            mov     eax,esi
+0088d522 c1e110          shl     ecx,10h
+0088d525 250000ff03      and     eax,3FF0000h
+0088d52a 3bc8            cmp     ecx,eax
+0088d52c 7547            jne     rabiribi+0x3d575 (0088d575)
+0088d52e 8b4d08          mov     ecx,dword ptr [ebp+8]
+0088d531 8b450c          mov     eax,dword ptr [ebp+0Ch]
+0088d534 894f40          mov     dword ptr [edi+40h],ecx
+0088d537 89476c          mov     dword ptr [edi+6Ch],eax
+0088d53a 85c9            test    ecx,ecx
+0088d53c 7431            je      rabiribi+0x3d56f (0088d56f)
+0088d53e 68c6050000      push    5C6h
+0088d543 68142cbf00      push    offset rabiribi!opus_strerror+0xa1e4 (00bf2c14)
+0088d548 6898dad500      push    offset rabiribi!opus_strerror+0x175068 (00d5da98)
+0088d54d e87e390200      call    rabiribi+0x60ed0 (008b0ed0)
+0088d552 57              push    edi
+0088d553 56              push    esi
+0088d554 8d4730          lea     eax,[edi+30h]
+0088d557 50              push    eax
+0088d558 6878dad500      push    offset rabiribi!opus_strerror+0x175048 (00d5da78)
+0088d55d e8de3f0300      call    rabiribi+0x71540 (008c1540)
+0088d562 6898dad500      push    offset rabiribi!opus_strerror+0x175068 (00d5da98)
+0088d567 e8c4390200      call    rabiribi+0x60f30 (008b0f30)
+0088d56c 83c420          add     esp,20h
+0088d56f 5f              pop     edi
+0088d570 8bc6            mov     eax,esi
+0088d572 5e              pop     esi
+0088d573 5d              pop     ebp
+0088d574 c3              ret
+0088d575 5f              pop     edi
+0088d576 83c8ff          or      eax,0FFFFFFFFh
+0088d579 5e              pop     esi
+0088d57a 5d              pop     ebp
+0088d57b c3              ret
+0088d57c cc              int     3
+0088d57d cc              int     3
+0088d57e cc              int     3
+0088d57f cc              int     3
+0088d580 55              push    ebp
+0088d581 8bec            mov     ebp,esp
+0088d583 83ec34          sub     esp,34h
+0088d586 a140e9d100      mov     eax,dword ptr [rabiribi!opus_strerror+0x135f10 (00d1e940)]
+0088d58b 33c5            xor     eax,ebp
+0088d58d 8945fc          mov     dword ptr [ebp-4],eax
+0088d590 53              push    ebx
+0088d591 56              push    esi
+0088d592 8b7508          mov     esi,dword ptr [ebp+8]
+0088d595 57              push    edi
+0088d596 8b8628250000    mov     eax,dword ptr [esi+2528h]
+0088d59c 69c0b8010000    imul    eax,eax,1B8h
+0088d5a2 8dbec4000000    lea     edi,[esi+0C4h]
+0088d5a8 03f8            add     edi,eax
+0088d5aa 833f00          cmp     dword ptr [edi],0
+0088d5ad 742b            je      rabiribi+0x3d5da (0088d5da)
+0088d5af 833d8ce1d50000  cmp     dword ptr [rabiribi!opus_strerror+0x17575c (00d5e18c)],0
+0088d5b6 7514            jne     rabiribi+0x3d5cc (0088d5cc)
+0088d5b8 6a00            push    0
+0088d5ba 8d45f8          lea     eax,[ebp-8]
+0088d5bd 50              push    eax
+0088d5be 57              push    edi
+0088d5bf e84c0a0100      call    rabiribi+0x4e010 (0089e010)
+===== 3D5C4 : at and after =====
+rabiribi+0x3d5c4:
+0088d5c4 83c40c          add     esp,0Ch
+0088d5c7 83f802          cmp     eax,2
+0088d5ca 750e            jne     rabiribi+0x3d5da (0088d5da)
+0088d5cc 8b4f54          mov     ecx,dword ptr [edi+54h]
+0088d5cf 0fb7473c        movzx   eax,word ptr [edi+3Ch]
+0088d5d3 0fafc8          imul    ecx,eax
+0088d5d6 8bf9            mov     edi,ecx
+0088d5d8 eb03            jmp     rabiribi+0x3d5dd (0088d5dd)
+0088d5da 8b7df8          mov     edi,dword ptr [ebp-8]
+0088d5dd 8b8628250000    mov     eax,dword ptr [esi+2528h]
+0088d5e3 40              inc     eax
+0088d5e4 33c9            xor     ecx,ecx
+0088d5e6 3b4670          cmp     eax,dword ptr [esi+70h]
+0088d5e9 8d9ec4000000    lea     ebx,[esi+0C4h]
+0088d5ef 0f4dc1          cmovge  eax,ecx
+0088d5f2 898628250000    mov     dword ptr [esi+2528h],eax
+0088d5f8 69c0b8010000    imul    eax,eax,1B8h
+0088d5fe 03d8            add     ebx,eax
+0088d600 c745f400000000  mov     dword ptr [ebp-0Ch],0
+0088d607 390b            cmp     dword ptr [ebx],ecx
+0088d609 0f8457020000    je      rabiribi+0x3d866 (0088d866)
+0088d60f 390d8ce1d500    cmp     dword ptr [rabiribi!opus_strerror+0x17575c (00d5e18c)],ecx
+0088d615 7405            je      rabiribi+0x3d61c (0088d61c)
+0088d617 8b4350          mov     eax,dword ptr [ebx+50h]
+0088d61a eb09            jmp     rabiribi+0x3d625 (0088d625)
+0088d61c 53              push    ebx
+0088d61d e8de080100      call    rabiribi+0x4df00 (0089df00)
+0088d622 83c404          add     esp,4
+0088d625 83f8ff          cmp     eax,0FFFFFFFFh
+0088d628 0f8438020000    je      rabiribi+0x3d866 (0088d866)
+0088d62e 85c0            test    eax,eax
+0088d630 8b450c          mov     eax,dword ptr [ebp+0Ch]
+0088d633 7428            je      rabiribi+0x3d65d (0088d65d)
+0088d635 85c0            test    eax,eax
+0088d637 7516            jne     rabiribi+0x3d64f (0088d64f)
+0088d639 5f              pop     edi
+0088d63a 5e              pop     esi
+0088d63b b801000000      mov     eax,1
+0088d640 5b              pop     ebx
+0088d641 8b4dfc          mov     ecx,dword ptr [ebp-4]
+0088d644 33cd            xor     ecx,ebp
+0088d646 e80ab73200      call    rabiribi!opus_multistream_decoder_destroy+0x844b5 (00bb8d55)
+0088d64b 8be5            mov     esp,ebp
+0088d64d 5d              pop     ebp
+0088d64e c3              ret
+0088d64f 6a00            push    0
+0088d651 53              push    ebx
+0088d652 e8198cffff      call    rabiribi+0x36270 (00886270)
+0088d657 8b450c          mov     eax,dword ptr [ebp+0Ch]
+0088d65a 83c408          add     esp,8
+0088d65d 83f801          cmp     eax,1
+0088d660 7504            jne     rabiribi+0x3d666 (0088d666)
+0088d662 6a00            push    0
+0088d664 eb01            jmp     rabiribi+0x3d667 (0088d667)
+0088d666 57              push    edi
+0088d667 53              push    ebx
+0088d668 e87389ffff      call    rabiribi+0x35fe0 (00885fe0)
+0088d66d 8d4b08          lea     ecx,[ebx+8]
+0088d670 8d8664250000    lea     eax,[esi+2564h]
+0088d676 83c408          add     esp,8
+0088d679 33ff            xor     edi,edi
+0088d67b 894df4          mov     dword ptr [ebp-0Ch],ecx
+0088d67e 8945ec          mov     dword ptr [ebp-14h],eax
+0088d681 80bc3eb025000000 cmp     byte ptr [esi+edi+25B0h],0
+0088d689 740d            je      rabiribi+0x3d698 (0088d698)
+0088d68b 8b405c          mov     eax,dword ptr [eax+5Ch]
+0088d68e c6843eb025000000 mov     byte ptr [esi+edi+25B0h],0
+0088d696 eb02            jmp     rabiribi+0x3d69a (0088d69a)
+0088d698 8b00            mov     eax,dword ptr [eax]
+0088d69a 833b00          cmp     dword ptr [ebx],0
+0088d69d 8944bdcc        mov     dword ptr [ebp+edi*4-34h],eax
+0088d6a1 7413            je      rabiribi+0x3d6b6 (0088d6b6)
+0088d6a3 83ff08          cmp     edi,8
+0088d6a6 7d0e            jge     rabiribi+0x3d6b6 (0088d6b6)
+0088d6a8 53              push    ebx
+0088d6a9 8901            mov     dword ptr [ecx],eax
+0088d6ab e8c084ffff      call    rabiribi+0x35b70 (00885b70)
+0088d6b0 8b4df4          mov     ecx,dword ptr [ebp-0Ch]
+0088d6b3 83c404          add     esp,4
+0088d6b6 8b45ec          mov     eax,dword ptr [ebp-14h]
+===== done =====
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

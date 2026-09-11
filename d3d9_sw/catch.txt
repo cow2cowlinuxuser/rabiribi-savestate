@@ -1,0 +1,19 @@
+$$ Catch only real crashes. Mono raises first-chance access violations as part
+$$ of normal null-reference handling, so those break on second chance only.
+$$
+$$ Commands are inlined rather than kept in a script file: $$>a< inside a quoted
+$$ sx command fails to resolve the path and the break then falls through to a
+$$ debugger with no input, which quits and takes the process with it.
+$$
+$$ Every handler is registered for both chances, since the fail-fast codes have
+$$ arrived as second chance every time so far.
+.echo ===SETUP===
+sxd -c2 ".echo ===FAULT===;.lastevent;r;.echo ===STACK===;kv 40;.echo ===ALLTHREADS===;~*kb;.echo ===END===;qd" av
+sxe -c ".echo ===FAULT===;.lastevent;r;.echo ===STACK===;kv 40;.echo ===ALLTHREADS===;~*kb;.echo ===END===;qd" -c2 ".echo ===FAULT===;.lastevent;r;.echo ===STACK===;kv 40;.echo ===ALLTHREADS===;~*kb;.echo ===END===;qd" 0xc0000094
+sxe -c ".echo ===FAULT===;.lastevent;r;.echo ===STACK===;kv 40;.echo ===ALLTHREADS===;~*kb;.echo ===END===;qd" -c2 ".echo ===FAULT===;.lastevent;r;.echo ===STACK===;kv 40;.echo ===ALLTHREADS===;~*kb;.echo ===END===;qd" 0xc0000409
+sxe -c ".echo ===FAULT===;.lastevent;r;.echo ===STACK===;kv 40;.echo ===ALLTHREADS===;~*kb;.echo ===END===;qd" -c2 ".echo ===FAULT===;.lastevent;r;.echo ===STACK===;kv 40;.echo ===ALLTHREADS===;~*kb;.echo ===END===;qd" 0xc0000374
+sxd sse
+sxd ssec
+sxd dz
+.echo ===ARMED===
+g

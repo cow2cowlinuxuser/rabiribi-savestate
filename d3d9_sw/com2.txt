@@ -1,0 +1,604 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.015 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [c:\dumps\default.exe(1).12252.dmp]
+User Mini Dump File: Only registers, stack and portions of memory are available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+Windows 10 Version 26200 MP (16 procs) Free x86 compatible
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Debug session time: Fri Aug 28 00:33:06.000 2026 (UTC - 4:00)
+System Uptime: 2 days 14:16:48.358
+Process Uptime: 0 days 0:06:18.000
+................................................................
+..................
+Loading unloaded module list
+...............................
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(2fdc.4ab8): Access violation - code c0000005 (first/second chance not available)
+For analysis of this file, run !analyze -v
+eax=00000001 ebx=77d0978c ecx=cfc6c121 edx=00000000 esi=00000001 edi=00000000
+eip=00000000 esp=0b42fbd4 ebp=ffffffff iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00010202
+00000000 ??              ???
+0:010> .echo ===CALLSITE
+===CALLSITE
+0:010> u 7558b860 7558b890
+KERNELBASE!ValidateLocalCookies+0x20:
+7558b860 ff8b46088b4e    dec     dword ptr [ebx+4E8B0846h]
+7558b866 0c03            or      al,3
+7558b868 cf              iretd
+7558b869 330c38          xor     ecx,dword ptr [eax+edi]
+7558b86c 5f              pop     edi
+7558b86d 5e              pop     esi
+7558b86e 5d              pop     ebp
+7558b86f e9ddfcffff      jmp     KERNELBASE!__security_check_cookie (7558b551)
+7558b874 cc              int     3
+7558b875 cc              int     3
+7558b876 cc              int     3
+7558b877 cc              int     3
+7558b878 cc              int     3
+7558b879 cc              int     3
+7558b87a cc              int     3
+7558b87b cc              int     3
+7558b87c cc              int     3
+7558b87d cc              int     3
+7558b87e cc              int     3
+7558b87f cc              int     3
+KERNELBASE!_except_handler4:
+7558b880 8bff            mov     edi,edi
+7558b882 55              push    ebp
+7558b883 8bec            mov     ebp,esp
+7558b885 83ec18          sub     esp,18h
+7558b888 53              push    ebx
+7558b889 56              push    esi
+7558b88a 57              push    edi
+7558b88b 8b7d0c          mov     edi,dword ptr [ebp+0Ch]
+7558b88e c645ff00        mov     byte ptr [ebp-1],0
+0:010> .echo ===COMBASE
+===COMBASE
+0:010> u 75c8b510 75c8b540
+combase!WaitCoalesced+0x88:
+75c8b510 83c40c          add     esp,0Ch
+75c8b513 ff7514          push    dword ptr [ebp+14h]
+75c8b516 8b85f8feffff    mov     eax,dword ptr [ebp-108h]
+75c8b51c 6aff            push    0FFFFFFFFh
+75c8b51e 8984b5fcfeffff  mov     dword ptr [ebp+esi*4-104h],eax
+75c8b525 46              inc     esi
+75c8b526 6a00            push    0
+75c8b528 8d85fcfeffff    lea     eax,[ebp-104h]
+75c8b52e 50              push    eax
+75c8b52f 56              push    esi
+75c8b530 e8bb120500      call    combase!WaitForMultipleObjectsEx (75cdc7f0)
+75c8b535 8d4eff          lea     ecx,[esi-1]
+75c8b538 ba02010000      mov     edx,102h
+75c8b53d 3bc8            cmp     ecx,eax
+75c8b53f 8b8df4feffff    mov     ecx,dword ptr [ebp-10Ch]
+0:010> .echo ===STACK
+===STACK
+0:010> dps 0b42fbd0 L30
+0b42fbd0  0b42fdcc
+0b42fbd4  7558b880 KERNELBASE!_except_handler4
+0b42fbd8  b1e36fb1
+0b42fbdc  00000000
+0b42fbe0  0b42fd1c
+0b42fbe4  75c8b535 combase!WaitCoalesced+0xad
+0b42fbe8  00000002
+0b42fbec  0b42fc18
+0b42fbf0  00000000
+0b42fbf4  ffffffff
+0b42fbf8  00000001
+0b42fbfc  00000628
+0b42fc00  02a24290
+0b42fc04  02a24200
+0b42fc08  ee1e5d00
+0b42fc0c  ffffffff
+0b42fc10  0b42fd50
+0b42fc14  00000628
+0b42fc18  0000062c
+0b42fc1c  00000628
+0b42fc20  00000000
+0b42fc24  00000000
+0b42fc28  00000000
+0b42fc2c  00000000
+0b42fc30  00000000
+0b42fc34  00000000
+0b42fc38  00000000
+0b42fc3c  00000000
+0b42fc40  00000000
+0b42fc44  00000000
+0b42fc48  00000000
+0b42fc4c  00000000
+0b42fc50  00000000
+0b42fc54  00000000
+0b42fc58  007a0000
+0b42fc5c  00000000
+0b42fc60  00000000
+0b42fc64  0b42fd08
+0b42fc68  ee66428b
+0b42fc6c  75c8b160 combase!CROIDTable::WorkerThreadLoop
+0b42fc70  02a24290
+0b42fc74  02a24290
+0b42fc78  00000118
+0b42fc7c  0b42fca8
+0b42fc80  75cdfacb combase!wil::details::ReportUsageToService+0x35
+0b42fc84  00000000
+0b42fc88  00000000
+0b42fc8c  75c55af9 combase!CROIDTable::ClientBulkUpdateOIDWithPingServer+0x129
+0:010> .echo ===WHERE
+===WHERE
+0:010> !address 0b42fbd4
+
+
+Building memory map: 00010000
+Building memory map: 00121000
+Building memory map: 00250000
+Building memory map: 003cef80
+Building memory map: 00409f00
+Building memory map: 0040df00
+Building memory map: 00411f00
+Building memory map: 00415f00
+Building memory map: 00447f00
+Building memory map: 0044ef00
+Building memory map: 00452f00
+Building memory map: 00456f00
+Building memory map: 0045af00
+Building memory map: 00466f00
+Building memory map: 0046ef00
+Building memory map: 00612000
+Building memory map: 00615000
+Building memory map: 007a0000
+Building memory map: 007a1770
+Building memory map: 007a8ea8
+Building memory map: 007add58
+Building memory map: 007b05b0
+Building memory map: 007b1cf8
+Building memory map: 007b2928
+Building memory map: 007b5de0
+Building memory map: 007b68e0
+Building memory map: 007bde60
+Building memory map: 007be590
+Building memory map: 007c3830
+Building memory map: 007c4948
+Building memory map: 007cb8d0
+Building memory map: 007cbfd0
+Building memory map: 007cc410
+Building memory map: 007cd770
+Building memory map: 007cdec0
+Building memory map: 007ce780
+Building memory map: 007cf910
+Building memory map: 00891518
+Building memory map: 008920c8
+Building memory map: 0089ca68
+Building memory map: 0089cef0
+Building memory map: 0089d4c0
+Building memory map: 0089e540
+Building memory map: 0089ee00
+Building memory map: 008a0000
+Building memory map: 00989580
+Building memory map: 00990c88
+Building memory map: 009c099a
+Building memory map: 00b5f54c
+Building memory map: 00c9f4e8
+Building memory map: 00ddf9d8
+Building memory map: 00df0000
+Building memory map: 00eb0000
+Building memory map: 00eb04b8
+Building memory map: 00eb2598
+Building memory map: 00eb782c
+Building memory map: 00eb8940
+Building memory map: 00ebedd0
+Building memory map: 00f6b8f4
+Building memory map: 00f6ed40
+Building memory map: 00fffe00
+Building memory map: 0143f750
+Building memory map: 0295a800
+Building memory map: 02962440
+Building memory map: 02984cf0
+Building memory map: 0298c140
+Building memory map: 029af980
+Building memory map: 02a09f30
+Building memory map: 02a24100
+Building memory map: 02a3ffec
+Building memory map: 02a4bcc8
+Building memory map: 03ca0000
+Building memory map: 044f0064
+Building memory map: 0468f104
+Building memory map: 046aabe0
+Building memory map: 046b1084
+Building memory map: 0487ff1a
+Building memory map: 06797590
+Building memory map: 06797b00
+Building memory map: 0679fbe8
+Building memory map: 067a4e50
+Building memory map: 067ac4b0
+Building memory map: 067ad68c
+Building memory map: 067b1680
+Building memory map: 067b3a10
+Building memory map: 067f059c
+Building memory map: 067f2690
+Building memory map: 067f75c4
+Building memory map: 06885d24
+Building memory map: 068a7f04
+Building memory map: 06ab0000
+Building memory map: 06ac9d38
+Building memory map: 06adbc10
+Building memory map: 06adca34
+Building memory map: 06b6004c
+Building memory map: 06b65710
+Building memory map: 06b66d50
+Building memory map: 06b78564
+Building memory map: 06c97300
+Building memory map: 06c9f3c0
+Building memory map: 06d11c64
+Building memory map: 06d1f1c0
+Building memory map: 0818004c
+Building memory map: 086bb800
+Building memory map: 0af9f8dc
+Building memory map: 0b029280
+Building memory map: 0b12f92c
+Building memory map: 0b22f8b8
+Building memory map: 0b32f5a8
+Building memory map: 0b42fb18
+Building memory map: 0b56f7fc
+Building memory map: 0b6afacc
+Building memory map: 0b82fb6c
+Building memory map: 0bda4b70
+Building memory map: 0bf413cc
+Building memory map: 0c232c80
+Building memory map: 0c23469c
+Building memory map: 0c6ac000
+Building memory map: 0c6b349c
+Building memory map: 0d4bdfe2
+Building memory map: 0d5becee
+Building memory map: 0d5d1e6f
+Building memory map: 0dffff00
+Building memory map: 0eeb6660
+Building memory map: 0eeb8564
+Building memory map: 0f8ef6ac
+Building memory map: 0f9a9000
+Building memory map: 0fe38f7b
+Building memory map: 109cd000
+Building memory map: 10a0bf40
+Building memory map: 10a4bf40
+Building memory map: 10a7af40
+Building memory map: 10b3cf40
+Building memory map: 10b4df40
+Building memory map: 10b6ff40
+Building memory map: 10b7ff40
+Building memory map: 10b86f40
+Building memory map: 12fffb8c
+Building memory map: 1323f5b0
+Building memory map: 1333f4c8
+Building memory map: 1343f5c4
+Building memory map: 13b51000
+Building memory map: 18182f00
+Building memory map: 19006400
+Building memory map: 19828620
+Building memory map: 1982a628
+Building memory map: 1d39ff00
+Building memory map: 235e0a48
+Building memory map: 29f1d577
+Building memory map: 2e311f72
+Building memory map: 2e766444
+Building memory map: 2ea84000
+Building memory map: 30205210
+Building memory map: 397fff00
+Building memory map: 39ffff00
+Building memory map: 3a7fff00
+Building memory map: 3a8ea67f
+Building memory map: 3bd1b617
+Building memory map: 3c51b617
+Building memory map: 3e00fedf
+Building memory map: 3e033233
+Building memory map: 3e03fedf
+Building memory map: 3e40fed9
+Building memory map: 3e9ffee0
+Building memory map: 3eaf0000
+Building memory map: 3eb23dc0
+Building memory map: 3eb256b8
+Building memory map: 3eb2b5f8
+Building memory map: 3eb9989a
+Building memory map: 3ebffed9
+Building memory map: 3ec0fed9
+Building memory map: 3ed1fed9
+Building memory map: 3ed9fed9
+Building memory map: 3edd7ed5
+Building memory map: 3edfff00
+Building memory map: 3ef3fe92
+Building memory map: 3f1afeb9
+Building memory map: 4072bf00
+Building memory map: 407fff00
+Building memory map: 4082bf00
+Building memory map: 409085d0
+Building memory map: 414cff01
+Building memory map: 41b81730
+Building memory map: 41ffff00
+Building memory map: 421b3f00
+Building memory map: 426fff00
+Building memory map: 4277ff00
+Building memory map: 427bff00
+Building memory map: 427ff880
+Building memory map: 427fff00
+Building memory map: 42ffff00
+Building memory map: 437eff00
+Building memory map: 43947f00
+Building memory map: 4394ff00
+Building memory map: 43957f00
+Building memory map: 4395ff00
+Building memory map: 43967f00
+Building memory map: 4396ff00
+Building memory map: 43977f00
+Building memory map: 439f7f00
+Building memory map: 439ffe30
+Building memory map: 43b47f00
+Building memory map: 43b4ff00
+Building memory map: 43b57f00
+Building memory map: 43b5ff00
+Building memory map: 43b67f00
+Building memory map: 43b6ff00
+Building memory map: 43b77f00
+Building memory map: 43bf7f00
+Building memory map: 43bfff00
+Building memory map: 43d47f00
+Building memory map: 43d4ff00
+Building memory map: 43d57f00
+Building memory map: 43d5ff00
+Building memory map: 43d67f00
+Building memory map: 43d6ff00
+Building memory map: 43d77f00
+Building memory map: 43df7f00
+Building memory map: 43dfbf00
+Building memory map: 43dfff00
+Building memory map: 43eeff00
+Building memory map: 43ef7f00
+Building memory map: 43efff00
+Building memory map: 43f07f00
+Building memory map: 43f1ff00
+Building memory map: 43ff7f00
+Building memory map: 43ffff00
+Building memory map: 440fff00
+Building memory map: 443ffe30
+Building memory map: 447fff00
+Building memory map: 44b9bf00
+Building memory map: 44dffe98
+Building memory map: 44f5bf00
+Building memory map: 450fff00
+Building memory map: 4516ef00
+Building memory map: 451aef00
+Building memory map: 451ddf00
+Building memory map: 453fdf00
+Building memory map: 454fff00
+Building memory map: 456ffee6
+Building memory map: 4573fecc
+Building memory map: 457bfecc
+Building memory map: 49746453
+Building memory map: 4b44525f
+Building memory map: 4c2e4156
+Building memory map: 4d475b6e
+Building memory map: 506e6e44
+Building memory map: 52000700
+Building memory map: 55f80700
+Building memory map: 56080700
+Building memory map: 5a000700
+Building memory map: 68ea4000
+Building memory map: 69905000
+Building memory map: 69957000
+Building memory map: 6995a000
+Building memory map: 69a18000
+Building memory map: 69a1d000
+Building memory map: 69a8a000
+Building memory map: 69a92000
+Building memory map: 69b98000
+Building memory map: 69b9b000
+Building memory map: 69d01000
+Building memory map: 69d02000
+Building memory map: 69d07000
+Building memory map: 69d09000
+Building memory map: 69d9e000
+Building memory map: 69d9f000
+Building memory map: 69da3000
+Building memory map: 69da4000
+Building memory map: 69e2d000
+Building memory map: 69fe8000
+Building memory map: 6a00a000
+Building memory map: 6a0ad000
+Building memory map: 6a132000
+Building memory map: 6a198000
+Building memory map: 6a1d2000
+Building memory map: 6b47b000
+Building memory map: 6b583000
+Building memory map: 6b7d2000
+Building memory map: 6b7d9000
+Building memory map: 6b927000
+Building memory map: 6b958000
+Building memory map: 6e67c000
+Building memory map: 6e680000
+Building memory map: 6e69f000
+Building memory map: 6e6a1000
+Building memory map: 6e6f9000
+Building memory map: 6e6fb000
+Building memory map: 6e726000
+Building memory map: 6e729000
+Building memory map: 6e8a5000
+Building memory map: 6e8a9000
+Building memory map: 709eb000
+Building memory map: 709ed000
+Building memory map: 70db8000
+Building memory map: 70dba000
+Building memory map: 70dd9000
+Building memory map: 70e41000
+Building memory map: 70e8c000
+Building memory map: 70f53000
+Building memory map: 71188000
+Building memory map: 711fe000
+Building memory map: 71236000
+Building memory map: 71244000
+Building memory map: 7127b000
+Building memory map: 715f4000
+Building memory map: 715f8000
+Building memory map: 71700000
+Building memory map: 71705000
+Building memory map: 71843000
+Building memory map: 71849000
+Building memory map: 71a97000
+Building memory map: 71aa3000
+Building memory map: 71ac3c69
+Building memory map: 71ac4350
+Building memory map: 71b05000
+Building memory map: 71b09000
+Building memory map: 71cea000
+Building memory map: 71d94000
+Building memory map: 71d97000
+Building memory map: 71fdf000
+Building memory map: 71fe2000
+Building memory map: 7241b000
+Building memory map: 7241d000
+Building memory map: 7245a000
+Building memory map: 72475000
+Building memory map: 72477000
+Building memory map: 724e6000
+Building memory map: 724e9000
+Building memory map: 7251d000
+Building memory map: 72520000
+Building memory map: 7263a000
+Building memory map: 7263e000
+Building memory map: 73167000
+Building memory map: 73169000
+Building memory map: 73175000
+Building memory map: 73177000
+Building memory map: 74ed4000
+Building memory map: 74eed000
+Building memory map: 74ef2000
+Building memory map: 75038000
+Building memory map: 7503d000
+Building memory map: 751a0000
+Building memory map: 751a3000
+Building memory map: 75237000
+Building memory map: 7523d000
+Building memory map: 75344000
+Building memory map: 7534c000
+Building memory map: 75695000
+Building memory map: 756a5000
+Building memory map: 757b9000
+Building memory map: 757c0000
+Building memory map: 758e4000
+Building memory map: 758eb000
+Building memory map: 75b8e000
+Building memory map: 75df3000
+Building memory map: 75dfc000
+Building memory map: 75ed1000
+Building memory map: 75ed6000
+Building memory map: 75ff3000
+Building memory map: 75ffa000
+Building memory map: 76082000
+Building memory map: 7665b000
+Building memory map: 7666c000
+Building memory map: 7672b000
+Building memory map: 76730000
+Building memory map: 7678c000
+Building memory map: 76790000
+Building memory map: 76879000
+Building memory map: 76882000
+Building memory map: 7694b000
+Building memory map: 7694f000
+Building memory map: 76a1a000
+Building memory map: 76b33000
+Building memory map: 76b37000
+Building memory map: 76bc1000
+Building memory map: 76bce000
+Building memory map: 76caa000
+Building memory map: 76cbb000
+Building memory map: 76e70000
+Building memory map: 76e80000
+Building memory map: 76f88000
+Building memory map: 76f91000
+Building memory map: 76fcb000
+Building memory map: 76fcd000
+Building memory map: 7764b000
+Building memory map: 77659000
+Building memory map: 7775b000
+Building memory map: 7775e000
+Building memory map: 77775e5c
+Building memory map: 77787000
+Building memory map: 77800000
+Building memory map: 7780a000
+Building memory map: 77907000
+Building memory map: 77911000
+Building memory map: 77c85000
+Building memory map: 77d0917c
+Building memory map: 77d0949c
+Building memory map: 77d0970c
+Building memory map: 77d0afbc
+Building memory map: 77dc6000
+Building memory map: 77dcb000
+Building memory map: 7f3c1000
+Building memory map: 7ffe0000
+Building memory map: 7ffe3000
+                                     
+Mapping file section regions...
+Mapping module regions...
+Mapping PEB regions...
+Mapping TEB and stack regions...
+*** WARNING: Unable to verify checksum for d3d9.dll
+Mapping heap regions...
+Mapping page heap regions...
+Mapping other regions...
+Mapping stack trace database regions...
+Mapping activation context regions...
+
+Usage:                  <unknown>
+Base Address:           0b42fb18
+End Address:            0b430000
+Region Size:            000004e8 (   1.227 kB)
+State:                  <info not present at the target>
+Protect:                <info not present at the target>
+Type:                   <info not present at the target>
+Allocation Base:        <info not present at the target>
+Allocation Protect:     <info not present at the target>
+
+
+Content source: 3 (unknown), length: 42c
+0:010> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

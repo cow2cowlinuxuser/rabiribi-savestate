@@ -1,0 +1,201 @@
+==== phase 1: heap summary ====
+
+   AllowParallelInitializationOfLocalRepositories : true
+
+
+
+
+
+
+*** wait with pending attach
+
+Response                         Time (ms)     Location
+WARNING: Process 17792 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+..
+Loading unloaded module list
+...
+(4580.7c28): Wake debugger - code 80000007 (first chance)
+eax=00000001 ebx=00000000 ecx=00000000 edx=00000000 esi=00000000 edi=007f2120
+eip=77d09abc esp=0056ec34 ebp=0056ec88 iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000202
+ntdll!NtAlpcSendWaitReceivePort+0xc:
+77d09abc c22000          ret     20h
+0:000> cdb: Reading initial command '!heap -s; q'
+
+
+************************************************************************************************************************
+                                              NT HEAP STATS BELOW
+************************************************************************************************************************
+NtGlobalFlag enables following debugging aids for new heaps:
+    stack back traces
+LFH Key                   : 0xd2730b67
+Termination on corruption : DISABLED
+  Heap     Flags   Reserv  Commit  Virt   Free  List   UCR  Virt  Lock  Fast 
+                    (k)     (k)    (k)     (k) length      blocks cont. heap 
+-----------------------------------------------------------------------------
+007f0000 08000002    8388   4420   8176    710    72     4    2      0   LFH
+    External fragmentation  16 % (72 free blocks)
+00c10000 08001002     272     32     60      0     3     1    0      0   LFH
+06000000 08001002    1292    152   1080     77     8     2    0      0   LFH
+09b10000 08001002     272     40     60      7     3     1    0      0   LFH
+09c10000 08001002      60     20     60      7     2     1    0      0      
+09dc0000 08001002     272     32     60      3     3     1    0      0   LFH
+0fea0000 08001002    4360   2728   4148      7     6     3    0      0   LFH
+-----------------------------------------------------------------------------
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'
+
+parsed 7 heap(s); treating 007f0000 as the game's runtime heap (largest committed)
+
+==== phase 2: size classes on heap 007f0000 ====
+
+   AllowParallelInitializationOfLocalRepositories : true
+
+
+
+
+
+
+*** wait with pending attach
+
+Response                         Time (ms)     Location
+WARNING: Process 17792 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+..
+Loading unloaded module list
+...
+(4580.7c28): Wake debugger - code 80000007 (first chance)
+eax=00000001 ebx=00000000 ecx=00000000 edx=00000000 esi=00000000 edi=007f22e0
+eip=77d09abc esp=0056ec34 ebp=0056ec88 iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000202
+ntdll!NtAlpcSendWaitReceivePort+0xc:
+77d09abc c22000          ret     20h
+0:000> cdb: Reading initial command '!heap -stat -h 0x007f0000 -grp A 24; q'
+Walking the heap 007f0000 ....
+ 0: Heap 007f0000
+   Flags          08000002 - HEAP_GROWABLE 
+   Reserved memory in segments              8176 (k)
+   Commited memory in segments              4408 (k)
+   Virtual bytes (correction for large UCR) 4576 (k)
+   Free space                               710 (k) (72 blocks)
+   External fragmentation          16% (72 free blocks)
+   Virtual address fragmentation   3% (4 uncommited ranges)
+   Virtual blocks  2 - total 1784 KBytes
+   Lock contention 0
+   Segments        1
+
+   Low fragmentation heap   00790000
+       Metadata usage     12288 bytes
+       Statistics:
+           Segments created        653
+           Segments deleted        462
+           Segments reused           0
+       Block cache:
+		 2:          512 bytes (     6,     0)
+		 3:         1024 bytes (     6,     0)
+		 4:         2048 bytes (    41,     0)
+		 5:         4096 bytes (    61,     0)
+		 6:         8192 bytes (    33,     0)
+		 7:        16384 bytes (    28,     0)
+		 8:        32768 bytes (    14,     0)
+		 9:        65536 bytes (     2,     0)
+
+       Buckets info:
+  Size   Blocks  Seg  Empty  Aff    Distribution
+------------------------------------------------
+    32     779    11      0  0 (11-779,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    40    1318    20      0  1 (15-1234,1-12,2-36,2-36,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    48     967    18      0  1 (14-917,2-30,1-10,1-10,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    56    2693    22      0  0 (22-2693,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    64     409     7      0  0 (7-409,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    72    5461    22      0  0 (22-5461,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    80     175     4      0  0 (4-175,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    88     944    12      0  0 (12-944,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+    96     147     4      0  0 (4-147,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   104      97     3      0  0 (3-97,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   112     162     5      0  0 (5-162,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   120     115     4      0  0 (4-115,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   128      94     2      0  0 (2-94,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   136      29     1      0  0 (1-29,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   152     185     4      0  0 (4-185,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   160     125     3      0  0 (3-125,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   168      24     1      0  0 (1-24,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   176      23     1      0  0 (1-23,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   200     100     3      0  0 (3-100,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   208     126     4      0  0 (4-126,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   224      18     1      0  0 (1-18,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   232     122     4      0  0 (4-122,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   248      16     1      0  0 (1-16,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   296      13     1      0  0 (1-13,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   328      12     1      0  0 (1-12,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   360      11     1      1  0 (1-11,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   456       8     1      1  0 (1-8,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   616      39     2      0  0 (2-39,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+   904     135     8      0  0 (8-135,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  1000      56     4      0  0 (4-56,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  1096     101     4      0  0 (4-101,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  1480      55     3      0  0 (3-55,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  1544      10     1      0  0 (1-10,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  1608      50     3      0  0 (3-50,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  1800      45     3      0  0 (3-45,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  1928       8     1      1  0 (1-8,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+  2184      14     1      0  0 (1-14,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0,0-0)
+------------------------------------------------
+
+                    Default heap   Front heap       Unused bytes
+   Range (bytes)     Busy  Free    Busy   Free     Total  Average 
+------------------------------------------------------------------ 
+     0 -   1024      520     69  12214   2189     331172     26
+  1024 -   2048      115      0    211     58      13860     42
+  2048 -   3072       18      0      4     10       1002     45
+  3072 -   4096       11      0      0      0        272     24
+  4096 -   5120        9      1      0      0        211     23
+  5120 -   6144        1      0      0      0         24     24
+  7168 -   8192        1      0      0      0          1      1
+  8192 -   9216        3      0      0      0         76     25
+ 13312 -  14336        1      0      0      0         30     30
+ 14336 -  15360        2      0      0      0         52     26
+ 18432 -  19456        1      0      0      0         24     24
+ 20480 -  21504        1      0      0      0         29     29
+ 32768 -  33792        1      0      0      0         24     24
+ 40960 -  41984        1      0      0      0         25     25
+ 49152 -  50176        1      0      0      0         24     24
+176128 - 177152        1      0      0      0         28     28
+212992 - 214016        0      1      0      0          0      0
+262144 - 263168        3      0      0      0         72     24
+502784 - 503808        0      1      0      0          0      0
+503808 - 504832        1      0      0      0         24     24
+523264 - 524288        2      0      0      0          0      0
+------------------------------------------------------------------ 
+  Total              693     72  12429   2257     346950     26
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'
+
+top size class(es) to sample: 
+
+==== phase 3: sampling blocks ====
+sampled 0 busy block(s)
+no busy blocks parsed; see F:\rbo_fabre_proto\d3d9_sw\heap_owner_raw.txt

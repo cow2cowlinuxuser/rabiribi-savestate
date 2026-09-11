@@ -1,0 +1,14 @@
+waiting for rabiribi.exe...
+found pid 17792
+PLAY TO A NORMAL SPOT. Probing in 40s - the game will hitch briefly each attach.
+==== phase 1: heap summary ====
+
+parsed 7 heap(s); treating 007f0000 as the game's runtime heap (largest committed)
+
+==== phase 2: size classes on heap 007f0000 ====
+
+top size class(es) to sample: 
+
+==== phase 3: sampling blocks ====
+sampled 0 busy block(s)
+no busy blocks parsed; see F:\rbo_fabre_proto\d3d9_sw\heap_owner_raw.txt

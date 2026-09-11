@@ -1,0 +1,127 @@
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present first
+[d3d9_sw] tri0 xy=(80.00,80.00)(560.00,120.00)(240.00,400.00) col=ffffffff uv=0.00,0.00 vs=0 inst=1 rt=640x480
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present first rt=640x480 bb=640x480 same=1
+[d3d9_sw] tri0 xy=(80.00,80.00)(560.00,120.00)(240.00,400.00) col=ffffffff uv=0.00,0.00 vs=0 inst=1 rt=640x480
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present first rt=640x480 bb=640x480 same=1 off=0x0
+[d3d9_sw] dumped d3d9_sw_tex_16x16.tga fmt=00000015 pool=1
+[d3d9_sw] tri0 xy=(80.0,60.0)(560.0,90.0)(320.0,420.0) uv=(0.000,0.000)(1.000,0.000)(0.500,1.000) col=ffffffff vs=0 clip=0 freq=00000000 s1=0 rt=640x480 tex=16x16 fmt=00000015 blend=1/5,6,1 atest=0/8,0 z=0/1,4 cull=1 addr=1,1
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=1 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=88750aed tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=30 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=4e55c0ee tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] Present n=120 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=5886f2c2 tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] dumped d3d9_sw_tex_16x16.tga fmt=00000015 pool=1
+[d3d9_sw] tri0 xy=(80.0,60.0)(560.0,90.0)(320.0,420.0) uv=(0.000,0.000)(1.000,0.000)(0.500,1.000) col=ffffffff vs=0 clip=0 freq=00000000 s1=0 rt=640x480 tex=16x16 fmt=00000015 blend=1/5,6,1 atest=0/8,0 z=0/1,4 cull=1 addr=1,1
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=1 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=4da59ee6 tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=30 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=e7391bd7 tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] Present n=120 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=64ae0ebe tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] dumped d3d9_sw_tex_16x16.tga fmt=00000015 pool=1
+[d3d9_sw] tri0 xy=(80.0,60.0)(560.0,90.0)(320.0,420.0) uv=(0.000,0.000)(1.000,0.000)(0.500,1.000) col=ffffffff vs=0 clip=0 freq=00000000 s1=0 rt=640x480 tex=16x16 fmt=00000015 blend=1/5,6,1 atest=0/8,0 z=0/1,4 cull=1 addr=1,1
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=1 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=bcf3e627 tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=30 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=3ad8d90c tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] Present n=120 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=205b352b tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] dumped d3d9_sw_tex_16x16.tga fmt=00000015 pool=1
+[d3d9_sw] tri0 xy=(80.0,60.0)(560.0,90.0)(320.0,420.0) uv=(0.000,0.000)(1.000,0.000)(0.500,1.000) col=ffffffff vs=0 clip=0 freq=00000000 s1=0 rt=640x480 tex=16x16 fmt=00000015 blend=1/5,6,1 atest=0/8,0 z=0/1,4 cull=1 addr=1,1
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=1 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=3785c85f tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=30 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=6dee0b9f tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] Present n=120 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=7d541f9c tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] dumped d3d9_sw_tex_16x16.tga fmt=00000015 pool=1
+[d3d9_sw] tri0 xy=(914.0,313.0)(930.0,313.0)(914.0,329.0) uv=(0.000,0.000)(1.000,0.000)(0.000,1.000) col=ffccf6e9 vs=0 clip=0 freq=00000000 s1=0 rt=1280x720 tex=16x16 fmt=00000015 blend=1/5,6,1 atest=0/8,0 z=0/1,4 cull=1 addr=1,1
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=1 rt=1280x720 bb=1280x720 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=16384 clr=1 vsok=0 vsfail=0 hash=9b825e74 tri=914.0,313.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawIndexedPrimitive type=4 prims=16384 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=30 rt=1280x720 bb=1280x720 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=16384 clr=1 vsok=0 vsfail=0 hash=c944bd93 tri=1205.0,167.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] Present n=120 rt=1280x720 bb=1280x720 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=16384 clr=1 vsok=0 vsfail=0 hash=0e911c98 tri=1019.0,226.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] dumped d3d9_sw_tex_16x16.tga fmt=00000015 pool=1
+[d3d9_sw] tri0 xy=(80.0,60.0)(560.0,90.0)(320.0,420.0) uv=(0.000,0.000)(1.000,0.000)(0.500,1.000) col=ffffffff vs=0 clip=0 freq=00000000 s1=0 rt=640x480 tex=16x16 fmt=00000015 blend=1/5,6,1 atest=0/8,0 z=0/1,4 cull=1 addr=1,1
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=1 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=02dd6d33 tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=30 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=79aed75c tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] Present n=120 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=91da60e7 tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] dumped d3d9_sw_tex_16x16.tga fmt=00000015 pool=1
+[d3d9_sw] tri0 xy=(80.0,60.0)(560.0,90.0)(320.0,420.0) uv=(0.000,0.000)(1.000,0.000)(0.500,1.000) col=ffffffff vs=0 clip=0 freq=00000000 s1=0 rt=640x480 tex=16x16 fmt=00000015 blend=1/5,6,1 atest=0/8,0 z=0/1,4 cull=1 addr=1,1
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=1 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=fa3704da tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] DrawPrimitiveUP type=4 prims=1 hr=00000000 decl=0 vs=0 fvf=00000144 rt=0
+[d3d9_sw] Present n=30 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=63d4d6e3 tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000
+[d3d9_sw] Present n=120 rt=640x480 bb=640x480 off=0x0 used=0,0 0x0 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=c3b44eea tri=80.0,60.0 uv=0.000,0.000 c0=0.000,0.000,0.000,0.000

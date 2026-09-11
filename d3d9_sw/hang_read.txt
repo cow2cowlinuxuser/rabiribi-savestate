@@ -1,0 +1,1926 @@
+Opened log file '.\hang_read.txt'
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.015 seconds
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [F:\rbo_fabre_proto\d3d9_sw\hang_live.dmp]
+User Mini Dump File with Full Memory : Only application data is available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw
+Executable search path is: 
+Windows 10 Version 26200 MP (16 procs) Free x64
+Product: WinNt, suite: SingleUserTS
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Debug session time: Sun Aug 30 23:02:29.000 2026 (UTC - 4:00)
+System Uptime: 5 days 12:46:18.651
+Process Uptime: 0 days 0:05:28.000
+.NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script successfully loaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'
+...............................................................
+....................................
+Loading unloaded module list
+.
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(c10.3ba4): Wake debugger - code 80000007 (first/second chance not available)
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+For analysis of this file, run !analyze -v
+UnityPlayer!UnityMain+0x3be27:
+00007ffd`29936ae7 493bd1          cmp     rdx,r9
+0:000> $$ Read the captured hang with OUR symbols on the path.
+0:000> $$
+0:000> $$ The first look resolved every frame in our wrapper to the nearest export,
+0:000> $$ D3D11CreateDeviceAndSwapChain, which says only "somewhere in d3d11.dll" - and
+0:000> $$ seventeen threads there is also what an idle sixteen-thread raster pool looks
+0:000> $$ like. d3d11.pdb sits in the build directory, so put it on the path and let the
+0:000> $$ frames name themselves before drawing any conclusion.
+0:000> 
+0:000> .sympath F:\rbo_fabre_proto\d3d9_sw;F:\rbo_fabre_proto\d3d9_sw\symbols;srv*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://msdl.microsoft.com/download/symbols
+Symbol search path is: F:\rbo_fabre_proto\d3d9_sw;F:\rbo_fabre_proto\d3d9_sw\symbols;srv*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://msdl.microsoft.com/download/symbols
+Expanded Symbol search path is: f:\rbo_fabre_proto\d3d9_sw;f:\rbo_fabre_proto\d3d9_sw\symbols;srv*f:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             F:\rbo_fabre_proto\d3d9_sw
+OK                                             F:\rbo_fabre_proto\d3d9_sw\symbols
+Deferred                                       srv*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://msdl.microsoft.com/download/symbols
+0:000> .reload /f
+.*** WARNING: Unable to verify checksum for OSFE.exe
+..........
+
+Press ctrl-c (cdb, kd, ntsd) or ctrl-break (windbg) to abort symbol loads that take too long.
+Run !sym noisy before .reload to track down problems loading symbols.
+
+......................................*** WARNING: Unable to verify checksum for d3d11.dll
+.*** WARNING: Unable to verify checksum for dxgi.dll
+..............
+....................................
+Loading unloaded module list
+.
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+OSFE                   The system cannot find the file specified
+gameoverlayrenderer64  The system cannot find the file specified
+mono-2.0-bdwgc         The system cannot find the file specified
+d3d11                  The system cannot find the file specified
+MpOAV                  The system cannot find the file specified
+mdnsNSP                The system cannot find the file specified
+steam_api64            The system cannot find the file specified
+steamclient64          The system cannot find the file specified
+vstdlib_s64            The system cannot find the file specified
+tier0_s64              The system cannot find the file specified
+discord_game_sdk       The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:000> 
+.*** WARNING: Unable to verify checksum for OSFE.exe
+................................................*** WARNING: Unable to verify checksum for d3d11.dll
+.*** WARNING: Unable to verify checksum for dxgi.dll
+..............
+....................................
+Loading unloaded module list
+.
+
+************* Symbol Loading Error Summary **************
+Module name            Error
+OSFE                   The system cannot find the file specified
+gameoverlayrenderer64  The system cannot find the file specified
+mono-2.0-bdwgc         The system cannot find the file specified
+d3d11                  The system cannot find the file specified
+MpOAV                  The system cannot find the file specified
+mdnsNSP                The system cannot find the file specified
+steam_api64            The system cannot find the file specified
+steamclient64          The system cannot find the file specified
+vstdlib_s64            The system cannot find the file specified
+tier0_s64              The system cannot find the file specified
+discord_game_sdk       The system cannot find the file specified
+
+You can troubleshoot most symbol related issues by turning on symbol loading diagnostics (!sym noisy) and repeating the command that caused symbols to be loaded.
+You should also verify that your symbol search path (.sympath) is correct.
+0:000> .echo ===WHO IS WHERE===
+===WHO IS WHERE===
+0:000> ~*k
+
+.  0  Id: c10.3ba4 Suspend: 0 Teb: 000000f2`af119000 Unfrozen
+Child-SP          RetAddr               Call Site
+(Inline Function) --------`--------     UnityPlayer!DynamicHeapAllocator<LowLevelAllocator>::PoolElement::Contains+0x4
+000000f2`af2fea88 00007ffd`2993a31a     UnityPlayer!DynamicHeapAllocator<LowLevelAllocator>::FindPoolFromPtr+0x17
+000000f2`af2fea90 00007ffd`2993a11e     UnityPlayer!DynamicHeapAllocator<LowLevelAllocator>::TryDeallocate+0xaa
+000000f2`af2fead0 00007ffd`2993689e     UnityPlayer!DualThreadAllocator<DynamicHeapAllocator<LowLevelAllocator> >::TryDeallocate+0xfe
+000000f2`af2feb40 00007ffd`2952868d     UnityPlayer!MemoryManager::Deallocate+0x8e
+000000f2`af2feb70 00007ffd`294ff656     UnityPlayer!mecanim::animation::DestroyClipOutput+0x2d
+000000f2`af2feba0 00007ffd`294e0c8b     UnityPlayer!AnimationClipPlayable::DeallocateBindings+0x36
+(Inline Function) --------`--------     UnityPlayer!AnimationPlayable::UpdateInternalState+0x9
+(Inline Function) --------`--------     UnityPlayer!AnimationPlayable::UpdateInternalState+0x21
+000000f2`af2febd0 00007ffd`294e0cce     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x2b
+000000f2`af2fec00 00007ffd`294e0cce     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x6e
+000000f2`af2fec30 00007ffd`294e0cce     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x6e
+000000f2`af2fec60 00007ffd`294e2f9d     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x6e
+(Inline Function) --------`--------     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive+0x54
+000000f2`af2fec90 00007ffd`294e348e     UnityPlayer!`anonymous namespace'::ProcessPlayableGraph+0x17d
+000000f2`af2fed30 00007ffd`294bea95     UnityPlayer!Animator::ProcessRootMotionStep+0x25e
+000000f2`af2fef50 00007ffd`294bdf48     UnityPlayer!Animator::ProcessRootMotionJob+0x65
+000000f2`af2fefa0 00007ffd`29ad2b39     UnityPlayer!UnityEngine::Animation::BlockRangeJob<Animator::AnimatorJob>::Job+0x38
+(Inline Function) --------`--------     UnityPlayer!JobQueue::ExecuteJobFunc+0x18
+000000f2`af2fefd0 00007ffd`29ad3dc8     UnityPlayer!JobQueue::Exec+0x89
+000000f2`af2ff020 00007ffd`29acefe3     UnityPlayer!JobQueue::WaitForJobGroupID+0x158
+000000f2`af2ff0b0 00007ffd`294c4823     UnityPlayer!CompleteFenceInternal+0x23
+(Inline Function) --------`--------     UnityPlayer!SyncFence+0x11
+000000f2`af2ff0f0 00007ffd`29bea0d3     UnityPlayer!Animator::UpdateAvatars+0x413
+(Inline Function) --------`--------     UnityPlayer!DirectorManager::ExecuteProcessCallbacks+0x5a
+000000f2`af2ff440 00007ffd`29b18b67     UnityPlayer!DirectorManager::ExecuteStage+0x83
+000000f2`af2ff470 00007ffd`29b18c09     UnityPlayer!ExecutePlayerLoop+0x57
+000000f2`af2ff620 00007ffd`29b1abbf     UnityPlayer!ExecutePlayerLoop+0xf9
+000000f2`af2ff7d0 00007ffd`298f3bd5     UnityPlayer!PlayerLoop+0x7f
+000000f2`af2ff850 00007ffd`298f220a     UnityPlayer!PerformMainLoop+0x1c5
+000000f2`af2ff880 00007ffd`298f6a90     UnityPlayer!MainMessageLoop+0xda
+000000f2`af2ff8f0 00007ffd`298faccb     UnityPlayer!UnityMainImpl+0x1010
+000000f2`af2ffc10 00007ff6`614711fa     UnityPlayer!UnityMain+0xb
+000000f2`af2ffc40 00007ffd`f72ee8d7     OSFE+0x11fa
+000000f2`af2ffc80 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af2ffcb0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   1  Id: c10.1614 Suspend: 0 Teb: 000000f2`af121000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af6ffc68 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af6ffc70 00007ffd`325d5ae8     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`af6ffd10 00007ffd`326c2a0d     mono_2_0_bdwgc!mono_conc_hashtable_remove+0x1a68
+000000f2`af6ffd40 00007ffd`326c17a5     mono_2_0_bdwgc!mono_gc_reference_queue_new+0x4fd
+000000f2`af6ffd80 00007ffd`32684cb8     mono_2_0_bdwgc!mono_callspec_parse+0x795
+000000f2`af6ffe40 00007ffd`32684a46     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x7a8
+000000f2`af6fff10 00007ffd`f72ee8d7     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x536
+000000f2`af6fff40 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af6fff70 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   2  Id: c10.1970 Suspend: 0 Teb: 000000f2`af123000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af7ff728 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af7ff730 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`af7ff7d0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`af7ff800 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`af7ff830 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`af7ff940 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af7ff970 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   3  Id: c10.30c4 Suspend: 0 Teb: 000000f2`af125000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af8ff5f8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af8ff600 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`af8ff6a0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`af8ff6d0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`af8ff700 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`af8ff810 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af8ff840 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   4  Id: c10.3f1c Suspend: 0 Teb: 000000f2`af127000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af9ff6a8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af9ff6b0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`af9ff750 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`af9ff780 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`af9ff7b0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`af9ff8c0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af9ff8f0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   5  Id: c10.669c Suspend: 0 Teb: 000000f2`af129000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afaffca8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afaffcb0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afaffd50 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afaffd80 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afaffdb0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afaffec0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afaffef0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   6  Id: c10.377c Suspend: 0 Teb: 000000f2`af12b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afbffc58 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afbffc60 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afbffd00 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afbffd30 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afbffd60 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afbffe70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afbffea0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   7  Id: c10.32b0 Suspend: 0 Teb: 000000f2`af12d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afcffa88 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afcffa90 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afcffb30 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afcffb60 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afcffb90 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afcffca0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afcffcd0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   8  Id: c10.3c04 Suspend: 0 Teb: 000000f2`af12f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afdffa58 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afdffa60 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afdffb00 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afdffb30 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afdffb60 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afdffc70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afdffca0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   9  Id: c10.2a30 Suspend: 0 Teb: 000000f2`af131000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afeffad8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afeffae0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afeffb80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afeffbb0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afeffbe0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afeffcf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afeffd20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  10  Id: c10.390c Suspend: 0 Teb: 000000f2`af133000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`affff898 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`affff8a0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`affff940 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`affff970 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`affff9a0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`affffab0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`affffae0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  11  Id: c10.644c Suspend: 0 Teb: 000000f2`af135000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b00ff9d8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b00ff9e0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b00ffa80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b00ffab0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b00ffae0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b00ffbf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b00ffc20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  12  Id: c10.247c Suspend: 0 Teb: 000000f2`af137000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b01ff668 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b01ff670 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b01ff710 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b01ff740 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b01ff770 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b01ff880 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b01ff8b0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  13  Id: c10.6494 Suspend: 0 Teb: 000000f2`af139000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b02ff9a8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b02ff9b0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b02ffa50 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b02ffa80 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b02ffab0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b02ffbc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b02ffbf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  14  Id: c10.6778 Suspend: 0 Teb: 000000f2`af13b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b03ffad8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b03ffae0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b03ffb80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b03ffbb0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b03ffbe0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b03ffcf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b03ffd20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  15  Id: c10.2c68 Suspend: 0 Teb: 000000f2`af13d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b04ffaa8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b04ffab0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b04ffb50 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b04ffb80 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b04ffbb0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b04ffcc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b04ffcf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  16  Id: c10.4294 Suspend: 0 Teb: 000000f2`af13f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b05ffa08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b05ffa10 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b05ffab0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b05ffae0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b05ffb10 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b05ffc20 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b05ffc50 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  17  Id: c10.2970 Suspend: 0 Teb: 000000f2`af141000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b06ff718 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b06ff720 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b06ff7c0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b06ff7f0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b06ff820 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b06ff930 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b06ff960 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  18  Id: c10.5d8c Suspend: 0 Teb: 000000f2`af143000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b07ff6e8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b07ff6f0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b07ff790 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b07ff7c0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b07ff7f0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b07ff900 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b07ff930 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  19  Id: c10.4f80 Suspend: 0 Teb: 000000f2`af145000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b08ffc48 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b08ffc50 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b08ffcf0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b08ffd20 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b08ffd50 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b08ffe60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b08ffe90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  20  Id: c10.4ca4 Suspend: 0 Teb: 000000f2`af147000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b09ff698 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b09ff6a0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b09ff740 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b09ff770 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b09ff7a0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b09ff8b0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b09ff8e0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  21  Id: c10.424c Suspend: 0 Teb: 000000f2`af149000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0aff858 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0aff860 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0aff900 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0aff930 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0aff960 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0affa70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0affaa0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  22  Id: c10.6128 Suspend: 0 Teb: 000000f2`af14b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0bffaf8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0bffb00 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0bffba0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0bffbd0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0bffc00 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0bffd10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0bffd40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  23  Id: c10.6594 Suspend: 0 Teb: 000000f2`af14d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0cffd28 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0cffd30 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0cffdd0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0cffe00 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0cffe30 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0cfff40 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0cfff70 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  24  Id: c10.1f30 Suspend: 0 Teb: 000000f2`af14f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0dff928 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0dff930 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0dff9d0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0dffa00 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0dffa30 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0dffb40 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0dffb70 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  25  Id: c10.63b8 Suspend: 0 Teb: 000000f2`af151000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0eff618 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0eff620 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0eff6c0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0eff6f0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0eff720 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0eff830 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0eff860 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  26  Id: c10.2408 Suspend: 0 Teb: 000000f2`af153000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0fff888 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0fff890 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0fff930 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0fff960 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0fff990 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0fffaa0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0fffad0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  27  Id: c10.4fa8 Suspend: 0 Teb: 000000f2`af155000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b10ffd08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b10ffd10 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b10ffdb0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b10ffde0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b10ffe10 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b10fff20 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b10fff50 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  28  Id: c10.1a8 Suspend: 0 Teb: 000000f2`af157000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b11ff628 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b11ff630 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b11ff6d0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b11ff700 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b11ff730 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b11ff840 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b11ff870 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  29  Id: c10.17c4 Suspend: 0 Teb: 000000f2`af159000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b12ff618 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b12ff620 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b12ff6c0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b12ff6f0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b12ff720 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b12ff830 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b12ff860 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  30  Id: c10.61fc Suspend: 0 Teb: 000000f2`af15b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b13ff7a8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b13ff7b0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b13ff850 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b13ff880 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b13ff8b0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b13ff9c0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b13ff9f0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  31  Id: c10.3af0 Suspend: 0 Teb: 000000f2`af15d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b14ff9d8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b14ff9e0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b14ffa80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b14ffab0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b14ffae0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b14ffbf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b14ffc20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  32  Id: c10.4f84 Suspend: 0 Teb: 000000f2`af15f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b15ff888 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b15ff890 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b15ff930 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b15ff960 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b15ff990 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b15ffaa0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b15ffad0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  33  Id: c10.9e8 Suspend: 0 Teb: 000000f2`af161000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b16ffb38 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b16ffb40 00007ffd`29b787e5     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x14
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x14
+000000f2`b16ffbe0 00007ffd`29b17d9c     UnityPlayer!ThreadedStreamBuffer::HandleOutOfBufferToReadFrom+0x165
+(Inline Function) --------`--------     UnityPlayer!ThreadedStreamBuffer::GetReadDataPointer+0x2c
+(Inline Function) --------`--------     UnityPlayer!ThreadedStreamBuffer::ReadValueType+0x2c
+000000f2`b16ffc30 00007ffd`29b77ae1     UnityPlayer!BatchDeleteStep2Threaded+0x4c
+000000f2`b16ffc80 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b16ffd90 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b16ffdc0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  34  Id: c10.32b4 Suspend: 0 Teb: 000000f2`af163000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b17ff998 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b17ff9a0 00007ffd`299e8388     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x18
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x18
+(Inline Function) --------`--------     UnityPlayer!AsyncReadManagerThreaded::ThreadEntry+0x90
+000000f2`b17ffa40 00007ffd`29b77ae1     UnityPlayer!AsyncReadManagerThreaded::StaticThreadEntry+0x98
+000000f2`b17ffab0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b17ffbc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b17ffbf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  35  Id: c10.1274 Suspend: 0 Teb: 000000f2`af165000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b18ff808 00007ffd`f4291a93     ntdll!NtWaitForMultipleObjects+0x14
+000000f2`b18ff810 00007ffd`f582ffce     KERNELBASE!WaitForMultipleObjectsEx+0x123
+(Inline Function) --------`--------     combase!WaitCoalesced+0x79
+000000f2`b18ffb00 00007ffd`f5825eaf     combase!CROIDTable::WorkerThreadLoop+0xae
+000000f2`b18ffd70 00007ffd`f5825dbf     combase!CRpcThread::WorkerLoop+0x5b
+000000f2`b18ffde0 00007ffd`f72ee8d7     combase!CRpcThreadCache::RpcWorkerThreadEntry+0x4f
+000000f2`b18ffe10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b18ffe40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  36  Id: c10.6680 Suspend: 0 Teb: 000000f2`af16b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1bfe448 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1bfe450 00007ffd`29b787e5     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x14
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x14
+000000f2`b1bfe4f0 00007ffd`298b8a31     UnityPlayer!ThreadedStreamBuffer::HandleOutOfBufferToReadFrom+0x165
+000000f2`b1bfe540 00007ffd`298c1a8b     UnityPlayer!GfxDeviceWorker::RunCommand+0x71
+(Inline Function) --------`--------     UnityPlayer!ProcessGfxCommands+0x21
+000000f2`b1bff7f0 00007ffd`298c1b67     UnityPlayer!GfxDeviceWorker::RunExt+0x3b
+(Inline Function) --------`--------     UnityPlayer!GfxDeviceWorker::Run+0x6e
+000000f2`b1bff820 00007ffd`29b77ae1     UnityPlayer!GfxDeviceWorker::RunGfxDeviceWorker+0x77
+000000f2`b1bff850 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b1bff960 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1bff990 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  37  Id: c10.66d8 Suspend: 0 Teb: 000000f2`af16d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1cffd68 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1cffd70 00007ffd`2a3b450a     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b1cffe10 00007ffd`2a3b445e     UnityPlayer!FMOD::OutputWASAPI::feederUpdate+0x9a
+000000f2`b1cffe70 00007ffd`2a341511     UnityPlayer!FMOD::OutputWASAPI::feederThreadCallback+0xe
+000000f2`b1cffea0 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x61
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b1cffed0 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b1cfff00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1cfff30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  38  Id: c10.2d24 Suspend: 0 Teb: 000000f2`af16f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1dffb58 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1dffb60 00007ffd`2a396a85     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b1dffc00 00007ffd`2a340a9a     UnityPlayer!EnterMeteredSection+0x55
+000000f2`b1dffc30 00007ffd`2a3414f1     UnityPlayer!FMOD_OS_Semaphore_Wait+0x1a
+000000f2`b1dffc60 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x41
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b1dffc90 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b1dffcc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1dffcf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  39  Id: c10.3208 Suspend: 0 Teb: 000000f2`af171000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1effba8 00007ffd`f7a51014     ntdll!NtDelayExecution+0x14
+000000f2`b1effbb0 00007ffd`f4296f01     ntdll!RtlDelayExecution+0x34
+000000f2`b1effbe0 00007ffd`2a340c4a     KERNELBASE!SleepEx+0x91
+000000f2`b1effc70 00007ffd`2a34152a     UnityPlayer!FMOD_OS_Time_Sleep+0xa
+000000f2`b1effca0 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x7a
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b1effcd0 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b1effd00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1effd30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  40  Id: c10.33c8 Suspend: 0 Teb: 000000f2`af193000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2fff758 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2fff760 00007ffd`29b2fc25     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+000000f2`b2fff800 00007ffd`29b2fdc9     UnityPlayer!PreloadManager::Run+0x55
+000000f2`b2fff8a0 00007ffd`29b77ae1     UnityPlayer!PreloadManager::Run+0x9
+000000f2`b2fff8d0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b2fff9e0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2fffa10 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  41  Id: c10.3fd0 Suspend: 0 Teb: 000000f2`af195000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b30ff608 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b30ff610 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b30ff6b0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b30ff6e0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b30ff710 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b30ff820 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b30ff850 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  42  Id: c10.1bb4 Suspend: 0 Teb: 000000f2`af19b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b32ffe28 00007ffd`f350767f     ntdll!NtRemoveIoCompletion+0x14
+000000f2`b32ffe30 00007ffd`f72ee8d7     mswsock!SockAsyncThread+0xaf
+000000f2`b32ffe90 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b32ffec0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  43  Id: c10.57d8 Suspend: 0 Teb: 000000f2`af19d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b31ff9f8 00007ffd`f79f5dfe     ntdll!NtWaitForWorkViaWorkerFactory+0x14
+000000f2`b31ffa00 00007ffd`f72ee8d7     ntdll!TppWorkerThread+0x37e
+000000f2`b31ffd60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b31ffd90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  44  Id: c10.5068 Suspend: 0 Teb: 000000f2`af1a5000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b33ff1d8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b33ff1e0 00007ffd`325d5ae8     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b33ff280 00007ffd`326862d3     mono_2_0_bdwgc!mono_conc_hashtable_remove+0x1a68
+000000f2`b33ff2b0 00000253`4085a6fd     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x1dc3
+000000f2`b33ff320 00000253`4085a53b     0x00000253`4085a6fd
+000000f2`b33ff450 00000253`4085a3eb     0x00000253`4085a53b
+000000f2`b33ff4e0 00000253`4085a36b     0x00000253`4085a3eb
+000000f2`b33ff540 00000253`4085be33     0x00000253`4085a36b
+000000f2`b33ff590 00000253`4085bda3     0x00000253`4085be33
+000000f2`b33ff5f0 00000253`4085adae     0x00000253`4085bda3
+000000f2`b33ff630 00000253`3d668cd6     0x00000253`4085adae
+000000f2`b33ff850 00000253`3d66872e     0x00000253`3d668cd6
+000000f2`b33ff8b0 00000253`3d66811b     0x00000253`3d66872e
+000000f2`b33ff960 00000253`3d66803b     0x00000253`3d66811b
+000000f2`b33ff9b0 00000253`3d667f53     0x00000253`3d66803b
+000000f2`b33ffa00 00000253`390872d4     0x00000253`3d667f53
+000000f2`b33ffa50 00007ffd`326db7b0     0x00000253`390872d4
+000000f2`b33ffae0 00007ffd`32661892     mono_2_0_bdwgc!mono_get_runtime_build_info+0x11f0
+000000f2`b33ffcc0 00007ffd`3266aa62     mono_2_0_bdwgc!mono_perfcounters_init+0x2532
+000000f2`b33ffd10 00007ffd`32684cff     mono_2_0_bdwgc!mono_runtime_invoke_array+0x122
+000000f2`b33ffd50 00007ffd`32684a46     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x7ef
+000000f2`b33ffe20 00007ffd`f72ee8d7     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x536
+000000f2`b33ffe50 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b33ffe80 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  45  Id: c10.5c08 Suspend: 0 Teb: 000000f2`af1a9000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b34ff3d8 00007ffd`f4291a93     ntdll!NtWaitForMultipleObjects+0x14
+000000f2`b34ff3e0 00007ffd`f167e5d8     KERNELBASE!WaitForMultipleObjectsEx+0x123
+000000f2`b34ff6d0 00007ffd`f167e2b3     CoreMessaging!Microsoft::CoreUI::Dispatch::WaitController::Callback_WaitAny+0xc8
+000000f2`b34ff7c0 00007ffd`f167df0e     CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_DoWait+0x123
+000000f2`b34ff890 00007ffd`f16715dc     CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_Wait+0x5e
+000000f2`b34ff950 00007ffd`f1670b67     CoreMessaging!Microsoft::CoreUI::Dispatch::WaitCollection::Callback_DoGeneralWait+0x1ec
+000000f2`b34ffa20 00007ffd`f166f194     CoreMessaging!Microsoft::CoreUI::Dispatch::WaitController::Callback_OnDispatch+0xf7
+000000f2`b34ffb10 00007ffd`f166ed2d     CoreMessaging!Microsoft::CoreUI::Dispatch::Dispatcher::Callback_DispatchLoop+0x334
+000000f2`b34ffc10 00007ffd`f1672058     CoreMessaging!Microsoft::CoreUI::Dispatch::EventLoop::Callback_RunCoreLoop+0x11d
+000000f2`b34ffc80 00007ffd`f16ed6ae     CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_Run+0xd8
+000000f2`b34ffd60 00007ffd`f16e69af     CoreMessaging!Microsoft::CoreUI::Dispatch::EventLoop::Callback_Run+0x156
+000000f2`b34ffdf0 00007ffd`f16c4a4b     CoreMessaging!Microsoft::CoreUI::Messaging::MessageSession::Microsoft_CoreUI_IExportMessageSession_Run$+0x33
+000000f2`b34ffe20 00007ffd`e1ffa4dd     CoreMessaging!Microsoft::CoreUI::IExportMessageSession::ExportAdapter$::Run+0x5b
+000000f2`b34ffe60 00007ffd`e1ff0eb9     inputhost!MessagingThread::ThreadProc+0xb5
+000000f2`b34ffeb0 00007ffd`f72ee8d7     inputhost!<lambda_376318154f061e76a4fa5387c7eed0ca>::<lambda_invoker_cdecl>+0x9
+000000f2`b34ffee0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b34fff10 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  46  Id: c10.4134 Suspend: 0 Teb: 000000f2`af1ab000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b35fecf8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b35fed00 00007ffd`325d5ae8     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b35feda0 00007ffd`326862d3     mono_2_0_bdwgc!mono_conc_hashtable_remove+0x1a68
+000000f2`b35fedd0 00000253`4085a6fd     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x1dc3
+000000f2`b35fee40 00000253`4085a53b     0x00000253`4085a6fd
+000000f2`b35fef70 00000253`4085a3eb     0x00000253`4085a53b
+000000f2`b35ff000 00000253`4085a36b     0x00000253`4085a3eb
+000000f2`b35ff060 00000253`4085a29b     0x00000253`4085a36b
+000000f2`b35ff0b0 00000253`4085a245     0x00000253`4085a29b
+000000f2`b35ff100 00000253`41273717     0x00000253`4085a245
+000000f2`b35ff140 00000253`41273623     0x00000253`41273717
+000000f2`b35ff250 00000253`3d668cd6     0x00000253`41273623
+000000f2`b35ff290 00000253`3d66872e     0x00000253`3d668cd6
+000000f2`b35ff2f0 00000253`3d66811b     0x00000253`3d66872e
+000000f2`b35ff3a0 00000253`3d66803b     0x00000253`3d66811b
+000000f2`b35ff3f0 00000253`3d667f53     0x00000253`3d66803b
+000000f2`b35ff440 00000253`390872d4     0x00000253`3d667f53
+000000f2`b35ff490 00007ffd`326db7b0     0x00000253`390872d4
+000000f2`b35ff520 00007ffd`32661892     mono_2_0_bdwgc!mono_get_runtime_build_info+0x11f0
+000000f2`b35ff700 00007ffd`3266aa62     mono_2_0_bdwgc!mono_perfcounters_init+0x2532
+000000f2`b35ff750 00007ffd`32684cff     mono_2_0_bdwgc!mono_runtime_invoke_array+0x122
+000000f2`b35ff790 00007ffd`32684a46     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x7ef
+000000f2`b35ff860 00007ffd`f72ee8d7     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x536
+000000f2`b35ff890 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b35ff8c0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  47  Id: c10.3ea8 Suspend: 0 Teb: 000000f2`af1ad000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b36ffb78 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b36ffb80 00007ffd`4585919f     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b36ffc20 00007ffd`4585a213     steamclient64!Breakpad_SteamWriteMiniDumpUsingExceptionInfoWithBuildId+0x14601f
+000000f2`b36ffca0 00007ffd`45853e1b     steamclient64!Breakpad_SteamWriteMiniDumpUsingExceptionInfoWithBuildId+0x147093
+000000f2`b36ffd10 00007ffd`45d38cd3     steamclient64!Breakpad_SteamWriteMiniDumpUsingExceptionInfoWithBuildId+0x140c9b
+000000f2`b36ffd40 00007ffd`f72ee8d7     steamclient64!CreateInterface+0x2cbe33
+000000f2`b36ffd70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b36ffda0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  48  Id: c10.39a0 Suspend: 0 Teb: 000000f2`af1b3000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b37ff628 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b37ff630 00007ffd`2a396a85     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b37ff6d0 00007ffd`2a340a9a     UnityPlayer!EnterMeteredSection+0x55
+000000f2`b37ff700 00007ffd`2a3414f1     UnityPlayer!FMOD_OS_Semaphore_Wait+0x1a
+000000f2`b37ff730 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x41
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b37ff760 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b37ff790 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b37ff7c0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  49  Id: c10.2fdc Suspend: 0 Teb: 000000f2`af1bd000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b38ffbb8 00007ffd`f7a51014     ntdll!NtDelayExecution+0x14
+000000f2`b38ffbc0 00007ffd`f4296f01     ntdll!RtlDelayExecution+0x34
+000000f2`b38ffbf0 00007ffd`2a340c4a     KERNELBASE!SleepEx+0x91
+000000f2`b38ffc80 00007ffd`2a34152a     UnityPlayer!FMOD_OS_Time_Sleep+0xa
+000000f2`b38ffcb0 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x7a
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b38ffce0 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b38ffd10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b38ffd40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  50  Id: c10.2890 Suspend: 0 Teb: 000000f2`af1c1000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b39fe398 00007ffd`f7a51014     ntdll!NtDelayExecution+0x14
+000000f2`b39fe3a0 00007ffd`f4296f01     ntdll!RtlDelayExecution+0x34
+000000f2`b39fe3d0 00007ffd`8d4974d7     KERNELBASE!SleepEx+0x91
+000000f2`b39fe460 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x14737
+000000f2`b39ff7b0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b39ff7e0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  51  Id: c10.d38 Suspend: 0 Teb: 000000f2`af006000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1fffd98 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1fffda0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b1fffe40 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b1fffe90 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1fffec0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  52  Id: c10.4f08 Suspend: 0 Teb: 000000f2`af008000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b20ff958 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b20ff960 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b20ffa00 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b20ffa50 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b20ffa80 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  53  Id: c10.3444 Suspend: 0 Teb: 000000f2`af00a000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b21ff808 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b21ff810 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b21ff8b0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b21ff900 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b21ff930 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  54  Id: c10.4fe4 Suspend: 0 Teb: 000000f2`af00c000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b22ff6b8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b22ff6c0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b22ff760 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b22ff7b0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b22ff7e0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  55  Id: c10.45fc Suspend: 0 Teb: 000000f2`af00e000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b23ffd68 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b23ffd70 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b23ffe10 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b23ffe60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b23ffe90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  56  Id: c10.6388 Suspend: 0 Teb: 000000f2`af010000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b24ff808 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b24ff810 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b24ff8b0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b24ff900 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b24ff930 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  57  Id: c10.798 Suspend: 0 Teb: 000000f2`af012000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b25ffb38 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b25ffb40 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b25ffbe0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b25ffc30 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b25ffc60 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  58  Id: c10.2e68 Suspend: 0 Teb: 000000f2`af014000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b26ffdd8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b26ffde0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b26ffe80 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b26ffed0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b26fff00 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  59  Id: c10.5d04 Suspend: 0 Teb: 000000f2`af016000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b27ffcb8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b27ffcc0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b27ffd60 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b27ffdb0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b27ffde0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  60  Id: c10.2ff0 Suspend: 0 Teb: 000000f2`af018000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b28ffb18 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b28ffb20 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b28ffbc0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b28ffc10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b28ffc40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  61  Id: c10.1ad4 Suspend: 0 Teb: 000000f2`af01a000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b29ff7c8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b29ff7d0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b29ff870 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b29ff8c0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b29ff8f0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  62  Id: c10.4cfc Suspend: 0 Teb: 000000f2`af01c000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2aff848 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2aff850 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2aff8f0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2aff940 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2aff970 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  63  Id: c10.1f44 Suspend: 0 Teb: 000000f2`af01e000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2bffb08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2bffb10 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2bffbb0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2bffc00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2bffc30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  64  Id: c10.31d4 Suspend: 0 Teb: 000000f2`af020000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2cffe28 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2cffe30 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2cffed0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2cfff20 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2cfff50 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  65  Id: c10.58b0 Suspend: 0 Teb: 000000f2`af022000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2dff978 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2dff980 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2dffa20 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2dffa70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2dffaa0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  66  Id: c10.3378 Suspend: 0 Teb: 000000f2`af024000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2effb08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2effb10 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2effbb0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2effc00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2effc30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  67  Id: c10.2858 Suspend: 0 Teb: 000000f2`af026000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af3ff5e8 00007ffd`f79f5dfe     ntdll!NtWaitForWorkViaWorkerFactory+0x14
+000000f2`af3ff5f0 00007ffd`f72ee8d7     ntdll!TppWorkerThread+0x37e
+000000f2`af3ff950 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af3ff980 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  68  Id: c10.6518 Suspend: 0 Teb: 000000f2`af028000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af4ff9f8 00007ffd`f79f5dfe     ntdll!NtWaitForWorkViaWorkerFactory+0x14
+000000f2`af4ffa00 00007ffd`f72ee8d7     ntdll!TppWorkerThread+0x37e
+000000f2`af4ffd60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af4ffd90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+0:000> 
+
+.  0  Id: c10.3ba4 Suspend: 0 Teb: 000000f2`af119000 Unfrozen
+Child-SP          RetAddr               Call Site
+(Inline Function) --------`--------     UnityPlayer!DynamicHeapAllocator<LowLevelAllocator>::PoolElement::Contains+0x4
+000000f2`af2fea88 00007ffd`2993a31a     UnityPlayer!DynamicHeapAllocator<LowLevelAllocator>::FindPoolFromPtr+0x17
+000000f2`af2fea90 00007ffd`2993a11e     UnityPlayer!DynamicHeapAllocator<LowLevelAllocator>::TryDeallocate+0xaa
+000000f2`af2fead0 00007ffd`2993689e     UnityPlayer!DualThreadAllocator<DynamicHeapAllocator<LowLevelAllocator> >::TryDeallocate+0xfe
+000000f2`af2feb40 00007ffd`2952868d     UnityPlayer!MemoryManager::Deallocate+0x8e
+000000f2`af2feb70 00007ffd`294ff656     UnityPlayer!mecanim::animation::DestroyClipOutput+0x2d
+000000f2`af2feba0 00007ffd`294e0c8b     UnityPlayer!AnimationClipPlayable::DeallocateBindings+0x36
+(Inline Function) --------`--------     UnityPlayer!AnimationPlayable::UpdateInternalState+0x9
+(Inline Function) --------`--------     UnityPlayer!AnimationPlayable::UpdateInternalState+0x21
+000000f2`af2febd0 00007ffd`294e0cce     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x2b
+000000f2`af2fec00 00007ffd`294e0cce     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x6e
+000000f2`af2fec30 00007ffd`294e0cce     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x6e
+000000f2`af2fec60 00007ffd`294e2f9d     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive<3,1>+0x6e
+(Inline Function) --------`--------     UnityPlayer!AnimationPlayable::UpdateInternalStateRecursive+0x54
+000000f2`af2fec90 00007ffd`294e348e     UnityPlayer!`anonymous namespace'::ProcessPlayableGraph+0x17d
+000000f2`af2fed30 00007ffd`294bea95     UnityPlayer!Animator::ProcessRootMotionStep+0x25e
+000000f2`af2fef50 00007ffd`294bdf48     UnityPlayer!Animator::ProcessRootMotionJob+0x65
+000000f2`af2fefa0 00007ffd`29ad2b39     UnityPlayer!UnityEngine::Animation::BlockRangeJob<Animator::AnimatorJob>::Job+0x38
+(Inline Function) --------`--------     UnityPlayer!JobQueue::ExecuteJobFunc+0x18
+000000f2`af2fefd0 00007ffd`29ad3dc8     UnityPlayer!JobQueue::Exec+0x89
+000000f2`af2ff020 00007ffd`29acefe3     UnityPlayer!JobQueue::WaitForJobGroupID+0x158
+000000f2`af2ff0b0 00007ffd`294c4823     UnityPlayer!CompleteFenceInternal+0x23
+(Inline Function) --------`--------     UnityPlayer!SyncFence+0x11
+000000f2`af2ff0f0 00007ffd`29bea0d3     UnityPlayer!Animator::UpdateAvatars+0x413
+(Inline Function) --------`--------     UnityPlayer!DirectorManager::ExecuteProcessCallbacks+0x5a
+000000f2`af2ff440 00007ffd`29b18b67     UnityPlayer!DirectorManager::ExecuteStage+0x83
+000000f2`af2ff470 00007ffd`29b18c09     UnityPlayer!ExecutePlayerLoop+0x57
+000000f2`af2ff620 00007ffd`29b1abbf     UnityPlayer!ExecutePlayerLoop+0xf9
+000000f2`af2ff7d0 00007ffd`298f3bd5     UnityPlayer!PlayerLoop+0x7f
+000000f2`af2ff850 00007ffd`298f220a     UnityPlayer!PerformMainLoop+0x1c5
+000000f2`af2ff880 00007ffd`298f6a90     UnityPlayer!MainMessageLoop+0xda
+000000f2`af2ff8f0 00007ffd`298faccb     UnityPlayer!UnityMainImpl+0x1010
+000000f2`af2ffc10 00007ff6`614711fa     UnityPlayer!UnityMain+0xb
+000000f2`af2ffc40 00007ffd`f72ee8d7     OSFE+0x11fa
+000000f2`af2ffc80 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af2ffcb0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   1  Id: c10.1614 Suspend: 0 Teb: 000000f2`af121000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af6ffc68 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af6ffc70 00007ffd`325d5ae8     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`af6ffd10 00007ffd`326c2a0d     mono_2_0_bdwgc!mono_conc_hashtable_remove+0x1a68
+000000f2`af6ffd40 00007ffd`326c17a5     mono_2_0_bdwgc!mono_gc_reference_queue_new+0x4fd
+000000f2`af6ffd80 00007ffd`32684cb8     mono_2_0_bdwgc!mono_callspec_parse+0x795
+000000f2`af6ffe40 00007ffd`32684a46     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x7a8
+000000f2`af6fff10 00007ffd`f72ee8d7     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x536
+000000f2`af6fff40 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af6fff70 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   2  Id: c10.1970 Suspend: 0 Teb: 000000f2`af123000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af7ff728 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af7ff730 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`af7ff7d0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`af7ff800 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`af7ff830 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`af7ff940 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af7ff970 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   3  Id: c10.30c4 Suspend: 0 Teb: 000000f2`af125000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af8ff5f8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af8ff600 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`af8ff6a0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`af8ff6d0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`af8ff700 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`af8ff810 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af8ff840 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   4  Id: c10.3f1c Suspend: 0 Teb: 000000f2`af127000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af9ff6a8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`af9ff6b0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`af9ff750 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`af9ff780 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`af9ff7b0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`af9ff8c0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af9ff8f0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   5  Id: c10.669c Suspend: 0 Teb: 000000f2`af129000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afaffca8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afaffcb0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afaffd50 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afaffd80 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afaffdb0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afaffec0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afaffef0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   6  Id: c10.377c Suspend: 0 Teb: 000000f2`af12b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afbffc58 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afbffc60 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afbffd00 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afbffd30 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afbffd60 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afbffe70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afbffea0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   7  Id: c10.32b0 Suspend: 0 Teb: 000000f2`af12d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afcffa88 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afcffa90 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afcffb30 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afcffb60 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afcffb90 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afcffca0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afcffcd0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   8  Id: c10.3c04 Suspend: 0 Teb: 000000f2`af12f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afdffa58 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afdffa60 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afdffb00 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afdffb30 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afdffb60 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afdffc70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afdffca0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+   9  Id: c10.2a30 Suspend: 0 Teb: 000000f2`af131000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`afeffad8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`afeffae0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`afeffb80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`afeffbb0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`afeffbe0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`afeffcf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`afeffd20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  10  Id: c10.390c Suspend: 0 Teb: 000000f2`af133000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`affff898 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`affff8a0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`affff940 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`affff970 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`affff9a0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`affffab0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`affffae0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  11  Id: c10.644c Suspend: 0 Teb: 000000f2`af135000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b00ff9d8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b00ff9e0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b00ffa80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b00ffab0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b00ffae0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b00ffbf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b00ffc20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  12  Id: c10.247c Suspend: 0 Teb: 000000f2`af137000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b01ff668 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b01ff670 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b01ff710 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b01ff740 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b01ff770 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b01ff880 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b01ff8b0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  13  Id: c10.6494 Suspend: 0 Teb: 000000f2`af139000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b02ff9a8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b02ff9b0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b02ffa50 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b02ffa80 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b02ffab0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b02ffbc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b02ffbf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  14  Id: c10.6778 Suspend: 0 Teb: 000000f2`af13b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b03ffad8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b03ffae0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b03ffb80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b03ffbb0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b03ffbe0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b03ffcf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b03ffd20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  15  Id: c10.2c68 Suspend: 0 Teb: 000000f2`af13d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b04ffaa8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b04ffab0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b04ffb50 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b04ffb80 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b04ffbb0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b04ffcc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b04ffcf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  16  Id: c10.4294 Suspend: 0 Teb: 000000f2`af13f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b05ffa08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b05ffa10 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b05ffab0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b05ffae0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b05ffb10 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b05ffc20 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b05ffc50 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  17  Id: c10.2970 Suspend: 0 Teb: 000000f2`af141000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b06ff718 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b06ff720 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b06ff7c0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b06ff7f0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b06ff820 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b06ff930 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b06ff960 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  18  Id: c10.5d8c Suspend: 0 Teb: 000000f2`af143000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b07ff6e8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b07ff6f0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b07ff790 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b07ff7c0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b07ff7f0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b07ff900 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b07ff930 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  19  Id: c10.4f80 Suspend: 0 Teb: 000000f2`af145000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b08ffc48 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b08ffc50 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b08ffcf0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b08ffd20 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b08ffd50 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b08ffe60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b08ffe90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  20  Id: c10.4ca4 Suspend: 0 Teb: 000000f2`af147000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b09ff698 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b09ff6a0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b09ff740 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b09ff770 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b09ff7a0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b09ff8b0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b09ff8e0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  21  Id: c10.424c Suspend: 0 Teb: 000000f2`af149000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0aff858 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0aff860 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0aff900 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0aff930 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0aff960 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0affa70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0affaa0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  22  Id: c10.6128 Suspend: 0 Teb: 000000f2`af14b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0bffaf8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0bffb00 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0bffba0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0bffbd0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0bffc00 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0bffd10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0bffd40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  23  Id: c10.6594 Suspend: 0 Teb: 000000f2`af14d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0cffd28 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0cffd30 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0cffdd0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0cffe00 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0cffe30 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0cfff40 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0cfff70 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  24  Id: c10.1f30 Suspend: 0 Teb: 000000f2`af14f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0dff928 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0dff930 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0dff9d0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0dffa00 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0dffa30 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0dffb40 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0dffb70 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  25  Id: c10.63b8 Suspend: 0 Teb: 000000f2`af151000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0eff618 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0eff620 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0eff6c0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0eff6f0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0eff720 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0eff830 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0eff860 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  26  Id: c10.2408 Suspend: 0 Teb: 000000f2`af153000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b0fff888 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b0fff890 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b0fff930 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b0fff960 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b0fff990 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b0fffaa0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b0fffad0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  27  Id: c10.4fa8 Suspend: 0 Teb: 000000f2`af155000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b10ffd08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b10ffd10 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b10ffdb0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b10ffde0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b10ffe10 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b10fff20 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b10fff50 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  28  Id: c10.1a8 Suspend: 0 Teb: 000000f2`af157000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b11ff628 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b11ff630 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b11ff6d0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b11ff700 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b11ff730 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b11ff840 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b11ff870 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  29  Id: c10.17c4 Suspend: 0 Teb: 000000f2`af159000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b12ff618 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b12ff620 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b12ff6c0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b12ff6f0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b12ff720 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b12ff830 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b12ff860 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  30  Id: c10.61fc Suspend: 0 Teb: 000000f2`af15b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b13ff7a8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b13ff7b0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b13ff850 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b13ff880 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b13ff8b0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b13ff9c0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b13ff9f0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  31  Id: c10.3af0 Suspend: 0 Teb: 000000f2`af15d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b14ff9d8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b14ff9e0 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b14ffa80 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b14ffab0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b14ffae0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b14ffbf0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b14ffc20 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  32  Id: c10.4f84 Suspend: 0 Teb: 000000f2`af15f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b15ff888 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b15ff890 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b15ff930 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b15ff960 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b15ff990 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b15ffaa0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b15ffad0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  33  Id: c10.9e8 Suspend: 0 Teb: 000000f2`af161000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b16ffb38 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b16ffb40 00007ffd`29b787e5     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x14
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x14
+000000f2`b16ffbe0 00007ffd`29b17d9c     UnityPlayer!ThreadedStreamBuffer::HandleOutOfBufferToReadFrom+0x165
+(Inline Function) --------`--------     UnityPlayer!ThreadedStreamBuffer::GetReadDataPointer+0x2c
+(Inline Function) --------`--------     UnityPlayer!ThreadedStreamBuffer::ReadValueType+0x2c
+000000f2`b16ffc30 00007ffd`29b77ae1     UnityPlayer!BatchDeleteStep2Threaded+0x4c
+000000f2`b16ffc80 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b16ffd90 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b16ffdc0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  34  Id: c10.32b4 Suspend: 0 Teb: 000000f2`af163000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b17ff998 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b17ff9a0 00007ffd`299e8388     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x18
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x18
+(Inline Function) --------`--------     UnityPlayer!AsyncReadManagerThreaded::ThreadEntry+0x90
+000000f2`b17ffa40 00007ffd`29b77ae1     UnityPlayer!AsyncReadManagerThreaded::StaticThreadEntry+0x98
+000000f2`b17ffab0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b17ffbc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b17ffbf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  35  Id: c10.1274 Suspend: 0 Teb: 000000f2`af165000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b18ff808 00007ffd`f4291a93     ntdll!NtWaitForMultipleObjects+0x14
+000000f2`b18ff810 00007ffd`f582ffce     KERNELBASE!WaitForMultipleObjectsEx+0x123
+(Inline Function) --------`--------     combase!WaitCoalesced+0x79
+000000f2`b18ffb00 00007ffd`f5825eaf     combase!CROIDTable::WorkerThreadLoop+0xae
+000000f2`b18ffd70 00007ffd`f5825dbf     combase!CRpcThread::WorkerLoop+0x5b
+000000f2`b18ffde0 00007ffd`f72ee8d7     combase!CRpcThreadCache::RpcWorkerThreadEntry+0x4f
+000000f2`b18ffe10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b18ffe40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  36  Id: c10.6680 Suspend: 0 Teb: 000000f2`af16b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1bfe448 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1bfe450 00007ffd`29b787e5     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x14
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x14
+000000f2`b1bfe4f0 00007ffd`298b8a31     UnityPlayer!ThreadedStreamBuffer::HandleOutOfBufferToReadFrom+0x165
+000000f2`b1bfe540 00007ffd`298c1a8b     UnityPlayer!GfxDeviceWorker::RunCommand+0x71
+(Inline Function) --------`--------     UnityPlayer!ProcessGfxCommands+0x21
+000000f2`b1bff7f0 00007ffd`298c1b67     UnityPlayer!GfxDeviceWorker::RunExt+0x3b
+(Inline Function) --------`--------     UnityPlayer!GfxDeviceWorker::Run+0x6e
+000000f2`b1bff820 00007ffd`29b77ae1     UnityPlayer!GfxDeviceWorker::RunGfxDeviceWorker+0x77
+000000f2`b1bff850 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b1bff960 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1bff990 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  37  Id: c10.66d8 Suspend: 0 Teb: 000000f2`af16d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1cffd68 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1cffd70 00007ffd`2a3b450a     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b1cffe10 00007ffd`2a3b445e     UnityPlayer!FMOD::OutputWASAPI::feederUpdate+0x9a
+000000f2`b1cffe70 00007ffd`2a341511     UnityPlayer!FMOD::OutputWASAPI::feederThreadCallback+0xe
+000000f2`b1cffea0 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x61
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b1cffed0 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b1cfff00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1cfff30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  38  Id: c10.2d24 Suspend: 0 Teb: 000000f2`af16f000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1dffb58 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1dffb60 00007ffd`2a396a85     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b1dffc00 00007ffd`2a340a9a     UnityPlayer!EnterMeteredSection+0x55
+000000f2`b1dffc30 00007ffd`2a3414f1     UnityPlayer!FMOD_OS_Semaphore_Wait+0x1a
+000000f2`b1dffc60 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x41
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b1dffc90 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b1dffcc0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1dffcf0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  39  Id: c10.3208 Suspend: 0 Teb: 000000f2`af171000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1effba8 00007ffd`f7a51014     ntdll!NtDelayExecution+0x14
+000000f2`b1effbb0 00007ffd`f4296f01     ntdll!RtlDelayExecution+0x34
+000000f2`b1effbe0 00007ffd`2a340c4a     KERNELBASE!SleepEx+0x91
+000000f2`b1effc70 00007ffd`2a34152a     UnityPlayer!FMOD_OS_Time_Sleep+0xa
+000000f2`b1effca0 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x7a
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b1effcd0 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b1effd00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1effd30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  40  Id: c10.33c8 Suspend: 0 Teb: 000000f2`af193000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2fff758 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2fff760 00007ffd`29b2fc25     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+000000f2`b2fff800 00007ffd`29b2fdc9     UnityPlayer!PreloadManager::Run+0x55
+000000f2`b2fff8a0 00007ffd`29b77ae1     UnityPlayer!PreloadManager::Run+0x9
+000000f2`b2fff8d0 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b2fff9e0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2fffa10 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  41  Id: c10.3fd0 Suspend: 0 Teb: 000000f2`af195000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b30ff608 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b30ff610 00007ffd`29ad2f1f     KERNELBASE!WaitForSingleObjectEx+0xaf
+(Inline Function) --------`--------     UnityPlayer!PlatformSemaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!Semaphore::WaitForSignal+0x15
+(Inline Function) --------`--------     UnityPlayer!CappedSemaphore::WaitForSignal+0x2e
+(Inline Function) --------`--------     UnityPlayer!WorkerController::WaitForSignal+0x2e
+000000f2`b30ff6b0 00007ffd`29ad40db     UnityPlayer!JobQueue::ProcessJobs+0x11f
+000000f2`b30ff6e0 00007ffd`29b77ae1     UnityPlayer!JobQueue::WorkLoop+0xb
+000000f2`b30ff710 00007ffd`f72ee8d7     UnityPlayer!Thread::RunThreadWrapper+0x3e1
+000000f2`b30ff820 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b30ff850 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  42  Id: c10.1bb4 Suspend: 0 Teb: 000000f2`af19b000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b32ffe28 00007ffd`f350767f     ntdll!NtRemoveIoCompletion+0x14
+000000f2`b32ffe30 00007ffd`f72ee8d7     mswsock!SockAsyncThread+0xaf
+000000f2`b32ffe90 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b32ffec0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  43  Id: c10.57d8 Suspend: 0 Teb: 000000f2`af19d000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b31ff9f8 00007ffd`f79f5dfe     ntdll!NtWaitForWorkViaWorkerFactory+0x14
+000000f2`b31ffa00 00007ffd`f72ee8d7     ntdll!TppWorkerThread+0x37e
+000000f2`b31ffd60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b31ffd90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  44  Id: c10.5068 Suspend: 0 Teb: 000000f2`af1a5000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b33ff1d8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b33ff1e0 00007ffd`325d5ae8     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b33ff280 00007ffd`326862d3     mono_2_0_bdwgc!mono_conc_hashtable_remove+0x1a68
+000000f2`b33ff2b0 00000253`4085a6fd     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x1dc3
+000000f2`b33ff320 00000253`4085a53b     0x00000253`4085a6fd
+000000f2`b33ff450 00000253`4085a3eb     0x00000253`4085a53b
+000000f2`b33ff4e0 00000253`4085a36b     0x00000253`4085a3eb
+000000f2`b33ff540 00000253`4085be33     0x00000253`4085a36b
+000000f2`b33ff590 00000253`4085bda3     0x00000253`4085be33
+000000f2`b33ff5f0 00000253`4085adae     0x00000253`4085bda3
+000000f2`b33ff630 00000253`3d668cd6     0x00000253`4085adae
+000000f2`b33ff850 00000253`3d66872e     0x00000253`3d668cd6
+000000f2`b33ff8b0 00000253`3d66811b     0x00000253`3d66872e
+000000f2`b33ff960 00000253`3d66803b     0x00000253`3d66811b
+000000f2`b33ff9b0 00000253`3d667f53     0x00000253`3d66803b
+000000f2`b33ffa00 00000253`390872d4     0x00000253`3d667f53
+000000f2`b33ffa50 00007ffd`326db7b0     0x00000253`390872d4
+000000f2`b33ffae0 00007ffd`32661892     mono_2_0_bdwgc!mono_get_runtime_build_info+0x11f0
+000000f2`b33ffcc0 00007ffd`3266aa62     mono_2_0_bdwgc!mono_perfcounters_init+0x2532
+000000f2`b33ffd10 00007ffd`32684cff     mono_2_0_bdwgc!mono_runtime_invoke_array+0x122
+000000f2`b33ffd50 00007ffd`32684a46     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x7ef
+000000f2`b33ffe20 00007ffd`f72ee8d7     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x536
+000000f2`b33ffe50 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b33ffe80 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  45  Id: c10.5c08 Suspend: 0 Teb: 000000f2`af1a9000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b34ff3d8 00007ffd`f4291a93     ntdll!NtWaitForMultipleObjects+0x14
+000000f2`b34ff3e0 00007ffd`f167e5d8     KERNELBASE!WaitForMultipleObjectsEx+0x123
+000000f2`b34ff6d0 00007ffd`f167e2b3     CoreMessaging!Microsoft::CoreUI::Dispatch::WaitController::Callback_WaitAny+0xc8
+000000f2`b34ff7c0 00007ffd`f167df0e     CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_DoWait+0x123
+000000f2`b34ff890 00007ffd`f16715dc     CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_Wait+0x5e
+000000f2`b34ff950 00007ffd`f1670b67     CoreMessaging!Microsoft::CoreUI::Dispatch::WaitCollection::Callback_DoGeneralWait+0x1ec
+000000f2`b34ffa20 00007ffd`f166f194     CoreMessaging!Microsoft::CoreUI::Dispatch::WaitController::Callback_OnDispatch+0xf7
+000000f2`b34ffb10 00007ffd`f166ed2d     CoreMessaging!Microsoft::CoreUI::Dispatch::Dispatcher::Callback_DispatchLoop+0x334
+000000f2`b34ffc10 00007ffd`f1672058     CoreMessaging!Microsoft::CoreUI::Dispatch::EventLoop::Callback_RunCoreLoop+0x11d
+000000f2`b34ffc80 00007ffd`f16ed6ae     CoreMessaging!Microsoft::CoreUI::Dispatch::Win32EventLoopBridge::Callback_Run+0xd8
+000000f2`b34ffd60 00007ffd`f16e69af     CoreMessaging!Microsoft::CoreUI::Dispatch::EventLoop::Callback_Run+0x156
+000000f2`b34ffdf0 00007ffd`f16c4a4b     CoreMessaging!Microsoft::CoreUI::Messaging::MessageSession::Microsoft_CoreUI_IExportMessageSession_Run$+0x33
+000000f2`b34ffe20 00007ffd`e1ffa4dd     CoreMessaging!Microsoft::CoreUI::IExportMessageSession::ExportAdapter$::Run+0x5b
+000000f2`b34ffe60 00007ffd`e1ff0eb9     inputhost!MessagingThread::ThreadProc+0xb5
+000000f2`b34ffeb0 00007ffd`f72ee8d7     inputhost!<lambda_376318154f061e76a4fa5387c7eed0ca>::<lambda_invoker_cdecl>+0x9
+000000f2`b34ffee0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b34fff10 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  46  Id: c10.4134 Suspend: 0 Teb: 000000f2`af1ab000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b35fecf8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b35fed00 00007ffd`325d5ae8     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b35feda0 00007ffd`326862d3     mono_2_0_bdwgc!mono_conc_hashtable_remove+0x1a68
+000000f2`b35fedd0 00000253`4085a6fd     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x1dc3
+000000f2`b35fee40 00000253`4085a53b     0x00000253`4085a6fd
+000000f2`b35fef70 00000253`4085a3eb     0x00000253`4085a53b
+000000f2`b35ff000 00000253`4085a36b     0x00000253`4085a3eb
+000000f2`b35ff060 00000253`4085a29b     0x00000253`4085a36b
+000000f2`b35ff0b0 00000253`4085a245     0x00000253`4085a29b
+000000f2`b35ff100 00000253`41273717     0x00000253`4085a245
+000000f2`b35ff140 00000253`41273623     0x00000253`41273717
+000000f2`b35ff250 00000253`3d668cd6     0x00000253`41273623
+000000f2`b35ff290 00000253`3d66872e     0x00000253`3d668cd6
+000000f2`b35ff2f0 00000253`3d66811b     0x00000253`3d66872e
+000000f2`b35ff3a0 00000253`3d66803b     0x00000253`3d66811b
+000000f2`b35ff3f0 00000253`3d667f53     0x00000253`3d66803b
+000000f2`b35ff440 00000253`390872d4     0x00000253`3d667f53
+000000f2`b35ff490 00007ffd`326db7b0     0x00000253`390872d4
+000000f2`b35ff520 00007ffd`32661892     mono_2_0_bdwgc!mono_get_runtime_build_info+0x11f0
+000000f2`b35ff700 00007ffd`3266aa62     mono_2_0_bdwgc!mono_perfcounters_init+0x2532
+000000f2`b35ff750 00007ffd`32684cff     mono_2_0_bdwgc!mono_runtime_invoke_array+0x122
+000000f2`b35ff790 00007ffd`32684a46     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x7ef
+000000f2`b35ff860 00007ffd`f72ee8d7     mono_2_0_bdwgc!mono_threads_set_shutting_down+0x536
+000000f2`b35ff890 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b35ff8c0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  47  Id: c10.3ea8 Suspend: 0 Teb: 000000f2`af1ad000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b36ffb78 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b36ffb80 00007ffd`4585919f     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b36ffc20 00007ffd`4585a213     steamclient64!Breakpad_SteamWriteMiniDumpUsingExceptionInfoWithBuildId+0x14601f
+000000f2`b36ffca0 00007ffd`45853e1b     steamclient64!Breakpad_SteamWriteMiniDumpUsingExceptionInfoWithBuildId+0x147093
+000000f2`b36ffd10 00007ffd`45d38cd3     steamclient64!Breakpad_SteamWriteMiniDumpUsingExceptionInfoWithBuildId+0x140c9b
+000000f2`b36ffd40 00007ffd`f72ee8d7     steamclient64!CreateInterface+0x2cbe33
+000000f2`b36ffd70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b36ffda0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  48  Id: c10.39a0 Suspend: 0 Teb: 000000f2`af1b3000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b37ff628 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b37ff630 00007ffd`2a396a85     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b37ff6d0 00007ffd`2a340a9a     UnityPlayer!EnterMeteredSection+0x55
+000000f2`b37ff700 00007ffd`2a3414f1     UnityPlayer!FMOD_OS_Semaphore_Wait+0x1a
+000000f2`b37ff730 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x41
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b37ff760 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b37ff790 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b37ff7c0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  49  Id: c10.2fdc Suspend: 0 Teb: 000000f2`af1bd000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b38ffbb8 00007ffd`f7a51014     ntdll!NtDelayExecution+0x14
+000000f2`b38ffbc0 00007ffd`f4296f01     ntdll!RtlDelayExecution+0x34
+000000f2`b38ffbf0 00007ffd`2a340c4a     KERNELBASE!SleepEx+0x91
+000000f2`b38ffc80 00007ffd`2a34152a     UnityPlayer!FMOD_OS_Time_Sleep+0xa
+000000f2`b38ffcb0 00007ffd`2a4da1e4     UnityPlayer!FMOD::Thread::callback+0x7a
+(Inline Function) --------`--------     UnityPlayer!invoke_thread_procedure+0xd
+000000f2`b38ffce0 00007ffd`f72ee8d7     UnityPlayer!thread_start<unsigned int (__cdecl*)(void * __ptr64)>+0x50
+000000f2`b38ffd10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b38ffd40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  50  Id: c10.2890 Suspend: 0 Teb: 000000f2`af1c1000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b39fe398 00007ffd`f7a51014     ntdll!NtDelayExecution+0x14
+000000f2`b39fe3a0 00007ffd`f4296f01     ntdll!RtlDelayExecution+0x34
+000000f2`b39fe3d0 00007ffd`8d4974d7     KERNELBASE!SleepEx+0x91
+000000f2`b39fe460 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x14737
+000000f2`b39ff7b0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b39ff7e0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  51  Id: c10.d38 Suspend: 0 Teb: 000000f2`af006000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b1fffd98 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b1fffda0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b1fffe40 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b1fffe90 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b1fffec0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  52  Id: c10.4f08 Suspend: 0 Teb: 000000f2`af008000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b20ff958 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b20ff960 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b20ffa00 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b20ffa50 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b20ffa80 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  53  Id: c10.3444 Suspend: 0 Teb: 000000f2`af00a000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b21ff808 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b21ff810 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b21ff8b0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b21ff900 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b21ff930 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  54  Id: c10.4fe4 Suspend: 0 Teb: 000000f2`af00c000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b22ff6b8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b22ff6c0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b22ff760 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b22ff7b0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b22ff7e0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  55  Id: c10.45fc Suspend: 0 Teb: 000000f2`af00e000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b23ffd68 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b23ffd70 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b23ffe10 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b23ffe60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b23ffe90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  56  Id: c10.6388 Suspend: 0 Teb: 000000f2`af010000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b24ff808 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b24ff810 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b24ff8b0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b24ff900 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b24ff930 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  57  Id: c10.798 Suspend: 0 Teb: 000000f2`af012000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b25ffb38 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b25ffb40 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b25ffbe0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b25ffc30 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b25ffc60 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  58  Id: c10.2e68 Suspend: 0 Teb: 000000f2`af014000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b26ffdd8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b26ffde0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b26ffe80 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b26ffed0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b26fff00 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  59  Id: c10.5d04 Suspend: 0 Teb: 000000f2`af016000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b27ffcb8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b27ffcc0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b27ffd60 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b27ffdb0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b27ffde0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  60  Id: c10.2ff0 Suspend: 0 Teb: 000000f2`af018000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b28ffb18 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b28ffb20 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b28ffbc0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b28ffc10 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b28ffc40 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  61  Id: c10.1ad4 Suspend: 0 Teb: 000000f2`af01a000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b29ff7c8 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b29ff7d0 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b29ff870 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b29ff8c0 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b29ff8f0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  62  Id: c10.4cfc Suspend: 0 Teb: 000000f2`af01c000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2aff848 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2aff850 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2aff8f0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2aff940 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2aff970 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  63  Id: c10.1f44 Suspend: 0 Teb: 000000f2`af01e000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2bffb08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2bffb10 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2bffbb0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2bffc00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2bffc30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  64  Id: c10.31d4 Suspend: 0 Teb: 000000f2`af020000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2cffe28 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2cffe30 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2cffed0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2cfff20 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2cfff50 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  65  Id: c10.58b0 Suspend: 0 Teb: 000000f2`af022000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2dff978 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2dff980 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2dffa20 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2dffa70 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2dffaa0 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  66  Id: c10.3378 Suspend: 0 Teb: 000000f2`af024000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`b2effb08 00007ffd`f428b1bf     ntdll!NtWaitForSingleObject+0x14
+000000f2`b2effb10 00007ffd`8d4a1edc     KERNELBASE!WaitForSingleObjectEx+0xaf
+000000f2`b2effbb0 00007ffd`f72ee8d7     d3d11!D3D11CreateDeviceAndSwapChain+0x1f13c
+000000f2`b2effc00 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`b2effc30 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  67  Id: c10.2858 Suspend: 0 Teb: 000000f2`af026000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af3ff5e8 00007ffd`f79f5dfe     ntdll!NtWaitForWorkViaWorkerFactory+0x14
+000000f2`af3ff5f0 00007ffd`f72ee8d7     ntdll!TppWorkerThread+0x37e
+000000f2`af3ff950 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af3ff980 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+
+  68  Id: c10.6518 Suspend: 0 Teb: 000000f2`af028000 Unfrozen
+Child-SP          RetAddr               Call Site
+000000f2`af4ff9f8 00007ffd`f79f5dfe     ntdll!NtWaitForWorkViaWorkerFactory+0x14
+000000f2`af4ffa00 00007ffd`f72ee8d7     ntdll!TppWorkerThread+0x37e
+000000f2`af4ffd60 00007ffd`f7a0c3fc     kernel32!BaseThreadInitThunk+0x17
+000000f2`af4ffd90 00000000`00000000     ntdll!RtlUserThreadStart+0x2c
+0:000> .echo ===THE LOCK ITSELF===
+===THE LOCK ITSELF===
+0:000> $$ g_fntabs is a static in d3d11.dll. If the theory holds, its lock word is 1
+0:000> $$ with no thread able to release it. Printed as a struct-less dump because the
+0:000> $$ first two LONGs are n and lock.
+0:000> dq d3d11!g_fntabs L1
+Couldn't resolve error at 'd3d11!g_fntabs '
+0:000> .echo ---- records: n, lock, removed, readded, failed, drifted, skipped, unstuck
+---- records: n, lock, removed, readded, failed, drifted, skipped, unstuck
+0:000> dd poi(d3d11!g_fntabs) L8
+Couldn't resolve error at 'd3d11!g_fntabs) '
+0:000> 
+0:000> .echo ===DONE===
+===DONE===
+0:000> q
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

@@ -1,0 +1,234 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.140 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 6284 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+..............
+Loading unloaded module list
+..
+(188c.5420): Wake debugger - code 80000007 (first chance)
+eax=00000000 ebx=01cff710 ecx=00000000 edx=00000000 esi=01b5c000 edi=01cff710
+eip=77d0951c esp=01cff6ac ebp=01cff6cc iopl=0         nv up ei pl nz na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00200206
+ntdll!NtDelayExecution+0xc:
+77d0951c c20800          ret     8
+0:000> cdb: Reading initial command '.echo ===== module =====; lm m rabiribi; .echo ===== 4E425 : leading up to it =====; ub rabiribi+4E425 L80; .echo ===== 4E425 : at and after =====; u rabiribi+4E425 L24; .echo ===== done =====; qd'
+===== module =====
+start    end        module name
+00850000 0191e000   rabiribi   (deferred)             
+===== 4E425 : leading up to it =====
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\rabiribi.exe
+rabiribi+0x4e29e:
+0089e29e 833dc8e1d70000  cmp     dword ptr [rabiribi!opus_strerror+0x195798 (00d7e1c8)],0
+0089e2a5 8b4518          mov     eax,dword ptr [ebp+18h]
+0089e2a8 6a00            push    0
+0089e2aa 747a            je      rabiribi+0x4e326 (0089e326)
+0089e2ac 85c0            test    eax,eax
+0089e2ae 7452            je      rabiribi+0x4e302 (0089e302)
+0089e2b0 a194eed700      mov     eax,dword ptr [rabiribi!opus_strerror+0x196464 (00d7ee94)]
+0089e2b5 8945f0          mov     dword ptr [ebp-10h],eax
+0089e2b8 8b87cc000000    mov     eax,dword ptr [edi+0CCh]
+0089e2be 8945f8          mov     dword ptr [ebp-8],eax
+0089e2c1 8d45ec          lea     eax,[ebp-14h]
+0089e2c4 8945d4          mov     dword ptr [ebp-2Ch],eax
+0089e2c7 a1e4e1d700      mov     eax,dword ptr [rabiribi!opus_strerror+0x1957b4 (00d7e1e4)]
+0089e2cc 8d55d0          lea     edx,[ebp-30h]
+0089e2cf 52              push    edx
+0089e2d0 ffb7d4000000    push    dword ptr [edi+0D4h]
+0089e2d6 c745ec80000000  mov     dword ptr [ebp-14h],80h
+0089e2dd c745f480000000  mov     dword ptr [ebp-0Ch],80h
+0089e2e4 c745d002000000  mov     dword ptr [ebp-30h],2
+0089e2eb 8b08            mov     ecx,dword ptr [eax]
+0089e2ed 51              push    ecx
+0089e2ee 8d55d8          lea     edx,[ebp-28h]
+0089e2f1 c7042400000040  mov     dword ptr [esp],40000000h
+0089e2f8 6a00            push    0
+0089e2fa 52              push    edx
+0089e2fb 53              push    ebx
+0089e2fc 50              push    eax
+0089e2fd ff5114          call    dword ptr [ecx+14h]
+0089e300 eb7c            jmp     rabiribi+0x4e37e (0089e37e)
+0089e302 a1e4e1d700      mov     eax,dword ptr [rabiribi!opus_strerror+0x1957b4 (00d7e1e4)]
+0089e307 6a00            push    0
+0089e309 ffb7d4000000    push    dword ptr [edi+0D4h]
+0089e30f 8b08            mov     ecx,dword ptr [eax]
+0089e311 51              push    ecx
+0089e312 8d55d8          lea     edx,[ebp-28h]
+0089e315 c7042400000040  mov     dword ptr [esp],40000000h
+0089e31c 6a00            push    0
+0089e31e 52              push    edx
+0089e31f 53              push    ebx
+0089e320 50              push    eax
+0089e321 ff5114          call    dword ptr [ecx+14h]
+0089e324 eb58            jmp     rabiribi+0x4e37e (0089e37e)
+0089e326 85c0            test    eax,eax
+0089e328 7432            je      rabiribi+0x4e35c (0089e35c)
+0089e32a a190eed700      mov     eax,dword ptr [rabiribi!opus_strerror+0x196460 (00d7ee90)]
+0089e32f 8945f0          mov     dword ptr [ebp-10h],eax
+0089e332 8b87cc000000    mov     eax,dword ptr [edi+0CCh]
+0089e338 8945f8          mov     dword ptr [ebp-8],eax
+0089e33b 8d45ec          lea     eax,[ebp-14h]
+0089e33e 8d55d0          lea     edx,[ebp-30h]
+0089e341 c745ec80000000  mov     dword ptr [ebp-14h],80h
+0089e348 c745f480000000  mov     dword ptr [ebp-0Ch],80h
+0089e34f c745d002000000  mov     dword ptr [ebp-30h],2
+0089e356 8945d4          mov     dword ptr [ebp-2Ch],eax
+0089e359 52              push    edx
+0089e35a eb02            jmp     rabiribi+0x4e35e (0089e35e)
+0089e35c 6a00            push    0
+0089e35e ffb7d4000000    push    dword ptr [edi+0D4h]
+0089e364 a1e4e1d700      mov     eax,dword ptr [rabiribi!opus_strerror+0x1957b4 (00d7e1e4)]
+0089e369 8d55d8          lea     edx,[ebp-28h]
+0089e36c 8b08            mov     ecx,dword ptr [eax]
+0089e36e 51              push    ecx
+0089e36f c7042400000040  mov     dword ptr [esp],40000000h
+0089e376 6a00            push    0
+0089e378 52              push    edx
+0089e379 53              push    ebx
+0089e37a 50              push    eax
+0089e37b ff5120          call    dword ptr [ecx+20h]
+0089e37e 85c0            test    eax,eax
+0089e380 0f88f8000000    js      rabiribi+0x4e47e (0089e47e)
+0089e386 85f6            test    esi,esi
+0089e388 7435            je      rabiribi+0x4e3bf (0089e3bf)
+0089e38a 8b5da8          mov     ebx,dword ptr [ebp-58h]
+0089e38d 33f6            xor     esi,esi
+0089e38f 83c308          add     ebx,8
+0089e392 ff33            push    dword ptr [ebx]
+0089e394 56              push    esi
+0089e395 57              push    edi
+0089e396 e8357dfeff      call    rabiribi+0x360d0 (008860d0)
+0089e39b 46              inc     esi
+0089e39c 83c40c          add     esp,0Ch
+0089e39f 8d5b04          lea     ebx,[ebx+4]
+0089e3a2 83fe08          cmp     esi,8
+0089e3a5 7ceb            jl      rabiribi+0x4e392 (0089e392)
+0089e3a7 8b5da8          mov     ebx,dword ptr [ebp-58h]
+0089e3aa ff7328          push    dword ptr [ebx+28h]
+0089e3ad 57              push    edi
+0089e3ae e87d7cfeff      call    rabiribi+0x36030 (00886030)
+0089e3b3 ff7304          push    dword ptr [ebx+4]
+0089e3b6 57              push    edi
+0089e3b7 e8c47cfeff      call    rabiribi+0x36080 (00886080)
+0089e3bc 83c410          add     esp,10h
+0089e3bf 5f              pop     edi
+0089e3c0 5e              pop     esi
+0089e3c1 33c0            xor     eax,eax
+0089e3c3 5b              pop     ebx
+0089e3c4 8b4dfc          mov     ecx,dword ptr [ebp-4]
+0089e3c7 33cd            xor     ecx,ebp
+0089e3c9 e887a93100      call    rabiribi!opus_multistream_decoder_destroy+0x844b5 (00bb8d55)
+0089e3ce 8be5            mov     esp,ebp
+0089e3d0 5d              pop     ebp
+0089e3d1 c3              ret
+0089e3d2 6a24            push    24h
+0089e3d4 8d45ac          lea     eax,[ebp-54h]
+0089e3d7 6a00            push    0
+0089e3d9 50              push    eax
+0089e3da e861060200      call    rabiribi+0x6ea40 (008bea40)
+0089e3df 83c40c          add     esp,0Ch
+0089e3e2 833d1cefd70000  cmp     dword ptr [rabiribi!opus_strerror+0x1964ec (00d7ef1c)],0
+0089e3e9 be02000000      mov     esi,2
+0089e3ee b908000000      mov     ecx,8
+0089e3f3 8bc6            mov     eax,esi
+0089e3f5 0f45c1          cmovne  eax,ecx
+0089e3f8 0de0800100      or      eax,180E0h
+0089e3fd 8945b0          mov     dword ptr [ebp-50h],eax
+0089e400 8b45a4          mov     eax,dword ptr [ebp-5Ch]
+0089e403 8945b4          mov     dword ptr [ebp-4Ch],eax
+0089e406 6a00            push    0
+0089e408 8d45d8          lea     eax,[ebp-28h]
+0089e40b 8945bc          mov     dword ptr [ebp-44h],eax
+0089e40e a1e4e1d700      mov     eax,dword ptr [rabiribi!opus_strerror+0x1957b4 (00d7e1e4)]
+0089e413 53              push    ebx
+0089e414 8d55ac          lea     edx,[ebp-54h]
+0089e417 c745ac24000000  mov     dword ptr [ebp-54h],24h
+0089e41e 8b08            mov     ecx,dword ptr [eax]
+0089e420 52              push    edx
+0089e421 50              push    eax
+0089e422 ff510c          call    dword ptr [ecx+0Ch]
+===== 4E425 : at and after =====
+rabiribi+0x4e425:
+0089e425 85c0            test    eax,eax
+0089e427 7496            je      rabiribi+0x4e3bf (0089e3bf)
+0089e429 6a24            push    24h
+0089e42b 8d45ac          lea     eax,[ebp-54h]
+0089e42e 6a00            push    0
+0089e430 50              push    eax
+0089e431 e80a060200      call    rabiribi+0x6ea40 (008bea40)
+0089e436 83c40c          add     esp,0Ch
+0089e439 833d1cefd70000  cmp     dword ptr [rabiribi!opus_strerror+0x1964ec (00d7ef1c)],0
+0089e440 b808000000      mov     eax,8
+0089e445 0f45f0          cmovne  esi,eax
+0089e448 8b45a4          mov     eax,dword ptr [ebp-5Ch]
+0089e44b 8945b4          mov     dword ptr [ebp-4Ch],eax
+0089e44e 6a00            push    0
+0089e450 8d45d8          lea     eax,[ebp-28h]
+0089e453 8945bc          mov     dword ptr [ebp-44h],eax
+0089e456 a1e4e1d700      mov     eax,dword ptr [rabiribi!opus_strerror+0x1957b4 (00d7e1e4)]
+0089e45b 53              push    ebx
+0089e45c 8d55ac          lea     edx,[ebp-54h]
+0089e45f 81cec0000000    or      esi,0C0h
+0089e465 c745ac24000000  mov     dword ptr [ebp-54h],24h
+0089e46c 8975b0          mov     dword ptr [ebp-50h],esi
+0089e46f 8b08            mov     ecx,dword ptr [eax]
+0089e471 52              push    edx
+0089e472 50              push    eax
+0089e473 ff510c          call    dword ptr [ecx+0Ch]
+0089e476 85c0            test    eax,eax
+0089e478 0f8441ffffff    je      rabiribi+0x4e3bf (0089e3bf)
+0089e47e 8db7cc000000    lea     esi,[edi+0CCh]
+0089e484 833d18efd70000  cmp     dword ptr [rabiribi!opus_strerror+0x1964e8 (00d7ef18)],0
+0089e48b 8b0b            mov     ecx,dword ptr [ebx]
+0089e48d 7453            je      rabiribi+0x4e4e2 (0089e4e2)
+0089e48f 85c9            test    ecx,ecx
+0089e491 740c            je      rabiribi+0x4e49f (0089e49f)
+0089e493 8b01            mov     eax,dword ptr [ecx]
+0089e495 51              push    ecx
+===== done =====
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

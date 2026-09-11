@@ -1,0 +1,5 @@
+# sequential IDirect3D9 / Device calls (AddRef/Release omitted)
+     1 ime: disabled for the process
+     2 Direct3DCreate9 sdk=32
+     3 D3D9.CreateDevice adapter=0 type=1 behavior=00000020 640x480
+     4 CreateTexture #1 16x16 lv=1/1 usage=00000000 fmt=00000015 pool=1

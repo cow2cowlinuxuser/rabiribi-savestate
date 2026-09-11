@@ -1,0 +1,1 @@
+16800 calls=1 dips=1 rej=0/0 prims=1 clr=1 vsok=0 vsfail=0 hash=f9015f87 tri=80.00,60.00 uv=0.000,0.000 c0=0.0000,0.0000,0.0000,0.0000

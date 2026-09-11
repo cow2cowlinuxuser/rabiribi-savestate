@@ -1,0 +1,127 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.016 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 32252 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+...
+Loading unloaded module list
+..
+(7dfc.764): Wake debugger - code 80000007 (first chance)
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\d3d11.dll
+eax=00000001 ebx=6a09b24c ecx=00000000 edx=18790000 esi=00000000 edi=00000000
+eip=6a03cd61 esp=01cff0c0 ebp=01cff0c4 iopl=0         nv up ei ng nz ac pe cy
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000297
+d3d11!D3D11CreateDeviceAndSwapChain+0x18981:
+6a03cd61 ebed            jmp     d3d11!D3D11CreateDeviceAndSwapChain+0x18970 (6a03cd50)
+0:000> cdb: Reading initial command '.echo ==FAULTPC==; u ntdll+42AC6-8 L8; .echo ==THREAD==; ~~[0x3a4c]s; k 20; .echo ==REGS==; r; .echo ==HEAPS==; !heap -s; q'
+==FAULTPC==
+ntdll!RtlpLocalInfoAllocFromCache+0x1e:
+77cd2abe 0000            add     byte ptr [eax],al
+77cd2ac0 8b45f8          mov     eax,dword ptr [ebp-8]
+77cd2ac3 8b7dfc          mov     edi,dword ptr [ebp-4]
+77cd2ac6 8b18            mov     ebx,dword ptr [eax]
+77cd2ac8 895de4          mov     dword ptr [ebp-1Ch],ebx
+77cd2acb 85db            test    ebx,ebx
+77cd2acd 0f841d010000    je      ntdll!RtlpLocalInfoAllocFromCache+0x150 (77cd2bf0)
+77cd2ad3 8b4b10          mov     ecx,dword ptr [ebx+10h]
+==THREAD==
+eax=00000000 ebx=1ce0db98 ecx=00000000 edx=00000000 esi=01b83000 edi=1ce0db98
+eip=77d0951c esp=1ce0db34 ebp=1ce0db54 iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000202
+ntdll!NtDelayExecution+0xc:
+77d0951c c20800          ret     8
+ChildEBP RetAddr      
+1ce0db30 77d22579     ntdll!NtDelayExecution+0xc
+1ce0db54 75582d50     ntdll!RtlDelayExecution+0xe9
+1ce0dbbc 75582cef     KERNELBASE!SleepEx+0x50
+1ce0dbcc 6a03edd7     KERNELBASE!Sleep+0xf
+WARNING: Stack unwind information not available. Following frames may be wrong.
+1ce0dc10 6a03b366     d3d11!D3D11CreateDeviceAndSwapChain+0x1a9f7
+1ce0dc9c 77d0382f     d3d11!D3D11CreateDeviceAndSwapChain+0x16f86
+1ce0dcec 77cfec64     ntdll!RtlpCallVectoredHandlers+0xf8
+1ce0dd80 77d0b5af     ntdll!RtlDispatchException+0x67
+1ce0dd80 77cd2ac6     ntdll!KiUserExceptionDispatcher+0xf
+1ce0e8c0 77cd2537     ntdll!RtlpLocalInfoAllocFromCache+0x26
+1ce0e910 77d20c96     ntdll!RtlpLowFragHeapAllocFromContext+0x67
+1ce0e94c 77ccf949     ntdll!RtlpAllocateNTHeapInternal+0xfc
+1ce0e980 7556da2e     ntdll!RtlAllocateHeap+0xa9
+1ce0e9c0 6a03b927     KERNELBASE!GetEnvironmentVariableA+0x7e
+1ce0ea14 6a0430e4     d3d11!D3D11CreateDeviceAndSwapChain+0x17547
+1ce0f498 6a040aa3     d3d11!D3D11CreateDeviceAndSwapChain+0x1ed04
+1ce0fc18 76dd5d49     d3d11!D3D11CreateDeviceAndSwapChain+0x1c6c3
+1ce0fc28 77cfd83b     KERNEL32!BaseThreadInitThunk+0x19
+1ce0fc80 77cfd7c1     ntdll!__RtlUserThreadStart+0x2b
+1ce0fc90 00000000     ntdll!_RtlUserThreadStart+0x1b
+==REGS==
+eax=00000000 ebx=1ce0db98 ecx=00000000 edx=00000000 esi=01b83000 edi=1ce0db98
+eip=77d0951c esp=1ce0db34 ebp=1ce0db54 iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000202
+ntdll!NtDelayExecution+0xc:
+77d0951c c20800          ret     8
+==HEAPS==
+
+
+************************************************************************************************************************
+                                              NT HEAP STATS BELOW
+************************************************************************************************************************
+LFH Key                   : 0xf3a04cee
+Termination on corruption : DISABLED
+  Heap     Flags   Reserv  Commit  Virt   Free  List   UCR  Virt  Lock  Fast 
+                    (k)     (k)    (k)     (k) length      blocks cont. heap 
+-----------------------------------------------------------------------------
+01f70000 00000002    8388   4400   8176    589    64     4    2      0   LFH
+    External fragmentation  13 % (64 free blocks)
+02800000 00001002     272     32     60      1     3     1    0      0   LFH
+03f50000 00001002    1292    152   1080     78     4     2    0      0   LFH
+03ef0000 00001002     272     36     60      5     2     1    0      0   LFH
+03f30000 00001002      60     20     60      7     2     1    0      0      
+027d0000 00001002     272     28     60      3     1     1    0      0   LFH
+0d630000 00001002   16640  12744  16428    216    23     5    0      0   LFH
+109f0000 00001002     272     40     60      7     2     1    0      0   LFH
+-----------------------------------------------------------------------------
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

@@ -1,0 +1,99 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.016 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 13884 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+...............
+(363c.1ca0): Wake debugger - code 80000007 (first chance)
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\d3d11.dll
+eax=000019a0 ebx=77ce4b23 ecx=00001ca0 edx=01093953 esi=c0000005 edi=00000000
+eip=69bcaa9a esp=005ed1f8 ebp=005ed27c iopl=0         nv up ei ng nz na pe cy
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00200287
+d3d11!D3D11CreateDeviceAndSwapChain+0x166ba:
+69bcaa9a 7441            je      d3d11!D3D11CreateDeviceAndSwapChain+0x166fd (69bcaadd) [br=0]
+0:000> cdb: Reading initial command '.echo ==PC==; u rabiribi+36913A-c L8; .echo ==STACK==; ~~[0x19a0]s; kv 16; q'
+==PC==
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\rabiribi.exe
+rabiribi!opus_multistream_decoder_destroy+0x8488e:
+00bb912e 0000            add     byte ptr [eax],al
+00bb9130 0fba2524e3180101 bt      dword ptr [rabiribi!opus_strerror+0x5a58f4 (0118e324)],1
+00bb9138 7307            jae     rabiribi!opus_multistream_decoder_destroy+0x848a1 (00bb9141)
+00bb913a f3a4            rep movs byte ptr es:[edi],byte ptr [esi]
+00bb913c e917030000      jmp     rabiribi!opus_multistream_decoder_destroy+0x84bb8 (00bb9458)
+00bb9141 81f980000000    cmp     ecx,80h
+00bb9147 0f82ce010000    jb      rabiribi!opus_multistream_decoder_destroy+0x84a7b (00bb931b)
+00bb914d 8bc7            mov     eax,edi
+==STACK==
+eax=00000000 ebx=0d6bebac ecx=ffeaad9c edx=fffffffc esi=0068e000 edi=0d6bebac
+eip=77d0951c esp=0d6beb4c ebp=0d6beb68 iopl=0         nv up ei pl nz na po nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000202
+ntdll!NtDelayExecution+0xc:
+77d0951c c20800          ret     8
+ChildEBP RetAddr      Args to Child              
+0d6beb48 77d22579     00000000 0d6bebac 00000000 ntdll!NtDelayExecution+0xc (FPO: [2,0,0])
+0d6beb68 75582d50     00000000 0d6bebac 01068300 ntdll!RtlDelayExecution+0xe9 (FPO: [2,2,0])
+0d6bebd0 75582cef     000003e8 00000000 0d6bec24 KERNELBASE!SleepEx+0x50 (FPO: [SEH])
+0d6bebe0 69bcf167     000003e8 0000001c 00000000 KERNELBASE!Sleep+0xf (FPO: [Non-Fpo])
+WARNING: Stack unwind information not available. Following frames may be wrong.
+0d6bec24 69bcb2e3     c0000005 0703f000 06e40000 d3d11!D3D11CreateDeviceAndSwapChain+0x1ad87
+0d6becb4 77d0382f     0d6becd0 0d6bee04 0d6bedb4 d3d11!D3D11CreateDeviceAndSwapChain+0x16f03
+0d6bed04 77cfec64     00000000 0703efa8 0703f000 ntdll!RtlpCallVectoredHandlers+0xf8 (FPO: [Non-Fpo])
+0d6bed9c 77d0b5af     0d6bedb4 0d6bee04 0d6bedb4 ntdll!RtlDispatchException+0x67 (FPO: [Non-Fpo])
+0d6bed9c 00bb913a     0d6bedb4 0d6bee04 0d6bedb4 ntdll!KiUserExceptionDispatcher+0xf (FPO: [2,0,0]) (CONTEXT @ 0d6bee04)
+0d6bf8fc 00ba8029     00000016 00000017 12844fc6 rabiribi!opus_multistream_decoder_destroy+0x8489a
+0d6bf974 00baa12b     12844fc6 00000000 00000001 rabiribi!opus_multistream_decoder_destroy+0x73789
+0d6bf9d4 00baa0a1     12844fc6 1269b280 00001000 rabiribi!opus_multistream_decoder_destroy+0x7588b
+0d6bfa00 00b1759f     12844fc6 1269b280 00001000 rabiribi!opus_multistream_decoder_destroy+0x75801
+0d6bfa30 008bf4fb     12844f74 000056b8 000056e4 rabiribi+0x2c759f
+0d6bfa4c 00886398     00000030 13667b20 000056b8 rabiribi+0x6f4fb
+0d6bfa6c 00883dce     0d6bfa9c 12844f74 0000ad9c rabiribi+0x36398
+0d6bfac8 00883815     0cec00e9 00000000 76ddd720 rabiribi+0x33dce
+0d6bfafc 77cfd83b     00000000 c782cf47 00000000 rabiribi+0x33815
+0d6bfb54 77cfd7c1     ffffffff 77d44808 00000000 ntdll!__RtlUserThreadStart+0x2b (FPO: [Non-Fpo])
+0d6bfb64 00000000     0089f520 00000000 00000000 ntdll!_RtlUserThreadStart+0x1b (FPO: [Non-Fpo])
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

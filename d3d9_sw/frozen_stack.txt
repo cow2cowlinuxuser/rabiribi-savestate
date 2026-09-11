@@ -1,0 +1,183 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.125 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 29
+
+Microsoft (R) Windows Debugger Version 10.0.28000.1721 X86
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+ModLoad: 00850000 0191e000   C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\rabiribi.exe
+ModLoad: 77c90000 77e4f000   C:\WINDOWS\SYSTEM32\ntdll.dll
+ModLoad: 76dc0000 76eb0000   C:\WINDOWS\System32\KERNEL32.DLL
+ModLoad: 75420000 756ea000   C:\WINDOWS\System32\KERNELBASE.dll
+ModLoad: 76be0000 76daf000   C:\WINDOWS\System32\USER32.dll
+ModLoad: 77770000 7778a000   C:\WINDOWS\System32\win32u.dll
+ModLoad: 77740000 77762000   C:\WINDOWS\System32\GDI32.dll
+ModLoad: 76ec0000 76fab000   C:\WINDOWS\System32\gdi32full.dll
+ModLoad: 76b50000 76bd5000   C:\WINDOWS\System32\msvcp_win.dll
+ModLoad: 76a30000 76b40000   C:\WINDOWS\System32\ucrtbase.dll
+ModLoad: 76090000 766ca000   C:\WINDOWS\System32\SHELL32.dll
+ModLoad: 750c0000 751b9000   C:\WINDOWS\System32\wintypes.dll
+ModLoad: 75ba0000 75e32000   C:\WINDOWS\System32\combase.dll
+ModLoad: 768a0000 7695c000   C:\WINDOWS\System32\RPCRT4.dll
+ModLoad: 71cb0000 71ce2000   C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\steam_api.dll
+ModLoad: 77790000 77812000   C:\WINDOWS\System32\ADVAPI32.dll
+ModLoad: 76960000 76a27000   C:\WINDOWS\System32\msvcrt.dll
+ModLoad: 75870000 758f3000   C:\WINDOWS\System32\sechost.dll
+ModLoad: 76fb0000 76fd5000   C:\WINDOWS\System32\IMM32.DLL
+ModLoad: 71b30000 71ca5000   C:\Program Files (x86)\Steam\gameoverlayrenderer.dll
+ModLoad: 756f0000 75843000   C:\WINDOWS\System32\ole32.dll
+ModLoad: 75e40000 75edf000   C:\WINDOWS\System32\OLEAUT32.dll
+ModLoad: 76080000 76086000   C:\WINDOWS\System32\PSAPI.DLL
+ModLoad: 6e880000 6e8b3000   C:\WINDOWS\SYSTEM32\WINMM.dll
+ModLoad: 724b0000 724ee000   C:\WINDOWS\SYSTEM32\CFGMGR32.dll
+ModLoad: 6a4d0000 6b97e000   C:\Program Files (x86)\Steam\steamclient.dll
+ModLoad: 76740000 767a9000   C:\WINDOWS\System32\WS2_32.dll
+ModLoad: 74ff0000 75042000   C:\WINDOWS\System32\SHLWAPI.dll
+ModLoad: 76fe0000 776c4000   C:\WINDOWS\System32\Windows.Storage.dll
+ModLoad: 75250000 75359000   C:\WINDOWS\System32\CRYPT32.dll
+ModLoad: 77820000 77c71000   C:\WINDOWS\System32\SETUPAPI.dll
+ModLoad: 74ed0000 74ed8000   C:\WINDOWS\SYSTEM32\VERSION.dll
+ModLoad: 71fe0000 72005000   C:\WINDOWS\SYSTEM32\IPHLPAPI.DLL
+ModLoad: 711e0000 71281000   C:\Program Files (x86)\Steam\tier0_s.dll
+ModLoad: 71a90000 71b28000   C:\Program Files (x86)\Steam\vstdlib_s.dll
+ModLoad: 725f0000 72644000   C:\WINDOWS\SYSTEM32\MSWSOCK.dll
+ModLoad: 73150000 7316c000   C:\WINDOWS\SYSTEM32\bcrypt.dll
+ModLoad: 711d0000 711da000   C:\WINDOWS\SYSTEM32\Secur32.dll
+ModLoad: 00810000 0082b000   C:\WINDOWS\System32\imagehlp.dll
+ModLoad: 711a0000 711cb000   C:\WINDOWS\SYSTEM32\SSPICLI.DLL
+ModLoad: 767c0000 76892000   C:\WINDOWS\System32\shcore.dll
+ModLoad: 73170000 7317a000   C:\WINDOWS\SYSTEM32\CRYPTBASE.DLL
+ModLoad: 75b20000 75b94000   C:\WINDOWS\System32\bcryptPrimitives.dll
+ModLoad: 70e50000 70f59000   C:\Program Files (x86)\Steam\steam.dll
+ModLoad: 6a2e0000 6a4c0000   C:\WINDOWS\SYSTEM32\DbgHelp.dll
+ModLoad: 71160000 71190000   C:\WINDOWS\SYSTEM32\dbgcore.DLL
+ModLoad: 70e20000 70e41000   C:\Program Files (x86)\Steam\CSERHelper.dll
+ModLoad: 6a240000 6a2d1000   C:\WINDOWS\WinSxS\x86_microsoft.windows.common-controls_6595b64144ccf1df_5.82.26100.8115_none_cf9a25ee8eaab31f\comctl32.dll
+ModLoad: 72480000 724a6000   C:\WINDOWS\SYSTEM32\dwmapi.dll
+ModLoad: 74ee0000 74ef5000   C:\WINDOWS\SYSTEM32\kernel.appcore.dll
+ModLoad: 717d0000 71850000   C:\WINDOWS\system32\uxtheme.dll
+ModLoad: 75ef0000 76008000   C:\WINDOWS\System32\MSCTF.dll
+ModLoad: 71610000 71713000   C:\WINDOWS\SYSTEM32\textinputframework.dll
+ModLoad: 71530000 7160d000   C:\WINDOWS\SYSTEM32\CoreMessaging.dll
+ModLoad: 71290000 71522000   C:\WINDOWS\SYSTEM32\CoreUIComponents.dll
+ModLoad: 70e00000 70e17000   C:\WINDOWS\SYSTEM32\xinput1_4.dll
+ModLoad: 72500000 72524000   C:\WINDOWS\SYSTEM32\DEVOBJ.dll
+ModLoad: 6a0c0000 6a232000   C:\WINDOWS\SYSTEM32\inputhost.dll
+ModLoad: 751c0000 75246000   C:\WINDOWS\System32\clbcatq.dll
+ModLoad: 07520000 07547000   C:\Windows\System32\dinput.dll
+ModLoad: 70dc0000 70dcb000   C:\WINDOWS\SYSTEM32\HID.DLL
+ModLoad: 766d0000 76737000   C:\WINDOWS\System32\WINTRUST.dll
+ModLoad: 72450000 7245e000   C:\WINDOWS\SYSTEM32\MSASN1.dll
+ModLoad: 6e670000 6e6a6000   C:\Windows\System32\deviceaccess.dll
+ModLoad: 6a020000 6a0b1000   C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\d3d11.dll
+ModLoad: 69fe0000 6a019000   C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\dxgi.dll
+ModLoad: 70db0000 70dbe000   C:\Users\ZIGMAS~1\AppData\Local\Temp\ddxx_MesHoooooook.dll
+(80dc.88fc): Break instruction exception - code 80000003 (first chance)
+eax=01a16000 ebx=00000000 ecx=77d5df00 edx=77d5df00 esi=77d5df00 edi=77d5df00
+eip=77d0b440 esp=1e81fb20 ebp=1e81fb4c iopl=0         nv up ei pl zr na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000246
+ntdll!DbgBreakPoint:
+77d0b440 cc              int     3
+0:043> cdb: Reading initial command '.echo ==== FAULTING INSTRUCTION ====; u 77D95F33 L6; .echo ==== WHO IS THIS ====; ln 77D95F33; .echo ==== FAULTING THREAD 13680 (0x3570) STACK ====; ~~[0x3570]s; kb 30; .echo ==== HEAP SUMMARY ====; !heap -s; q'
+==== FAULTING INSTRUCTION ====
+ntdll!RtlpGetFirstBlockAddress+0x56:
+77d95f33 0fb7400c        movzx   eax,word ptr [eax+0Ch]
+77d95f37 33c1            xor     eax,ecx
+77d95f39 0fb70df899dc77  movzx   ecx,word ptr [ntdll!RtlpLFHKey (77dc99f8)]
+77d95f40 33c1            xor     eax,ecx
+77d95f42 0fb7ce          movzx   ecx,si
+77d95f45 33c1            xor     eax,ecx
+==== WHO IS THIS ====
+(77d95edd)   ntdll!RtlpGetFirstBlockAddress+0x56   |  (77d95f51)   ntdll!RtlpGetReservedBlockSize
+==== FAULTING THREAD 13680 (0x3570) STACK ====
+eax=00000000 ebx=10bad8d0 ecx=0000a746 edx=03da2ff8 esi=01bc8000 edi=10bad8d0
+eip=77d0951c esp=10bad86c ebp=10bad88c iopl=0         nv up ei pl nz na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000206
+ntdll!NtDelayExecution+0xc:
+77d0951c c20800          ret     8
+ChildEBP RetAddr      Args to Child              
+10bad868 77d22579     00000000 10bad8d0 00000000 ntdll!NtDelayExecution+0xc
+10bad88c 75582d50     00000000 10bad8d0 7b258992 ntdll!RtlDelayExecution+0xe9
+10bad8f4 75582cef     000003e8 00000000 10bad948 KERNELBASE!SleepEx+0x50
+*** WARNING: Unable to verify checksum for C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi\d3d11.dll
+10bad904 6a03eda7     000003e8 0000001c 00000000 KERNELBASE!Sleep+0xf
+WARNING: Stack unwind information not available. Following frames may be wrong.
+10bad948 6a03b336     c0000005 00000000 00000000 d3d11!D3D11CreateDeviceAndSwapChain+0x1a9c7
+10bad9d4 77d0382f     10bad9f0 10badb20 10badad0 d3d11!D3D11CreateDeviceAndSwapChain+0x16f56
+10bada24 77cfec64     00000000 03da2ff0 03da2ff8 ntdll!RtlpCallVectoredHandlers+0xf8
+10badab8 77d0b5af     10badad0 10badb20 10badad0 ntdll!RtlDispatchException+0x67
+10badab8 77d95f33     10badad0 10badb20 10badad0 ntdll!KiUserExceptionDispatcher+0xf
+10bae5c8 77d96de6     02020000 03da2ff0 10bae654 ntdll!RtlpGetFirstBlockAddress+0x56
+10bae5f4 77d7ef79     00000002 00001000 10bae680 ntdll!RtlpWalkLFHBlock+0x348
+10bae61c 77d7f317     00000001 02020000 10bae638 ntdll!RtlpWalkHeap+0x337
+10bae62c 77d7cdb2     00000001 10bae670 7566d20e ntdll!RtlpWalkHeapInternal+0x17
+10bae638 7566d20e     02020000 10bae654 10bae680 ntdll!RtlWalkHeap+0x12
+10bae670 6a04943a     02020000 10bae680 03da2ed0 KERNELBASE!HeapWalk+0x6e
+10bae6b8 6a0431c1     07188cb8 10baecf4 10baeec6 d3d11!D3D11CreateDeviceAndSwapChain+0x2505a
+10baf128 6a0409b9     00000000 00000007 10924cd0 d3d11!D3D11CreateDeviceAndSwapChain+0x1ede1
+10baf894 76dd5d49     00000000 76dd5d30 10baf8fc d3d11!D3D11CreateDeviceAndSwapChain+0x1c5d9
+10baf8a4 77cfd83b     00000000 271830c0 00000000 KERNEL32!BaseThreadInitThunk+0x19
+10baf8fc 77cfd7c1     ffffffff 77d4482d 00000000 ntdll!__RtlUserThreadStart+0x2b
+10baf90c 00000000     6a040900 00000000 00000000 ntdll!_RtlUserThreadStart+0x1b
+==== HEAP SUMMARY ====
+
+
+************************************************************************************************************************
+                                              NT HEAP STATS BELOW
+************************************************************************************************************************
+LFH Key                   : 0x8370889e
+Termination on corruption : DISABLED
+  Heap     Flags   Reserv  Commit  Virt   Free  List   UCR  Virt  Lock  Fast 
+                    (k)     (k)    (k)     (k) length      blocks cont. heap 
+-----------------------------------------------------------------------------
+02020000 00000002    8388   4460   8176    700    56     4    2      0   LFH
+    External fragmentation  15 % (56 free blocks)
+02690000 00001002     272     32     60      1     3     1    0      0   LFH
+03e20000 00001002    1292    152   1080     78     3     2    0      0   LFH
+07490000 00001002     272     36     60      5     2     1    0      0   LFH
+07550000 00001002      60     20     60      7     2     1    0      0      
+076b0000 00001002     272     28     60      3     1     1    0      0   LFH
+0d4b0000 00001002    8452   5660   8240    125    19     4    0      0   LFH
+0e200000 00001002     272     40     60      7     3     1    0      0   LFH
+-----------------------------------------------------------------------------
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\Visualizers\winrt.natvis'

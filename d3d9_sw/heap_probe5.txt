@@ -1,0 +1,72 @@
+
+   AllowParallelInitializationOfLocalRepositories : true
+
+
+
+
+
+
+*** wait with pending attach
+
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+
+Response                         Time (ms)     Location
+Deferred                                       srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Symbol search path is: srv*C:\symbols*https://msdl.microsoft.com/download/symbols
+Executable search path is: 
+WARNING: Process 17792 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+...
+Loading unloaded module list
+.........
+(4580.7c28): Wake debugger - code 80000007 (first chance)
+eax=00000000 ebx=0056e8e8 ecx=00000000 edx=09a60b80 esi=0981adb8 edi=620120b0
+eip=76f0b8f6 esp=0056e8c8 ebp=0056e8e0 iopl=0         nv up ei pl nz na pe nc
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00000206
+gdi32full!pcfAllocCFONT+0x14:
+76f0b8f6 ff0d2490f876    dec     dword ptr [gdi32full!cCfontFree (76f89024)] ds:002b:76f89024=00000001
+0:000> cdb: Reading initial command '.echo ==PA==; !heap -p -a 0x007f2488; .echo ==PA2==; !heap -p -a 0x007f2c60; .echo ==I==; !heap -i 0x007f2488; .echo ==SRCH==; !heap -srch 0x007f2488; q'
+==PA==
+**********************************************
+
+The `!heap -p' commands in exts.dll have been replaced
+with equivalent commands in ext.dll.
+If you are in a KD session, use `!ext.heap -p`
+**********************************************
+==PA2==
+**********************************************
+
+The `!heap -p' commands in exts.dll have been replaced
+with equivalent commands in ext.dll.
+If you are in a KD session, use `!ext.heap -p`
+**********************************************
+==I==
+Detailed information for block entry 007f2488
+Assumed heap       : 0x00000000 (Use !heap -i NewHeapHandle to change)
+Header content     : 0xD306EFF6 0xC2002070
+Block flags        : 0x1 LFH (busy )
+Total block size   : 0x0 units (0x0 bytes)
+Requested size     : 0xffffffe7 bytes (unused 0x19 bytes)
+Subsegment         : 0x9bd972f4User blocks not available
+
+
+==SRCH==
+NtGlobalFlag enables following debugging aids for new heaps:
+    stack back traces
+LFH Key                   : 0xd2730b67
+Termination on corruption : DISABLED
+  Heap     Flags   Reserv  Commit  Virt   Free  List   UCR  Virt  Lock  Fast 
+                    (k)     (k)    (k)     (k) length      blocks cont. heap 
+-----------------------------------------------------------------------------
+007f0000 08000002    8388   4420   8176    609    73     4    2      0   LFH
+    External fragmentation  13 % (73 free blocks)
+00c10000 08001002     272     44     60      4     3     1    0      0   LFH
+06000000 08001002    1292    152   1080     69    11     2    0      0   LFH
+09b10000 08001002     272     40     60      7     3     1    0      0   LFH
+09c10000 08001002      60     20     60      7     2     1    0      0      
+09dc0000 08001002     272     32     60      3     3     1    0      0   LFH
+0fea0000 08001002    8452   7728   8240    196    31     4    0      0   LFH
+-----------------------------------------------------------------------------
+quit:

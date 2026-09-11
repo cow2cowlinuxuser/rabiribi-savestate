@@ -1,0 +1,8 @@
+Get-Random : Cannot validate argument on parameter 'Count'. The 0 argument is less than the minimum allowed range of 
+1. Supply an argument that is greater than or equal to 1 and then try the command again.
+At F:\rbo_fabre_proto\d3d9_sw\heap_owner.ps1:111 char:61
++ ... ndom -Count ([Math]::Min(60, ($addrs | Select-Object -Unique).Count)) ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Get-Random], ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.GetRandomCommand
+ 

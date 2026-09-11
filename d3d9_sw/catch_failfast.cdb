@@ -1,0 +1,46 @@
+$$ Commands for catch_failfast.ps1. Kept in a file rather than passed with -c
+$$ because the command string has to contain quotes, and a quoted argument
+$$ containing quotes does not survive PowerShell handing it to cdb - the outer
+$$ quotes are stripped and cdb reads the remainder as a program to launch. A
+$$ script file has no shell in the path, so cdb's own parser sees it intact.
+
+.symfix
+
+$$ Unity publishes symbols for shipped players, and this build's are already
+$$ downloaded and expanded under symbols\. Without them a fail-fast stack is a
+$$ column of UnityPlayer+hex, which is how five offsets sat in the logs for days
+$$ while the crash they named - GfxDeviceD3D11Base::PresentFrame walking a
+$$ std::list<ID3D11Query *> - went unrecognised. The local path is first so a
+$$ cached copy is used before the network is touched.
+.sympath+ F:\rbo_fabre_proto\d3d9_sw\symbols
+.sympath+ SRV*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://symbolserver.unity3d.com/
+.reload /f
+.echo === symbol state for the modules that matter ===
+lm m UnityPlayer
+lm m mono*
+lm m d3d11
+
+$$ Fail-fast. Windows reports every one of these as 0xc0000409,
+$$ STATUS_STACK_BUFFER_OVERRUN, whatever the real check was; the subcode in rcx
+$$ is what names it, and 3 is FAST_FAIL_CORRUPT_LIST_ENTRY. kv is the point of
+$$ the whole exercise: the call site tells us which list ntdll was walking.
+$$ A full dump is written too. The stack in this log names the site, but the dump
+$$ is the only way to ask a question we did not think of before the process died
+$$ - which has happened twice now - and it can be reopened with the same symbols
+$$ afterwards using analyze_dump.cdb.
+$$ Armed on BOTH chances. int 29h is noncontinuable, so the first real one of
+$$ these arrived as a second-chance event and walked straight past a first-chance
+$$ -c: we got the header line and none of the report, with the process frozen at a
+$$ prompt holding everything we had asked for.
+sxe -c ".echo ===FAILFAST===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/failfast.dmp" -c2 ".echo ===FAILFAST-2ND===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/failfast.dmp" 0xc0000409
+
+$$ Heap corruption, the other way a bad restore announces itself.
+sxe -c ".echo ===HEAPCORRUPT===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/heapcorrupt.dmp" -c2 ".echo ===HEAPCORRUPT-2ND===; r rcx; .echo ---STACK---; kv; .echo ---ALLTHREADS---; ~*k; .echo ---END---; .dump /ma /o F:/rbo_fabre_proto/d3d9_sw/heapcorrupt.dmp" 0xc0000374
+
+$$ Ordinary access violations, second chance only. Mono raises first-chance
+$$ exceptions as routine control flow, so acting on those would never finish.
+$$ sxd passes the first chance through to the program's own handler and reports
+$$ only if nothing handled it, which is the case that actually kills the process.
+sxd -c2 ".echo ===AV===; .exr -1; .echo ---STACK---; kv; .echo ---END---" av
+
+g
