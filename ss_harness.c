@@ -755,6 +755,10 @@ typedef struct {
 	LONG pre_bad;  /* the control: this one should never go wrong */
 	LONG post_bad; /* the hypothesis */
 
+	/* thread-set invariant (invariant 4 / restore_invariants.md) */
+	LONG tset_checks, tset_fresh, tset_gone, tset_recycled;
+	LONG tset_worst_gone;
+
 	Rec rec[REC_MAX];
 } Held;
 
@@ -1544,6 +1548,17 @@ int main(int argc, char **argv)
 			/* Bumped before anything else so the workers pick it up as
 			 * early as possible after their contexts resume. */
 			g_held->gen++;
+			{
+				int tf = 0, tr = 0, tg = 0;
+
+				savestate_thread_set(&tf, &tr, &tg);
+				g_held->tset_checks++;
+				g_held->tset_fresh += tf;
+				g_held->tset_gone += tg;
+				g_held->tset_recycled += tr;
+				if (tg > g_held->tset_worst_gone)
+					g_held->tset_worst_gone = tg;
+			}
 			if (g_mode == MODE_MONO) {
 				pin_verify();
 				call_oracle(NULL);
@@ -1677,6 +1692,11 @@ int main(int argc, char **argv)
 		       (long)g_held->call_checks, (long)g_held->call_failed,
 		       (long)g_held->call_wrong);
 	}
+	printf("thread-set invariant: %ld check(s), %ld gone total (worst %ld in one "
+	       "restore), %ld fresh (%ld recycled)\n",
+	       (long)g_held->tset_checks, (long)g_held->tset_gone,
+	       (long)g_held->tset_worst_gone, (long)g_held->tset_fresh,
+	       (long)g_held->tset_recycled);
 	if (g_held->stalls) {
 		static const char *edge[8] = { "<1ms",  "<2ms",  "<4ms",  "<8ms",
 					       "<16ms", "<32ms", "<64ms", ">=64ms" };

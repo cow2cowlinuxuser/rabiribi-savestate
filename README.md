@@ -22,6 +22,25 @@ threads keep running forward with stacks that are never rewound. Objects that
 those threads hold then no longer describe the buffers the restored game
 believes in.
 
+### What changed (2026-09)
+
+**Class B TEB veto (the deferred win).** System thread TEBs hold ~8 blocks on
+the game's rewound heap every session. Those TEBs are not in the snapshot but
+the blocks are, so the blocks were being written back while the system threads
+that held them kept running. `blk_sys_mark` now scans every system thread's
+full TEB as a veto root for the block-ownership closure, so those blocks are no
+longer restored. See `restore_invariants.md` invariant 6.
+
+**Thread-set invariant.** The restore already compared thread sets and logged
+divergences, but the counts were buried in the log and no harness checked them.
+`savestate_thread_set()` now exports the fresh / recycled / gone counts, and
+both harnesses (`rr_harness`, `ss_harness`) report them after every restore.
+See `restore_invariants.md` invariant 4.
+
+Both changes need a Windows game run to verify the death rate. The harnesses
+exercise the code paths and log the counts, but the harness's thread set is
+smaller and more stable than the game's.
+
 Known gaps, all measured rather than assumed:
 
 - roughly 4.7 MB of `MEM_MAPPED` regions are never captured, because the region

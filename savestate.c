@@ -3437,6 +3437,8 @@ typedef struct Control {
 	int rmode;
 	int guard;
 	int last_fresh;
+	int last_gone;
+	int last_recycled;
 	int listed;
 	DWORD anchor_tick;
 #define SS_FMT_SLOTS 64
@@ -6716,7 +6718,7 @@ static void blk_sys_mark(void)
 	uintptr_t lo_all = (uintptr_t)-1, hi_all = 0;
 	unsigned qh = 0, qn = 0, marked = 0, both = 0, i;
 	HANDLE proc = GetProcessHeap();
-	int k, nroot = 0, nteb = 0;
+	int k, nroot = 0, nteb = 0, nteb_sys = 0;
 	LARGE_INTEGER t0, t1, pf;
 	BlkWalk w;
 
@@ -6813,12 +6815,68 @@ static void blk_sys_mark(void)
 				nroot++;
 			}
 		}
-		/* ActivationContextStackPointer. That stack is a heap block and the
-		 * TEB is the only thing pointing at it, so without this word the
-		 * closure never finds it - and the TEB is excluded, so nothing else
-		 * is going to. */
-		w.root = (uintptr_t)(teb + TEB_ACTCTX_SP);
-		blk_scan_range((uintptr_t)(teb + TEB_ACTCTX_SP), sizeof(void *), &w);
+		/* Class B: system thread TEBs as veto roots (restore_invariants.md
+		 * invariant 6).
+		 *
+		 * audit_present_threads reported ~8 blocks on the game's rewound
+		 * heap held by system thread TEBs every session, but the report
+		 * was advisory only. Those blocks were still written back, and the
+		 * system threads that held them - which keep running forward - used
+		 * the restored contents as present-time state. The crash histogram
+		 * shows workers dying 0 frames after restore with wild pointers
+		 * in CRT and ntdll paths on those same threads.
+		 *
+		 * For a transient (system) thread, scan the full TEB page and one
+		 * hop of small private allocations reachable from it. This is the
+		 * same scan audit_present_threads does, promoted from advisory to
+		 * veto: any block the system closure reaches from a system TEB is
+		 * marked as system-owned and will not be written back. Game threads
+		 * still get only the activation-context pointer, which is the only
+		 * TEB field pointing at a heap block that the game's side needs. */
+		if (g_ctl->transient[i]) {
+			const uintptr_t *tw = (const uintptr_t *)teb;
+			unsigned tk;
+			uintptr_t hops[16];
+			int nhops = 0, tj;
+
+			w.root = (uintptr_t)teb;
+			blk_scan_range((uintptr_t)teb, 0x1000, &w);
+			nteb_sys++;
+
+			for (tk = 0; tk < 0x1000 / sizeof(uintptr_t) && nhops < 16; tk++) {
+				MEMORY_BASIC_INFORMATION tmbi;
+				uintptr_t tab, tspan;
+
+				if (tw[tk] < 0x10000 ||
+				    VirtualQuery((LPCVOID)tw[tk], &tmbi, sizeof(tmbi)) !=
+					    sizeof(tmbi))
+					continue;
+				if (tmbi.State != MEM_COMMIT || tmbi.Type != MEM_PRIVATE ||
+				    (tmbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+					continue;
+				tab = (uintptr_t)tmbi.AllocationBase;
+				tspan = alloc_span(tab);
+				if (!tspan || tspan > 0x10000 || heap_index_of(tab) >= 0)
+					continue;
+				for (tj = 0; tj < nhops; tj++)
+					if (hops[tj] == tab)
+						break;
+				if (tj == nhops) {
+					hops[nhops++] = tab;
+					w.root = tab;
+					blk_scan_range(tab, tspan, &w);
+				}
+			}
+			nroot++;
+		} else {
+			/* ActivationContextStackPointer. That stack is a heap block
+			 * and the TEB is the only thing pointing at it, so without
+			 * this word the closure never finds it - and the TEB is
+			 * excluded, so nothing else is going to. */
+			w.root = (uintptr_t)(teb + TEB_ACTCTX_SP);
+			blk_scan_range((uintptr_t)(teb + TEB_ACTCTX_SP),
+				       sizeof(void *), &w);
+		}
 		nteb++;
 	}
 	nroot += nteb;
@@ -6844,12 +6902,13 @@ static void blk_sys_mark(void)
 	 * hole the loader crashes were coming through. Zero means they were not
 	 * coming from here and the next theory is somewhere else. */
 	ss_log("  system reach: %u of %u matched block(s) reachable from %s, %u "
-	       "contested, over %d root(s), %u exact hit(s), %.1f ms%s\n",
+	       "contested, over %d root(s) (%d system TEBs scanned as veto roots), "
+	       "%u exact hit(s), %.1f ms%s\n",
 	       marked, g_blk_match_n,
 	       mode == 3  ? "ntdll and the audio stack"
 	       : mode < 2 ? "ntdll"
 			  : "everything left in the present",
-	       both, nroot, g_reach_exact,
+	       both, nroot, nteb_sys, g_reach_exact,
 	       (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)pf.QuadPart,
 	       qn >= SS_BLK_QCAP ? " <<< QUEUE FULL, closure is incomplete" : "");
 }
@@ -10941,8 +11000,14 @@ static int do_load(int slotno)
 			}
 		}
 		if (fresh || gone)
-			ss_log("  divergence: %d newer (%d same role), %d gone\n", fresh,
-			       recycled, gone);
+			ss_log("  thread-set invariant: %d at save, %d live now, "
+			       "%d newer (%d same role), %d gone%s\n",
+			       s->nids, g_ctl->nids, fresh, recycled, gone,
+			       gone ? " <<< restored state refers to exited threads"
+				    : "");
+		else
+			ss_log("  thread-set invariant: %d threads, unchanged "
+			       "since the save\n", s->nids);
 		if (fresh && policy() == POLICY_REFUSE) {
 			ss_log("load: refused, %d thread(s) newer than the save "
 			       "(D3D9SW_REWIND_NEWTHREADS=hold or run to override)\n",
@@ -10951,6 +11016,8 @@ static int do_load(int slotno)
 			return 0;
 		}
 		g_ctl->last_fresh = fresh;
+		g_ctl->last_gone = gone;
+		g_ctl->last_recycled = recycled;
 	}
 
 	/* Nothing is written until every region is known to be restorable. A
@@ -12383,5 +12450,30 @@ void savestate_exclude(void *p, size_t bytes)
 	 * quietly rewound by the next - which is worse than not holding it, since the
 	 * first restore would appear to prove it worked. */
 	g_ctl->nex_fixed = g_ctl->nex;
+}
+
+/* Thread-set mismatch after the most recent restore.
+ *
+ * The restored state can refer to threads that have since exited, and threads
+ * that appeared after the save hold stacks and TEBs pointing into memory the
+ * restore just moved. Both are Class B straddles.
+ *
+ * Returns: number of threads present at save but gone now.
+ * Writes *fresh (threads live now but not at save), *recycled (same entry
+ * point under a new TID), *gone (at-save threads that exited) when non-NULL.
+ *
+ * Zero cost - reads counts the restore already computed. */
+int savestate_thread_set(int *fresh, int *recycled, int *gone)
+{
+	if (!g_ctl) {
+		if (fresh) *fresh = 0;
+		if (recycled) *recycled = 0;
+		if (gone) *gone = 0;
+		return 0;
+	}
+	if (fresh) *fresh = g_ctl->last_fresh;
+	if (recycled) *recycled = g_ctl->last_recycled;
+	if (gone) *gone = g_ctl->last_gone;
+	return g_ctl->last_gone;
 }
 

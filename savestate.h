@@ -86,6 +86,17 @@ int savestate_host_is(const char *exe_name);
  * is safe from a handler that may be holding the heap lock already. */
 int savestate_rewinds(const void *p, char *name, unsigned cap);
 
+/* Thread-set mismatch after the most recent restore.
+ *
+ * The restore already compares the live thread set against the saved one and
+ * logs the difference, but until now the counts lived only in the log. This
+ * exports them cheaply so the harness can assert on them.
+ *
+ * Returns: count of threads present at save time that have exited.
+ * Optionally fills *fresh (live now, not at save), *recycled (same entry point
+ * under a new TID), *gone (same as the return value). */
+int savestate_thread_set(int *fresh, int *recycled, int *gone);
+
 /* One slot. Each costs a full copy of the game's committed memory, which for
  * this title is well over a gigabyte of physical RAM. */
 #define SAVESTATE_SLOTS 1

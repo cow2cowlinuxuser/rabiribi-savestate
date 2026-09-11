@@ -77,10 +77,17 @@ sane. A fill loop was photographed halfway through. MITIGATED by the settle
 check, which is coarse (whole module) and expensive under load (1178-1462 ms of
 suspend time when the JIT is hot, against 34-83 ms when it is quiet).
 
-**Class B, named but not acted on.** Eight blocks on the game's rewound heap are
+**Class B, system thread TEBs.** Eight blocks on the game's rewound heap are
 held by system thread TEBs, reported in every session. TEBs are not in the
-snapshot; those blocks are. This is the cheapest identified win in the whole
-project and has been deferred four times.
+snapshot; those blocks are. BUILT: `blk_sys_mark` now scans the full TEB page of
+every transient (system) thread as a veto root, plus one hop of small private
+allocations reachable from the TEB (the same scan `audit_present_threads` was
+already doing as an advisory). Any shared-heap block the closure reaches from a
+system TEB is marked system-owned and will not be written back during the
+restore. Game threads still get only the activation-context pointer. The count
+of system TEBs scanned is logged as "system TEBs scanned as veto roots" in the
+system-reach line. This was deferred four times and is the cheapest identified
+win in the whole project.
 
 ### Instances that were theorised and then measured absent
 
@@ -251,15 +258,20 @@ sections are recorded. An earlier harness fault named
 `ntdll!RtlpWakeByAddress+0x15a`, so they are not hypothetical. Clearing the held
 bit by scanning is guesswork and is not proposed.
 
-### 4. Every thread the restored state refers to still exists
+### 4. Every thread the restored state refers to still exists - BUILT
 
 A restore has reported 52 contexts against 55 recorded at save. Three threads
 that existed at save time had exited, so restored state refers to threads that
 are gone - and a structure whose writer is gone is a structure that will never be
 completed. This is the missing second ingredient for the Class C instance above.
 
-Cheap to check: compare the recorded thread set against the live one and report
-the difference. Currently the counts are logged but never compared.
+BUILT: the restore now logs a structured "thread-set invariant" line with the
+save-time count, the live count, and the counts of fresh / recycled / gone
+threads, with a `<<<` tag when threads have exited. The counts are exported
+through `savestate_thread_set(fresh, recycled, gone)` so harnesses can check
+them after every restore without parsing the log. Both `rr_harness` and
+`ss_harness` call this after every restore and report cumulative counts plus the
+worst single-restore gone count.
 
 ### 5. No structure with a head outside the snapshot has entries inside it
 
@@ -268,6 +280,33 @@ Candidates by shape: loader lists, TLS bookkeeping, RPC and COM tables, the
 critical-section list ntdll itself maintains. Any structure whose head lives in a
 held module and whose entries live in a rewound heap has the identical failure
 mode, and there is no reason to expect the unwind tables are the only one.
+
+### 6. System thread TEBs do not hold pointers into blocks we restore - BUILT
+
+The general form of the Class B instance above, promoted from diagnostic to
+veto. `audit_present_threads` was already scanning system thread TEBs and
+reporting blocks on the game's rewound heap that system threads held pointers to,
+but the report was advisory: those blocks were still written back, and the system
+threads whose TEBs pointed at them - threads that keep running forward with
+stacks that are never rewound - used the restored contents as present-time state.
+
+BUILT: `blk_sys_mark` now includes every transient thread's full TEB page as a
+system-side root for the reachability closure, plus one hop of small private
+allocations hanging off each TEB (the same chain `audit_present_threads` follows
+to find per-thread runtime state like XInput's). Blocks the closure reaches are
+vetoed and will not be written back. The "system reach" log line now includes
+"N system TEBs scanned as veto roots" so the count is visible and can be
+compared against the `audit_present_threads` advisory that preceded it.
+
+Cost: one VirtualQuery per TEB word that looks like a pointer, bounded by the
+0x1000-byte TEB size and the 16-hop limit per thread. In practice this is a
+handful of queries per system thread, each of which is a single syscall. The
+block scan itself is the same binary-search walk the existing closure uses.
+
+The check that this fires can be constructed: create a system thread (e.g. via
+QueueUserWorkItem) that holds a pointer to a shared-heap block in its TEB via
+TlsSetValue, and verify the block is not written back. `rr_harness` already
+does exactly this for its `g_tls` slot.
 
 ## Two rules for anything added here
 

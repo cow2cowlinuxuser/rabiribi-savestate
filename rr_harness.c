@@ -50,6 +50,7 @@ int savestate_load(int slot);
 void savestate_guard(void);
 void savestate_exclude(void *p, size_t bytes);
 int savestate_last_was_restore(void);
+int savestate_thread_set(int *fresh, int *recycled, int *gone);
 
 /* No rasteriser here, so this is honest rather than merely convenient - the
  * same stub both existing harnesses carry. */
@@ -143,6 +144,10 @@ typedef struct {
 
 	/* heap identity, inherited from ss_harness scenario 3 */
 	int heap_bad;
+
+	/* thread-set invariant (invariant 4 / restore_invariants.md) */
+	int tset_checks, tset_fresh, tset_gone, tset_recycled;
+	int tset_worst_gone; /* high watermark of gone threads in a single restore */
 
 	/* fingerprints of the immutable half of every node, taken before the save.
 	 * Only magic/serial/self/fn are covered: the payload is written by worker
@@ -498,17 +503,33 @@ static int oracle_heaps(void)
 	return bad;
 }
 
+static int oracle_thread_set(void)
+{
+	int fresh = 0, recycled = 0, gone = 0;
+
+	savestate_thread_set(&fresh, &recycled, &gone);
+	g_held->tset_checks++;
+	g_held->tset_fresh += fresh;
+	g_held->tset_gone += gone;
+	g_held->tset_recycled += recycled;
+	if (gone > g_held->tset_worst_gone)
+		g_held->tset_worst_gone = gone;
+	return gone;
+}
+
 static void oracles(int cycle)
 {
 	int nb = oracle_nodes();
 	int vb = oracle_view();
 	int hb = oracle_heaps();
+	int tb = oracle_thread_set();
 
 	printf("  ORACLE cycle %d: nodes %d bad of %d checked (magic %d, identity %d, "
-	       "callback %d), mapped view %s, heaps %s\n",
+	       "callback %d), mapped view %s, heaps %s, threads %s\n",
 	       cycle, nb, g_held->node_checked, g_held->node_bad_magic,
 	       g_held->node_bad_self, g_held->node_bad_fn,
-	       vb ? "DID NOT come back" : "matches", hb ? "BROKEN" : "sane");
+	       vb ? "DID NOT come back" : "matches", hb ? "BROKEN" : "sane",
+	       tb ? "GONE threads exist" : "set matches");
 	printf("  ORACLE pool: %ld call(s) from ntdll worker(s), %ld held a pointer "
 	       "that no longer describes its object%s\n",
 	       g_held->pool_calls, g_held->pool_stale,
@@ -982,6 +1003,11 @@ int main(int argc, char **argv)
 	       g_held->worker_bad);
 	printf("  pump ticks / file reads %ld / %ld\n", g_held->pump_ticks,
 	       g_held->file_reads);
+	printf("  thread-set checks      %d\n", g_held->tset_checks);
+	printf("  threads gone total     %d (worst %d in one restore)\n",
+	       g_held->tset_gone, g_held->tset_worst_gone);
+	printf("  threads fresh total    %d (recycled %d)\n",
+	       g_held->tset_fresh, g_held->tset_recycled);
 
 	if (g_held->node_bad_magic || g_held->node_bad_self || g_held->node_bad_fn)
 		printf("\n  REPRODUCED. Objects on the shared process heap did not come\n"
