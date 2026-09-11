@@ -2572,6 +2572,81 @@ static LONG CALLBACK ss_fault_log(EXCEPTION_POINTERS *ep)
 		       (unsigned long)code, (void *)pc, in ? in : "unknown", off,
 		       (unsigned long)GetCurrentThreadId(), (long)g_frames_since_load);
 	}
+	/* What the instruction was reaching for.
+	 *
+	 * rabiribi.exe+6E9F8 has now killed the process twice, once immediately
+	 * after a restore that crossed a room boundary. The obvious next move is to
+	 * disassemble it, and that move is not available: the on-disk .text is
+	 * encrypted behind a Steam .bind stub and only exists in plaintext in the
+	 * memory of a process that is, by the time we care, dead.
+	 *
+	 * So describe the crash from the inside instead. An access violation
+	 * already carries the two facts a disassembly would have been used to
+	 * recover - which direction the access went and what address it named - and
+	 * VirtualQuery turns the second into a verdict: a write into PAGE_READONLY
+	 * is a pointer that should have been to a buffer and is instead to a
+	 * literal; a MEM_FREE target is a pointer to something that was reissued;
+	 * committed and writable means the pointer was fine and its contents were
+	 * not. Those are different bugs and we have been guessing between them.
+	 *
+	 * The bytes at the faulting address are dumped too, because the plaintext
+	 * instruction is right there under our own hand and nowhere else. */
+	if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR) {
+		ULONG_PTR what = ep->ExceptionRecord->NumberParameters > 0
+					 ? ep->ExceptionRecord->ExceptionInformation[0]
+					 : 2;
+		uintptr_t at = ep->ExceptionRecord->NumberParameters > 1
+				       ? (uintptr_t)ep->ExceptionRecord
+						 ->ExceptionInformation[1]
+				       : 0;
+		MEMORY_BASIC_INFORMATION mbi;
+		unsigned off = 0;
+		const char *in;
+
+		in = ss_module(at, &off);
+		ss_raw("       reaching: %s %08lX%s%s%s\n",
+		       what == 1 ? "WROTE to" : what == 8 ? "EXECUTED" : "read from",
+		       (unsigned long)at, in ? " in " : "", in ? in : "",
+		       in ? "" : " (no module)");
+		if (VirtualQuery((LPCVOID)at, &mbi, sizeof(mbi)) == sizeof(mbi))
+			ss_raw("       that page: base %08lX, %lu bytes, state %s, "
+			       "protect %08lX, type %s\n",
+			       (unsigned long)(ULONG_PTR)mbi.BaseAddress,
+			       (unsigned long)mbi.RegionSize,
+			       mbi.State == MEM_COMMIT	 ? "committed"
+			       : mbi.State == MEM_RESERVE ? "RESERVED, not committed"
+							  : "FREE - nothing is there",
+			       (unsigned long)(mbi.State == MEM_COMMIT ? mbi.Protect
+								       : 0),
+			       mbi.Type == MEM_IMAGE   ? "image"
+			       : mbi.Type == MEM_MAPPED ? "mapped"
+			       : mbi.Type == MEM_PRIVATE ? "private"
+							 : "none");
+		else
+			ss_raw("       that page: VirtualQuery would not describe it at "
+			       "all, so the address is not in this address space\n");
+		if (ss_readable(pc, 16)) {
+			const unsigned char *q = (const unsigned char *)pc;
+
+			ss_raw("       the instruction, in plaintext because we are inside "
+			       "the process: %02X %02X %02X %02X %02X %02X %02X %02X "
+			       "%02X %02X %02X %02X %02X %02X %02X %02X\n",
+			       q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8],
+			       q[9], q[10], q[11], q[12], q[13], q[14], q[15]);
+		}
+#if defined(_M_IX86) || defined(__i386__)
+		ss_raw("       registers: eax %08lX ebx %08lX ecx %08lX edx %08lX "
+		       "esi %08lX edi %08lX ebp %08lX esp %08lX\n",
+		       (unsigned long)ep->ContextRecord->Eax,
+		       (unsigned long)ep->ContextRecord->Ebx,
+		       (unsigned long)ep->ContextRecord->Ecx,
+		       (unsigned long)ep->ContextRecord->Edx,
+		       (unsigned long)ep->ContextRecord->Esi,
+		       (unsigned long)ep->ContextRecord->Edi,
+		       (unsigned long)ep->ContextRecord->Ebp,
+		       (unsigned long)ep->ContextRecord->Esp);
+#endif
+	}
 	/* The one arithmetic fault we can name exactly.
 	 *
 	 * ntdll's RtlpSubSegmentInitialize ends with `div ebx` where ebx is the
