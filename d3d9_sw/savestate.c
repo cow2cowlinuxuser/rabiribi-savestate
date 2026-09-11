@@ -9881,6 +9881,137 @@ static int in_the_jit(unsigned *who, uintptr_t *where)
 	return 0;
 }
 
+static int alloc_settle(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_ALLOCSETTLE", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+/* Is any thread running ntdll code that is not a parked system call?
+ *
+ * Heap locks do not answer this. blk_lock_all holds every heap's lock while the
+ * block map is walked, which excludes the classic allocator paths - but the low
+ * fragmentation heap deliberately does not take that lock. Its fast path runs on
+ * interlocked SLists precisely so that it never has to, so HeapLock succeeds
+ * while a thread is halfway through an LFH allocation, and the snapshot is taken
+ * anyway.
+ *
+ * That is the fault at 0D2AF674: thread 4488 was suspended inside the LFH path
+ * with ntdll+90CF5 and ntdll+43ACF beneath it. Its stack was held in the present
+ * because it is a system thread we exclude, and while it stood still we wrote 92
+ * MB of block contents underneath it. On resume its locals still pointed where
+ * they had pointed, but the bytes there had been replaced with bytes from the
+ * past, so the target it computed was not a function and it jumped into its own
+ * stack - the instruction pointer landed 348 bytes above the stack pointer, in
+ * the same allocation.
+ *
+ * Nothing can be restored differently to fix that. Both halves of the
+ * inconsistency are legitimate: the stack must stay in the present because it
+ * has kernel-side state we cannot rewind, and the heap must go back because that
+ * is the whole point. As with the JIT, the only repair is not to take the
+ * picture at that moment.
+ *
+ * The test has to be coarse, because the functions involved are internal and
+ * naming them means hard-coding offsets into whichever ntdll this machine
+ * shipped. But the whole module is too coarse the other way: threads park in
+ * ntdll for their entire lives waiting on handles, and a loop that waits for
+ * those would never settle. So the parked ones are subtracted by address. Every
+ * Nt* system call stub lives in one contiguous block, so a few exported ones
+ * give its bounds, and a thread sitting in any wait is inside it. A thread in
+ * ntdll but outside it is running real code, which for our purposes is close
+ * enough to "might be in the allocator" - the false positives are things like
+ * critical section entry, which are over in microseconds and cost us one more
+ * turn of the loop. */
+static int in_the_allocator(unsigned *who, uintptr_t *where)
+{
+	static uintptr_t lo, hi, stub_lo, stub_hi;
+	int i;
+
+	if (!hi) {
+		HMODULE m = GetModuleHandleA("ntdll.dll");
+		if (!m) {
+			hi = 1; /* cannot happen, but never look again if it does */
+			return 0;
+		}
+		{
+			IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)m;
+			IMAGE_NT_HEADERS *nt =
+				(IMAGE_NT_HEADERS *)((unsigned char *)m + dos->e_lfanew);
+			lo = (uintptr_t)m;
+			hi = lo + nt->OptionalHeader.SizeOfImage;
+		}
+		{
+			/* Spread deliberately across the alphabet, because the stubs are
+			 * laid out in system call number order and a handful of names from
+			 * one letter would bound only a slice of the block. */
+			static const char *const nm[] = {
+				"NtWaitForSingleObject", "NtWaitForMultipleObjects",
+				"NtDelayExecution", "NtRemoveIoCompletion",
+				"NtReadFile", "NtWriteFile", "NtDeviceIoControlFile",
+				"NtRequestWaitReplyPort", "NtAlpcSendWaitReceivePort",
+				"NtWaitForWorkViaWorkerFactory", "NtSetEvent",
+				"NtQueryObject", "NtClose", "NtCreateFile",
+				"NtQueryInformationThread", "NtReleaseMutant",
+			};
+			unsigned k;
+
+			for (k = 0; k < sizeof(nm) / sizeof(nm[0]); k++) {
+				uintptr_t a = (uintptr_t)GetProcAddress(m, nm[k]);
+				if (!a)
+					continue;
+				if (!stub_lo || a < stub_lo)
+					stub_lo = a;
+				if (a + 32 > stub_hi)
+					stub_hi = a + 32;
+			}
+			if (!stub_lo) {
+				/* No stubs found means no way to tell a parked thread from a
+				 * working one, and a settle loop that cannot tell would burn
+				 * every attempt and warn on every save. Better to say so once
+				 * and stay out of the way. */
+				hi = 1;
+				ss_log("  allocator settle: OFF - could not locate ntdll's "
+				       "system call stubs, so a parked thread cannot be told "
+				       "from one inside the heap\n");
+				return 0;
+			}
+		}
+	}
+	if (hi <= 1)
+		return 0;
+	for (i = 0; i < g_ctl->nids; i++) {
+		CONTEXT c;
+		uintptr_t pc;
+
+		if (!g_ctl->handles[i])
+			continue;
+		memset(&c, 0, sizeof(c));
+		c.ContextFlags = CONTEXT_CONTROL;
+		if (!GetThreadContext(g_ctl->handles[i], &c))
+			continue;
+#if defined(_M_IX86) || defined(__i386__)
+		pc = (uintptr_t)c.Eip;
+#else
+		pc = (uintptr_t)c.Rip;
+#endif
+		if (pc >= lo && pc < hi && !(pc >= stub_lo && pc < stub_hi)) {
+			if (who)
+				*who = g_ctl->ids[i];
+			if (where)
+				*where = pc - lo; /* an RVA, so the log can be compared across runs */
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* How many times to let go and look again before saving anyway.
  *
  * Saving anyway rather than refusing, because a save that silently does not
@@ -9949,23 +10080,34 @@ static int do_save(int slotno)
 	 * the release has to be real - a thread cannot leave the JIT while held. */
 	{
 		int tries = settle_tries(), n = 0;
-		unsigned who = 0;
-		uintptr_t where = 0;
+		unsigned who = 0, awho = 0;
+		uintptr_t where = 0, arva = 0;
+		int jit, alloc;
 
-		while (n < tries && in_the_jit(&who, &where)) {
+		for (;;) {
+			jit = in_the_jit(&who, &where);
+			alloc = alloc_settle() && in_the_allocator(&awho, &arva);
+			if ((!jit && !alloc) || n >= tries)
+				break;
 			resume_all(0);
 			Sleep(2);
 			collect_threads();
 			suspend_all();
 			n++;
 		}
-		if (n && !in_the_jit(NULL, NULL))
-			ss_log("  settled after %d attempt(s): no thread inside the JIT\n", n);
-		else if (n)
+		if (n && !jit && !alloc)
+			ss_log("  settled after %d attempt(s): nobody inside the JIT or "
+			       "running ntdll\n", n);
+		if (jit)
 			ss_log("  WARNING: still inside the JIT after %d attempt(s) (thread %u at "
 			       "%p); saving anyway, and this snapshot may hold a half-updated "
 			       "JIT-info table\n",
 			       n, who, (void *)where);
+		if (alloc)
+			ss_log("  WARNING: thread %u is still running ntdll at +%lX after %d "
+			       "attempt(s); saving anyway, and if it is inside the heap its "
+			       "stack will resume against block contents from the past\n",
+			       awho, (unsigned long)arva, n);
 	}
 	/* Heap locks are taken after settling rather than before it, because a
 	 * thread that needs to allocate its way out of the JIT cannot do that
@@ -9979,6 +10121,32 @@ static int do_save(int slotno)
 		blk_lock_all();
 		collect_threads();
 		suspend_all();
+		/* Settle again, because the release just above reopened the window the
+		 * first loop closed. Fewer attempts than the first pass: the heap locks
+		 * are held now, so a thread that wants the classic allocator will park
+		 * on the lock - which reads as a system call stub and therefore as
+		 * settled - and the only thing still able to make progress is the LFH
+		 * fast path, which is what we are waiting for anyway. */
+		if (alloc_settle()) {
+			unsigned awho = 0;
+			uintptr_t arva = 0;
+			int n = 0;
+
+			while (n < 8 && in_the_allocator(&awho, &arva)) {
+				resume_all(0);
+				Sleep(1);
+				collect_threads();
+				suspend_all();
+				n++;
+			}
+			if (in_the_allocator(&awho, &arva))
+				ss_log("  WARNING: thread %u is running ntdll at +%lX with the heap "
+				       "locks held; the block map is being walked out from under "
+				       "it\n", awho, (unsigned long)arva);
+			else if (n)
+				ss_log("  settled again after %d attempt(s) once the heaps were "
+				       "locked\n", n);
+		}
 		g_blk_save_n = blk_walk_locked(g_blk_save, SS_BLK_CAP, &capped);
 		blk_sort(g_blk_save, (int)g_blk_save_n);
 		if (capped)

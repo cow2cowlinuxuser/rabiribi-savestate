@@ -1,0 +1,3 @@
+built ds_harness32.exe (DirectSound rewind test, no game)
+built rr_harness32.exe (all four conditions, no game)
+wrote F:\rbo_fabre_proto\d3d9_sw\gl_stubs.c (2783 stubs, 198 hand) and F:\rbo_fabre_proto\d3d9_sw\opengl32.def (2988 exports)
