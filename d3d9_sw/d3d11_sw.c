@@ -7936,10 +7936,32 @@ static HRESULT WINAPI Ctx_Map(ID3D11DeviceContext1 *this, ID3D11Resource *res, U
 	mapped->RowPitch = r->kind ? r->row_pitch : r->byte_width;
 	mapped->DepthPitch = r->cpu_size;
 	map_track(r->cpu, r->cpu_size, r->id, (int)r->bind, r->kind);
-	if (r->kind == 1)
+	if (r->kind == 1) {
+		/* The readback question, answered permanently rather than under a
+		 * trace flag that costs more than the rasterising it describes.
+		 *
+		 * A staging texture with CPU read access, mapped, is the game
+		 * reading back what was drawn - and that is the one thing that
+		 * would stop the GPU from ever being a disposable cache. It is also
+		 * broken today: rasterising writes the render target's pixels
+		 * plane, every copy and Map path reads the cpu plane, and nothing
+		 * encodes one into the other, so a readback of rendered output
+		 * returns a plane that was never written. Black is what that looks
+		 * like on screen. */
+		if (r->usage == D3D11_USAGE_STAGING &&
+		    (r->cpu_access & D3D11_CPU_ACCESS_READ)) {
+			static long seen;
+
+			if (InterlockedIncrement(&seen) <= 8)
+				d11_log("READBACK: the game mapped staging texture #%d "
+					"%ux%u for READ (type=%u). This is a real "
+					"readback of rendered output, and the cpu plane "
+					"it reads was never written by the rasteriser",
+					r->id, r->width, r->height, type);
+		}
 		d11_trace("Map tex #%d %ux%u fmt=%d type=%u flags=%x", r->id, r->width, r->height,
 			(int)r->format, type, flags);
-	else if (r->bind & D3D11_BIND_CONSTANT_BUFFER) {
+	} else if (r->bind & D3D11_BIND_CONSTANT_BUFFER) {
 		if (InterlockedIncrement(&g_cb_maps) <= 20)
 			d11_trace("Map cb bytes=%u type=%u", r->byte_width, type);
 	} else if (InterlockedIncrement(&g_buf_maps) <= 20)
@@ -8101,6 +8123,21 @@ static void WINAPI Ctx_CopyResource(ID3D11DeviceContext1 *this, ID3D11Resource *
 	swrast_flush_if_pending(s->pixels);
 	if (d->is_bb)
 		g_bb_writes += d->width * d->height;
+	/* The other half of the readback question: copying INTO a staging
+	 * surface is how the data gets there before it is mapped. Naming the
+	 * source says whether it is the backbuffer or a render target, which is
+	 * what decides whether the GPU could ever be non-authoritative here. */
+	if (d->usage == D3D11_USAGE_STAGING && (d->cpu_access & D3D11_CPU_ACCESS_READ)) {
+		static long seen;
+
+		if (InterlockedIncrement(&seen) <= 8)
+			d11_log("READBACK: CopyResource into staging #%d %ux%u from #%d "
+				"%ux%u (backbuffer=%d, render target=%d). The source's "
+				"rendered pixels live in its pixels plane and this copies "
+				"its cpu plane, which nothing writes",
+				d->id, d->width, d->height, s->id, s->width, s->height,
+				s->is_bb, (s->bind & D3D11_BIND_RENDER_TARGET) ? 1 : 0);
+	}
 	if (d->kind == 1 && s->kind == 1) {
 		d11_trace("CopyResource #%d %ux%u fmt=%d bb=%d <- #%d %ux%u fmt=%d", d->id, d->width,
 			d->height, (int)d->format, d->is_bb, s->id, s->width, s->height,

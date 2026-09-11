@@ -48,13 +48,20 @@
 #define DS_CREATE_BUFFER 3
 #define DS_DUPLICATE 5
 
+#define DSB_QI 0
 #define DSB_RELEASE 2
 #define DSB_LOCK 11
 #define DSB_GET_POSITION 4
+#define DSB_GET_FORMAT 5
+#define DSB_GET_VOLUME 6
 #define DSB_GET_STATUS 9
 #define DSB_PLAY 12
 #define DSB_SET_POSITION 13
+#define DSB_SET_VOLUME 15
+#define DSB_SET_PAN 16
+#define DSB_SET_FREQ 17
 #define DSB_STOP 18
+#define DSB_UNLOCK 19
 
 typedef HRESULT(WINAPI *PFN_DSCREATE8)(const GUID *, void **, void *);
 typedef HRESULT(WINAPI *PFN_CREATEBUF)(void *, const void *, void **, void *);
@@ -82,6 +89,27 @@ typedef struct Buf {
 	int held; /* the snapshot has something to say about this one */
 	void *owner; /* the return address of whoever asked for it */
 } Buf;
+
+/* Declared up here because two of the methods being counted were hooked long
+ * before the survey existed, and their hooks sit above it. */
+enum {
+	C_QI,
+	C_GETPOS,
+	C_GETFMT,
+	C_GETVOL,
+	C_GETSTAT,
+	C_LOCK,
+	C_UNLOCK,
+	C_PLAY,
+	C_STOP,
+	C_SETPOS,
+	C_SETVOL,
+	C_SETPAN,
+	C_SETFREQ,
+	C_MAX
+};
+
+static unsigned long g_calls[C_MAX];
 
 static Buf g_buf[DSH_MAX];
 static int g_nbuf;
@@ -524,6 +552,7 @@ static HRESULT WINAPI hook_getpos(void *self, DWORD *play, DWORD *write)
 	void **fp = (void **)__builtin_frame_address(0);
 	HRESULT hr;
 
+	g_calls[C_GETPOS]++; /* see the note in hook_lock */
 	note_owner(__builtin_return_address(0), frame_up(fp), SITE_CURSOR);
 	hr = g_real_getpos(self, play, write);
 	if (SUCCEEDED(hr) && play && fp[0])
@@ -547,6 +576,10 @@ static HRESULT WINAPI hook_lock(void *self, DWORD off, DWORD bytes, void **p1, D
 	HRESULT hr = g_real_lock(self, off, bytes, p1, b1, p2, b2, flags);
 
 	g_lock_calls++;
+	/* Counted for the survey too. This slot was already hooked before the
+	 * survey existed, so the survey's own counter never saw it and the
+	 * inventory reported Lock as never called - next to 942 Unlocks. */
+	g_calls[C_LOCK]++;
 	/* Worth recording the largest request as well as any negative one: a
 	 * request of two billion is the same bug wearing a different sign. */
 	if ((bytes & 0x80000000u) || bytes > g_lock_worst_req) {
@@ -559,6 +592,171 @@ static HRESULT WINAPI hook_lock(void *self, DWORD off, DWORD bytes, void **p1, D
 		g_lock_worst_ra = frame_up((void **)__builtin_frame_address(0));
 	}
 	return hr;
+}
+
+/* The survey.
+ *
+ * We are considering replacing DirectSound outright with our own mixer, so that
+ * the play cursor becomes a number we own and advance rather than a hardware
+ * fact that keeps moving while every thread is suspended. That is only a
+ * sensible amount of work if we implement the part DxLib actually uses, and
+ * nobody knows what that is - DirectSound has far more surface than any one
+ * caller touches.
+ *
+ * So this counts. Every method is hooked to increment and call through, buffer
+ * formats are recorded where they are created, and QueryInterface records what
+ * else the game reaches for. Nothing here changes behaviour; it only answers
+ * "what would we have to build". */
+static const char *const g_cname[C_MAX] = {
+	"QueryInterface", "GetCurrentPosition", "GetFormat", "GetVolume",
+	"GetStatus",	  "Lock",		"Unlock",    "Play",
+	"Stop",		  "SetCurrentPosition", "SetVolume", "SetPan",
+	"SetFrequency"
+};
+
+/* One row per distinct wave format, because "what formats does it use" decides
+ * how much of a resampler we would need. */
+typedef struct Fmt {
+	DWORD rate;
+	WORD ch, bits;
+	unsigned long n;
+} Fmt;
+
+static Fmt g_fmt[16];
+static int g_nfmt;
+static DWORD g_flags_seen;
+static DWORD g_bytes_min = 0xFFFFFFFFu, g_bytes_max;
+static unsigned long g_ncreate, g_ndup;
+static GUID g_iid[8];
+static int g_niid;
+
+static void note_format(const void *desc)
+{
+	/* DSBUFFERDESC: size, flags, bufferBytes, reserved, then the format. */
+	const DWORD *d = (const DWORD *)desc;
+	const WORD *w;
+	DWORD rate;
+	WORD ch, bits;
+	int i;
+
+	if (!desc)
+		return;
+	g_flags_seen |= d[1];
+	if (d[2] < g_bytes_min)
+		g_bytes_min = d[2];
+	if (d[2] > g_bytes_max)
+		g_bytes_max = d[2];
+	w = (const WORD *)(uintptr_t)d[4];
+	if (!w)
+		return; /* a primary buffer has no format here */
+	ch = w[1];
+	rate = *(const DWORD *)(w + 2);
+	bits = w[7];
+	for (i = 0; i < g_nfmt; i++)
+		if (g_fmt[i].rate == rate && g_fmt[i].ch == ch && g_fmt[i].bits == bits) {
+			g_fmt[i].n++;
+			return;
+		}
+	if (g_nfmt < 16) {
+		g_fmt[g_nfmt].rate = rate;
+		g_fmt[g_nfmt].ch = ch;
+		g_fmt[g_nfmt].bits = bits;
+		g_fmt[g_nfmt].n = 1;
+		g_nfmt++;
+	}
+}
+
+static PFN_GETSTATUS g_real_getstatus;
+static PFN_PLAY g_real_play;
+static PFN_SETPOS g_real_setpos;
+static PFN_STOP g_real_stop;
+typedef HRESULT(WINAPI *PFN_QI)(void *, const GUID *, void **);
+typedef HRESULT(WINAPI *PFN_GETFMT)(void *, void *, DWORD, DWORD *);
+typedef HRESULT(WINAPI *PFN_GETVOL)(void *, LONG *);
+typedef HRESULT(WINAPI *PFN_SETLONG)(void *, LONG);
+typedef HRESULT(WINAPI *PFN_SETDWORD)(void *, DWORD);
+typedef HRESULT(WINAPI *PFN_UNLOCK)(void *, void *, DWORD, void *, DWORD);
+static PFN_QI g_real_qi;
+static PFN_GETFMT g_real_getfmt;
+static PFN_GETVOL g_real_getvol;
+static PFN_SETLONG g_real_setvol, g_real_setpan;
+static PFN_SETDWORD g_real_setfreq;
+static PFN_UNLOCK g_real_unlock;
+
+static HRESULT WINAPI hook_qi(void *self, const GUID *iid, void **out)
+{
+	int i;
+
+	g_calls[C_QI]++;
+	if (iid) {
+		for (i = 0; i < g_niid; i++)
+			if (!memcmp(&g_iid[i], iid, sizeof(GUID)))
+				goto done;
+		if (g_niid < 8)
+			g_iid[g_niid++] = *iid;
+	}
+done:
+	return g_real_qi(self, iid, out);
+}
+
+static HRESULT WINAPI hook_getfmt(void *self, void *f, DWORD n, DWORD *got)
+{
+	g_calls[C_GETFMT]++;
+	return g_real_getfmt(self, f, n, got);
+}
+
+static HRESULT WINAPI hook_getvol(void *self, LONG *v)
+{
+	g_calls[C_GETVOL]++;
+	return g_real_getvol(self, v);
+}
+
+static HRESULT WINAPI hook_getstatus(void *self, DWORD *s)
+{
+	g_calls[C_GETSTAT]++;
+	return g_real_getstatus(self, s);
+}
+
+static HRESULT WINAPI hook_unlock(void *self, void *p1, DWORD b1, void *p2, DWORD b2)
+{
+	g_calls[C_UNLOCK]++;
+	return g_real_unlock(self, p1, b1, p2, b2);
+}
+
+static HRESULT WINAPI hook_play(void *self, DWORD r1, DWORD pri, DWORD flags)
+{
+	g_calls[C_PLAY]++;
+	return g_real_play(self, r1, pri, flags);
+}
+
+static HRESULT WINAPI hook_stop(void *self)
+{
+	g_calls[C_STOP]++;
+	return g_real_stop(self);
+}
+
+static HRESULT WINAPI hook_setpos(void *self, DWORD p)
+{
+	g_calls[C_SETPOS]++;
+	return g_real_setpos(self, p);
+}
+
+static HRESULT WINAPI hook_setvol(void *self, LONG v)
+{
+	g_calls[C_SETVOL]++;
+	return g_real_setvol(self, v);
+}
+
+static HRESULT WINAPI hook_setpan(void *self, LONG v)
+{
+	g_calls[C_SETPAN]++;
+	return g_real_setpan(self, v);
+}
+
+static HRESULT WINAPI hook_setfreq(void *self, DWORD v)
+{
+	g_calls[C_SETFREQ]++;
+	return g_real_setfreq(self, v);
 }
 
 static void learn_buffer_vtbl(void *b)
@@ -574,6 +772,55 @@ static void learn_buffer_vtbl(void *b)
 	ss_hook_note("vtable", "IDirectSoundBuffer::GetCurrentPosition",
 		     g_buf_vtbl[DSB_GET_POSITION], 1);
 	ss_hook_note("vtable", "IDirectSoundBuffer::Lock", g_buf_vtbl[DSB_LOCK], 1);
+	/* Counting only. Each of these increments and calls through, so the survey
+	 * costs an add per call and changes nothing the game can observe. */
+	g_real_qi = (PFN_QI)slot_swap(g_buf_vtbl, DSB_QI, (void *)hook_qi);
+	g_real_getfmt = (PFN_GETFMT)slot_swap(g_buf_vtbl, DSB_GET_FORMAT, (void *)hook_getfmt);
+	g_real_getvol = (PFN_GETVOL)slot_swap(g_buf_vtbl, DSB_GET_VOLUME, (void *)hook_getvol);
+	g_real_getstatus =
+		(PFN_GETSTATUS)slot_swap(g_buf_vtbl, DSB_GET_STATUS, (void *)hook_getstatus);
+	g_real_unlock = (PFN_UNLOCK)slot_swap(g_buf_vtbl, DSB_UNLOCK, (void *)hook_unlock);
+	g_real_play = (PFN_PLAY)slot_swap(g_buf_vtbl, DSB_PLAY, (void *)hook_play);
+	g_real_stop = (PFN_STOP)slot_swap(g_buf_vtbl, DSB_STOP, (void *)hook_stop);
+	g_real_setpos = (PFN_SETPOS)slot_swap(g_buf_vtbl, DSB_SET_POSITION, (void *)hook_setpos);
+	g_real_setvol = (PFN_SETLONG)slot_swap(g_buf_vtbl, DSB_SET_VOLUME, (void *)hook_setvol);
+	g_real_setpan = (PFN_SETLONG)slot_swap(g_buf_vtbl, DSB_SET_PAN, (void *)hook_setpan);
+	g_real_setfreq =
+		(PFN_SETDWORD)slot_swap(g_buf_vtbl, DSB_SET_FREQ, (void *)hook_setfreq);
+}
+
+/* What we would have to build. */
+void dsh_survey(void)
+{
+	int i;
+
+	if (!g_ready) {
+		ss_log("dsound survey: the hook never armed, so nothing was counted\n");
+		return;
+	}
+	ss_log("dsound survey: %lu buffer(s) created, %lu duplicated, flags seen %08lX, "
+	       "buffer bytes %lu to %lu\n",
+	       g_ncreate, g_ndup, (unsigned long)g_flags_seen,
+	       (unsigned long)(g_bytes_min == 0xFFFFFFFFu ? 0 : g_bytes_min),
+	       (unsigned long)g_bytes_max);
+	for (i = 0; i < g_nfmt; i++)
+		ss_log("  format: %lu Hz, %u bit, %u channel(s) - %lu buffer(s)\n",
+		       (unsigned long)g_fmt[i].rate, (unsigned)g_fmt[i].bits,
+		       (unsigned)g_fmt[i].ch, g_fmt[i].n);
+	for (i = 0; i < C_MAX; i++)
+		if (g_calls[i])
+			ss_log("  %-20s %lu call(s)\n", g_cname[i], g_calls[i]);
+	/* A method with no calls is the useful half of this: it is surface we
+	 * would not have to implement. */
+	for (i = 0; i < C_MAX; i++)
+		if (!g_calls[i])
+			ss_log("  %-20s never called\n", g_cname[i]);
+	for (i = 0; i < g_niid; i++)
+		ss_log("  QueryInterface asked for {%08lX-%04X-%04X-%02X%02X%02X%02X%02X%02X%02X%02X}\n",
+		       (unsigned long)g_iid[i].Data1, g_iid[i].Data2, g_iid[i].Data3,
+		       g_iid[i].Data4[0], g_iid[i].Data4[1], g_iid[i].Data4[2],
+		       g_iid[i].Data4[3], g_iid[i].Data4[4], g_iid[i].Data4[5],
+		       g_iid[i].Data4[6], g_iid[i].Data4[7]);
 }
 
 static HRESULT WINAPI hook_create(void *self, const void *desc, void **out, void *unk)
@@ -585,6 +832,8 @@ static HRESULT WINAPI hook_create(void *self, const void *desc, void **out, void
 		learn_buffer_vtbl(*out);
 		track(*out, ra);
 		note_owner(ra, frame_up((void **)__builtin_frame_address(0)), SITE_CREATE);
+		g_ncreate++;
+		note_format(desc);
 	}
 	return hr;
 }
@@ -598,6 +847,7 @@ static HRESULT WINAPI hook_dup(void *self, void *src, void **out)
 		learn_buffer_vtbl(*out);
 		track(*out, ra);
 		note_owner(ra, frame_up((void **)__builtin_frame_address(0)), SITE_CREATE);
+		g_ndup++;
 	}
 	return hr;
 }

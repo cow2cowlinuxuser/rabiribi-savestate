@@ -1787,6 +1787,7 @@ void dsh_save(void);
 void dsh_restore(void);
 void dsh_seek(void);
 void dsh_quiet(void);
+void dsh_survey(void);
 void dsh_play(void);
 
 static int g_runaway_hits;
@@ -13843,6 +13844,7 @@ void savestate_object_report(void)
 	int i, j, clusters = 0, in_heap = 0, outside = 0, shown = 0;
 	int obj_heap = 0, obj_out = 0;
 
+	dsh_survey();
 	if (g_ctl && !g_ctl->cap_n)
 		ss_log("objects: nothing saved yet, so there is no region list to "
 		       "check against - press F5 first or every object will read as "
