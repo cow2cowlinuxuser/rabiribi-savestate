@@ -4046,7 +4046,8 @@ static const char *const g_knobs[] = {
 	"D3D9SW_DERIVED",	  "D3D9SW_FREEZE",
 	"D3D9SW_PROBE",           "D3D9SW_WATCH",
 	"D3D9SW_NOTHREAD",        "D3D9SW_RUNAWAY",
-	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
+	"D3D9SW_REWIND_TEXTINPUT", "D3D9SW_DECPATCH",
+	"D3D9SW_LFHHOLD",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN"
 };
 
@@ -5627,12 +5628,31 @@ static int sw_heap_rewound(void)
  * into a large region that is not theirs -- 16.2 MB apiece where mode 0 saw
  * 0.4 MB. Restoring on top of that gave a divide by zero inside ntdll's
  * allocator on two threads at once, a size field that came back zero. */
-static const char *const kOsHeapOwners[] = { "ntdll.dll" };
+/* The text input stack was added after it crashed in exactly the way this list
+ * describes: C0000005 at textinputframework.dll+E0A20 with MSCTF.dll frames
+ * beneath it, 388 frames after a restore, on a session whose eight restores were
+ * all inside one room. Its heap was being rewound - the partition dump said
+ * "heap 03E80000 textinputframework.dll rewound (193 vote(s))" - while the
+ * objects in it are Windows' own, reached from thread local storage and from
+ * COM apartment state that no snapshot of ours touches.
+ *
+ * It fails on focus changes rather than continuously because that is when MSCTF
+ * runs. A game window losing focus is enough to make Windows walk structures we
+ * wound back, which is why this looked like the game refusing to run off-screen.
+ *
+ * ntdll must stay first: the knob below trims the list back to it. */
+static const char *const kOsHeapOwners[] = { "ntdll.dll", "textinputframework.dll",
+					     "MSCTF.dll", "inputhost.dll" };
 
 static int os_owned_heap(const char *who)
 {
-	size_t i;
-	for (i = 0; i < sizeof(kOsHeapOwners) / sizeof(kOsHeapOwners[0]); i++)
+	size_t i, n = sizeof(kOsHeapOwners) / sizeof(kOsHeapOwners[0]);
+
+	/* D3D9SW_REWIND_TEXTINPUT=1 hands the text input heaps back to the rewind,
+	 * so the trade can be measured from the cfg instead of rebuilt. */
+	if (ss_tristate("D3D9SW_REWIND_TEXTINPUT") == 1)
+		n = 1;
+	for (i = 0; i < n; i++)
 		if (lstrcmpiA(who, kOsHeapOwners[i]) == 0)
 			return 1;
 	return 0;
