@@ -6230,6 +6230,73 @@ static void present_wait(HWND hwnd, UINT sync)
 	}
 }
 
+/* What the game asks of the swap chain, and what it actually gets.
+ *
+ * Two unmeasured numbers decide whether our pacing has anything to do with the
+ * game running fast: the sync interval the game passes, because present_wait is
+ * skipped outright when it is zero and the game is then limiting itself, and
+ * the frame rate we really deliver.
+ *
+ * Sampled against a QueryPerformanceCounter resolved straight out of kernel32
+ * rather than whatever the imports point at. The savestate engine offsets every
+ * clock the game can read, and a pacing measurement taken on a rewound clock
+ * would be describing the rewind rather than the pacing.
+ *
+ * Window state is reported next to it because the compositor throttles frames
+ * for windows nobody can see. A fixed-timestep game slowed down that way is
+ * advancing its world at a rate its own logic has no idea about, which is the
+ * off-screen case worth having evidence for rather than a theory. */
+static void pace_probe(HWND hwnd, UINT sync, UINT flags)
+{
+	static BOOL(WINAPI * qpc)(LARGE_INTEGER *);
+	static LARGE_INTEGER freq, mark;
+	static unsigned long frames;
+	static int last_state = -1;
+	static UINT last_sync = 0xFFFFFFFFu;
+	LARGE_INTEGER now;
+	double el;
+	int state;
+
+	if (!qpc) {
+		HMODULE k = GetModuleHandleA("kernel32.dll");
+
+		if (k)
+			qpc = (BOOL(WINAPI *)(LARGE_INTEGER *))(void *)GetProcAddress(
+				k, "QueryPerformanceCounter");
+		if (!qpc)
+			return;
+		QueryPerformanceFrequency(&freq);
+		qpc(&mark);
+	}
+	frames++;
+	/* Once per distinct value rather than once per frame: the event worth
+	 * seeing is the game changing its mind, which it does at mode changes. */
+	if (sync != last_sync) {
+		last_sync = sync;
+		d11_log("present: the game asked for SyncInterval=%u flags=%x - %s", sync,
+			flags,
+			sync ? "our pacing applies"
+			     : "our pacing is SKIPPED, so the game is limiting itself");
+	}
+	state = IsIconic(hwnd) ? 2 : (GetForegroundWindow() == hwnd ? 0 : 1);
+	if (state != last_state) {
+		last_state = state;
+		d11_log("present: window is now %s", state == 2	  ? "MINIMISED"
+						     : state == 1 ? "in the background"
+								  : "in the foreground");
+	}
+	if (!qpc(&now) || !freq.QuadPart)
+		return;
+	el = (double)(now.QuadPart - mark.QuadPart) / (double)freq.QuadPart;
+	if (el >= 2.0) {
+		d11_log("present: %.1f fps over %.1f s (%s, SyncInterval=%u)", frames / el, el,
+			state == 2 ? "minimised" : state == 1 ? "background" : "foreground",
+			sync);
+		mark = now;
+		frames = 0;
+	}
+}
+
 static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 {
 	Sw11Swap *s = (Sw11Swap *)this;
@@ -6413,6 +6480,7 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	 * how fast the rasteriser can actually go. */
 	if (sync && vsync_on())
 		present_wait(s->hwnd, sync);
+	pace_probe(s->hwnd, sync, flags);
 	perf_tick();
 	return S_OK;
 }
