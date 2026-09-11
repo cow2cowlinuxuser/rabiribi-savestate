@@ -61,9 +61,17 @@
 #define SS_MAX_REGIONS 65536
 #define SS_MAX_THREADS 256
 #define SS_MAX_EXCL 1024
-#define SS_MAX_HEAPS 64
+/* One entry per heap AND one per heap segment, so this is not bounded by how
+ * many heaps exist but by how far they have grown. At 64 the table filled on
+ * this game - a single heap of 26 MB carries 79 segments - and the segments
+ * past the cap were never registered. An unregistered segment answers to no
+ * heap, so heap_rewound_at said no, so the region skipped the by-block path and
+ * was restored wholesale: the allocator's own headers and free lists written
+ * back from a snapshot, which is the one write we know kills the process. The
+ * cap did not report itself, so this looked like block mode working. */
+#define SS_MAX_HEAPS 512
 #define SS_MAX_MODS 256
-#define SS_MAX_SEGS 256
+#define SS_MAX_SEGS 1024
 #define SS_VIEW_BYTES (32u * 1024u * 1024u)
 
 typedef struct Region {
@@ -3630,6 +3638,20 @@ typedef struct Control {
 	/* Carried across the restore by hand, for state the snapshot does not
 	 * cover. Kept apart from pos_buf so that F11 and F5 cannot overwrite
 	 * each other's mark. */
+	/* What the last save actually captured. The object map needs to answer
+	 * "will a restore reach this address", and the only truthful source for
+	 * that is the region list the save was built from - asking which heap an
+	 * address belongs to answers a different question and gets it wrong,
+	 * because a heap's later segments are nowhere near its handle. */
+	uintptr_t cap_base[1024];
+	uintptr_t cap_size[1024];
+	int cap_n;
+	/* The process heap roster as it stood in the present, sampled before the
+	 * restore writes anything. */
+	unsigned roster_n;
+	uintptr_t roster_arr;
+	uintptr_t roster_ent[64];
+	int roster_valid;
 	unsigned char carry_buf[0x400];
 	int carry_span;
 	int carry_valid;
@@ -3639,6 +3661,7 @@ typedef struct Control {
 #define SS_FMT_SLOTS 64
 	int nheaps, heaps_listed;
 	HANDLE heap_h[SS_MAX_HEAPS];
+	int seg_full;
 	uintptr_t heap_lo[SS_MAX_HEAPS], heap_hi[SS_MAX_HEAPS];
 	char heap_ours[SS_MAX_HEAPS];
 	char heap_name[SS_MAX_HEAPS][32];
@@ -5681,8 +5704,13 @@ static void heaps_partition(void)
 		    (uintptr_t)mbi.AllocationBase != base)
 			continue;
 		owner = segment_owner(base, mbi.Protect);
-		if (!owner || g_ctl->nseg >= SS_MAX_SEGS)
+		if (!owner || g_ctl->nseg >= SS_MAX_SEGS) {
+			if (owner && g_ctl->nseg >= SS_MAX_SEGS && !g_ctl->seg_full++)
+				ss_log("    WARNING: the segment list is full at %d, so some "
+				       "heap memory is invisible to every decision below\n",
+				       SS_MAX_SEGS);
 			continue;
+		}
 		s = g_ctl->nseg++;
 		g_ctl->seg_base[s] = base;
 		g_ctl->seg_size[s] = alloc_span(base);
@@ -5819,6 +5847,15 @@ static void heaps_partition(void)
 		 * be named and its side of the line known. Only the first segment of
 		 * a heap is its handle, so without this the rest of a grown heap
 		 * answers to nothing. */
+		/* Loud, because the silent version of this cost us a day. A segment
+		 * that does not fit here is a segment the restore will write
+		 * wholesale. */
+		if (g_ctl->nheaps >= SS_MAX_HEAPS && first)
+			ss_log("    WARNING: the heap table is full at %d entries, so "
+			       "segments past this point answer to no heap and will be "
+			       "restored WHOLESALE, metadata included, instead of by "
+			       "block\n",
+			       SS_MAX_HEAPS);
 		if (g_ctl->nheaps < SS_MAX_HEAPS &&
 		    g_ctl->seg_base[s] != (uintptr_t)g_ctl->seg_owner[s]) {
 			k = g_ctl->nheaps++;
@@ -9401,6 +9438,9 @@ static void witness_save(Slot *s);
 static void witness_load(void);
 static void carry_save(void);
 static void carry_load(void);
+static void roster_save(void);
+static void roster_load(void);
+static void cap_record(Slot *s);
 
 /* D3D9SW_DIFFWRITE=0 goes back to the wholesale copy, so the two can be run
  * against each other on the same save without rebuilding. */
@@ -10309,6 +10349,7 @@ static int do_save(int slotno)
 	ss_log("save: slot %d, %d regions, %.1f MB, %d threads, %d context(s), %d file(s)\n",
 	       slotno, s->nregs, g_ctl->last_mb, g_ctl->nids, s->nthreads, s->nfiles);
 	witness_save(s);
+	cap_record(s);
 	carry_save();
 	rc = 1;
 
@@ -11269,6 +11310,7 @@ static int do_load(int slotno)
 	 * this line then the comparison after the restore has nothing to miss, and
 	 * the check reports health exactly as it did before it was written. */
 	heap_check("as the restore begins");
+	roster_save();
 	poke_init();
 	g_clob_slot = -1;
 	if (clobber_mode() && clobber_marks())
@@ -12202,6 +12244,7 @@ static int do_load(int slotno)
 	 * version of this line never appeared and why the census that follows a
 	 * restore prints "save". The helper is excluded from the snapshot and is
 	 * the only thread that survives the restore in its own present. */
+	roster_load();
 	carry_load();
 	witness_load();
 	if (g_ctl->diff_same || g_ctl->diff_wrote) {
@@ -13350,6 +13393,121 @@ static void witness_save(Slot *s)
 			       : "wholesale");
 }
 
+/* The process heap roster.
+ *
+ * Windows keeps the list of live heaps in the PEB: a count and an array of
+ * handles. That list is memory, so a restore rewinds it - while the heaps it
+ * describes are left in the present, because we do not rewind heaps. The two
+ * then disagree, and the disagreement is not symmetric: a heap the game created
+ * after the save still exists, still holds allocations, and still has a handle
+ * the game is using, but has been struck off the roster. The heap check calls
+ * these forgotten heaps, and it found two of them in the run before this was
+ * written.
+ *
+ * Nothing good comes of telling Windows it has fewer heaps than it has. So the
+ * roster is read before the restore writes anything and put back afterwards,
+ * which leaves the list describing the heaps that actually exist. It is a count
+ * and a handful of pointers - the smallest possible fix for the largest
+ * mismatch we have found.
+ *
+ * Offsets are the documented PEB layout for each architecture. The TEB gives us
+ * the PEB without a syscall. */
+#if defined(_M_IX86) || defined(__i386__)
+#define PEB_FROM_TEB 0x30
+#define PEB_NHEAPS 0x88
+#define PEB_HEAPARR 0x90
+#else
+#define PEB_FROM_TEB 0x60
+#define PEB_NHEAPS 0xE8
+#define PEB_HEAPARR 0xF0
+#endif
+
+static int roster_keep(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_ROSTER", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+static uintptr_t peb_base(void)
+{
+	uintptr_t teb = (uintptr_t)NtCurrentTeb();
+
+	if (!teb || !ss_readable(teb + PEB_FROM_TEB, sizeof(uintptr_t)))
+		return 0;
+	return *(const uintptr_t *)(teb + PEB_FROM_TEB);
+}
+
+static void roster_save(void)
+{
+	uintptr_t peb = peb_base();
+	unsigned i, n;
+	uintptr_t arr;
+
+	if (!g_ctl)
+		return;
+	g_ctl->roster_valid = 0;
+	if (!roster_keep() || !peb)
+		return;
+	if (!ss_readable(peb + PEB_NHEAPS, sizeof(unsigned)) ||
+	    !ss_readable(peb + PEB_HEAPARR, sizeof(uintptr_t)))
+		return;
+	n = *(const unsigned *)(peb + PEB_NHEAPS);
+	arr = *(const uintptr_t *)(peb + PEB_HEAPARR);
+	if (!arr || n > 64)
+		n = n > 64 ? 64 : n;
+	if (!arr || !ss_readable(arr, n * sizeof(uintptr_t)))
+		return;
+	for (i = 0; i < n; i++)
+		g_ctl->roster_ent[i] = *(const uintptr_t *)(arr + i * sizeof(uintptr_t));
+	g_ctl->roster_n = n;
+	g_ctl->roster_arr = arr;
+	g_ctl->roster_valid = 1;
+}
+
+/* Runs while the threads are still suspended, so no allocation can observe the
+ * moment when the roster and the heaps disagreed. */
+static void roster_load(void)
+{
+	uintptr_t peb = peb_base();
+	unsigned i, now_n, put = 0;
+
+	if (!g_ctl || !g_ctl->roster_valid || !peb)
+		return;
+	if (!ss_readable(peb + PEB_NHEAPS, sizeof(unsigned)))
+		return;
+	now_n = *(const unsigned *)(peb + PEB_NHEAPS);
+	if (ss_readable(g_ctl->roster_arr, g_ctl->roster_n * sizeof(uintptr_t)))
+		for (i = 0; i < g_ctl->roster_n; i++) {
+			uintptr_t *slot =
+				(uintptr_t *)(g_ctl->roster_arr + i * sizeof(uintptr_t));
+
+			if (*slot == g_ctl->roster_ent[i])
+				continue;
+			*slot = g_ctl->roster_ent[i];
+			put++;
+		}
+	*(unsigned *)(peb + PEB_NHEAPS) = g_ctl->roster_n;
+	/* Reported even when nothing moved, because "the rewind did not touch
+	 * the roster" is the result that would retire this whole idea, and a
+	 * silent success looks identical to a knob that never ran. */
+	if (now_n == g_ctl->roster_n && !put)
+		ss_log("  peb heaps: roster already matched the present, %u heap(s) "
+		       "- the rewind did not disturb it\n",
+		       g_ctl->roster_n);
+	else
+		ss_log("  peb heaps: the rewind left %u heap(s) on the roster, the "
+		       "present has %u - put back, %u handle(s) corrected, so no "
+		       "live heap is disowned\n",
+		       now_n, g_ctl->roster_n, put);
+}
+
 /* Hand-carried state.
  *
  * The player lives in a heap segment, and with the heaps left in the present
@@ -13516,6 +13674,256 @@ void savestate_probe_census(void)
 	if (!pos_ready())
 		return;
 	boundary_census("f7");
+}
+
+/* A map of what is alive, built without knowing anything about the game.
+ *
+ * We have no types, no symbols and no object list, so we cannot ask the game
+ * what is on screen. But a thing that is on screen and moving has a signature
+ * that needs no type information: a few words, close together, whose values
+ * change continuously. Sweep memory, keep the addresses that changed since we
+ * last looked, cluster them by proximity, and what falls out is the live
+ * objects and where they live.
+ *
+ * The point is not the objects themselves - it is which side of the seam they
+ * are on. A cluster inside a heap will not survive a restore under the current
+ * settings; a cluster outside the heaps will. That turns "bullets sometimes
+ * come back" from something you notice into something we can count before the
+ * restore happens.
+ *
+ * Cost is kept to one window per frame. A full pass over the candidate memory
+ * therefore takes tens of frames, which means this sees anything that lives
+ * longer than about half a second and can miss anything shorter. That is a real
+ * limitation and the report says so rather than implying it saw everything. */
+#define OM_WIN (1u << 20)
+#define OM_MAX 262144
+/* One object is a run of changed words with no large gap - but in a dense
+ * region like a particle pool that rule will happily swallow a hundred
+ * kilobytes and call it one thing. Runs are cut off here so a busy area is
+ * reported as many objects rather than one implausible one. */
+#define OM_GAP 128
+#define OM_SPAN 2048
+
+/* The list the last save was built from, so the question asked is the one that
+ * matters: not which heap owns this address, but whether the snapshot covers
+ * it. Heap membership got this wrong - a heap's later segments sit far from its
+ * handle, so live objects in them were reported as captured when they were
+ * not. */
+static void cap_record(Slot *s)
+{
+	int i;
+
+	if (!g_ctl)
+		return;
+	g_ctl->cap_n = 0;
+	for (i = 0; i < s->nregs && g_ctl->cap_n < 1024; i++) {
+		g_ctl->cap_base[g_ctl->cap_n] = s->regs[i].base;
+		g_ctl->cap_size[g_ctl->cap_n] = s->regs[i].size;
+		g_ctl->cap_n++;
+	}
+}
+
+static int om_captured(uintptr_t a)
+{
+	int i;
+
+	if (!g_ctl)
+		return 0;
+	for (i = 0; i < g_ctl->cap_n; i++)
+		if (a >= g_ctl->cap_base[i] && a < g_ctl->cap_base[i] + g_ctl->cap_size[i])
+			return 1;
+	return 0;
+}
+
+static unsigned char *g_om_shadow;
+static uintptr_t g_om_base;
+static size_t g_om_len;
+static uintptr_t g_om_cursor;
+static uintptr_t *g_om_hit;  /* address | 1 when the new value looks like a coordinate */
+static int g_om_hit_n;
+static uintptr_t *g_om_done;
+static int g_om_done_n;
+static unsigned g_om_sweeps;
+
+/* Coordinates in this game are floats in the thousands. Anything with a sane
+ * exponent and a magnitude in playfield range counts; the test only has to be
+ * good enough to tell a moving position from a frame counter. */
+static int om_coordlike(unsigned bits)
+{
+	unsigned exp = (bits >> 23) & 0xFF;
+	float f;
+
+	if (exp == 0 || exp == 0xFF)
+		return 0;
+	memcpy(&f, &bits, sizeof(f));
+	if (f < 0)
+		f = -f;
+	return f >= 1.0f && f <= 200000.0f;
+}
+
+static int om_ready(void)
+{
+	if (g_om_shadow)
+		return 1;
+	g_om_shadow = (unsigned char *)blk_arena(OM_WIN);
+	g_om_hit = (uintptr_t *)blk_arena(OM_MAX * sizeof(uintptr_t));
+	g_om_done = (uintptr_t *)blk_arena(OM_MAX * sizeof(uintptr_t));
+	return g_om_shadow && g_om_hit && g_om_done;
+}
+
+/* Ordinary writable private memory only. Images and mappings are not where the
+ * game keeps moving objects, and our own bookkeeping is skipped so the map does
+ * not fill up with the instrument watching itself. */
+static int om_candidate(const MEMORY_BASIC_INFORMATION *mbi)
+{
+	DWORD p = mbi->Protect & 0xFF;
+
+	if (mbi->State != MEM_COMMIT || mbi->Type != MEM_PRIVATE)
+		return 0;
+	if (p != PAGE_READWRITE && p != PAGE_EXECUTE_READWRITE)
+		return 0;
+	if ((uintptr_t)mbi->BaseAddress == (uintptr_t)g_ctl)
+		return 0;
+	return 1;
+}
+
+void savestate_object_watch(void)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	uintptr_t at;
+	size_t take;
+
+	if (!g_ctl || !om_ready())
+		return;
+	/* Compare what we shadowed last frame against what it says now. */
+	if (g_om_len && ss_readable(g_om_base, g_om_len)) {
+		const unsigned *live = (const unsigned *)g_om_base;
+		const unsigned *was = (const unsigned *)g_om_shadow;
+		size_t i, words = g_om_len / sizeof(unsigned);
+
+		for (i = 0; i < words && g_om_hit_n < OM_MAX; i++) {
+			if (live[i] == was[i])
+				continue;
+			g_om_hit[g_om_hit_n++] = (g_om_base + i * sizeof(unsigned)) |
+						 (om_coordlike(live[i]) ? 1u : 0u);
+		}
+	}
+	g_om_len = 0;
+	/* Then move the window on. */
+	for (at = g_om_cursor; at < 0x7FFF0000u;) {
+		if (VirtualQuery((LPCVOID)at, &mbi, sizeof(mbi)) != sizeof(mbi))
+			break;
+		if (!om_candidate(&mbi)) {
+			at = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+			continue;
+		}
+		take = (size_t)((uintptr_t)mbi.BaseAddress + mbi.RegionSize - at);
+		if (take > OM_WIN)
+			take = OM_WIN;
+		if (ss_readable(at, take)) {
+			memcpy(g_om_shadow, (const void *)at, take);
+			g_om_base = at;
+			g_om_len = take;
+			g_om_cursor = at + take;
+			return;
+		}
+		at = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+	}
+	/* Wrapped. The sweep just finished is the one worth reporting, so it is
+	 * kept whole rather than blended into the next one. */
+	memcpy(g_om_done, g_om_hit, (size_t)g_om_hit_n * sizeof(uintptr_t));
+	g_om_done_n = g_om_hit_n;
+	g_om_hit_n = 0;
+	g_om_cursor = 0;
+	g_om_sweeps++;
+}
+
+void savestate_object_report(void)
+{
+	int i, j, clusters = 0, in_heap = 0, outside = 0, shown = 0;
+	int obj_heap = 0, obj_out = 0;
+
+	if (g_ctl && !g_ctl->cap_n)
+		ss_log("objects: nothing saved yet, so there is no region list to "
+		       "check against - press F5 first or every object will read as "
+		       "uncaptured\n");
+	if (!g_ctl || !g_om_done_n) {
+		ss_log("objects: no completed sweep yet - %u so far, each takes a few "
+		       "dozen frames\n",
+		       g_om_sweeps);
+		return;
+	}
+	/* Insertion sort by address. The list is the changed words of one sweep,
+	 * already close to sorted because the sweep walks upward. */
+	for (i = 1; i < g_om_done_n; i++) {
+		uintptr_t v = g_om_done[i];
+
+		for (j = i - 1; j >= 0 && (g_om_done[j] & ~1u) > (v & ~1u); j--)
+			g_om_done[j + 1] = g_om_done[j];
+		g_om_done[j + 1] = v;
+	}
+	ss_log("objects: sweep %u, %d word(s) changed since the sweep before it%s\n",
+	       g_om_sweeps, g_om_done_n,
+	       g_om_done_n >= OM_MAX
+		       ? " <<< THE TABLE FILLED, so this sweep stopped early and the "
+			 "counts below are a floor, not a total"
+		       : "");
+	for (i = 0; i < g_om_done_n;) {
+		uintptr_t base = g_om_done[i] & ~1u;
+		uintptr_t end = base;
+		int words = 0, coords = 0, heap;
+
+		/* One object is a run of changed words with no large gap. Anything
+		 * further than this apart is treated as a different thing. */
+		for (j = i; j < g_om_done_n; j++) {
+			uintptr_t a = g_om_done[j] & ~1u;
+
+			if (a > end + OM_GAP || a - base > OM_SPAN)
+				break;
+			end = a;
+			words++;
+			if (g_om_done[j] & 1u)
+				coords++;
+		}
+		heap = !om_captured(base);
+		clusters++;
+		if (heap)
+			in_heap++;
+		else
+			outside++;
+		/* Two coordinate-like words together is the signature of something
+		 * with a position, which is what "on screen" means here. */
+		if (coords >= 2) {
+			if (heap)
+				obj_heap++;
+			else
+				obj_out++;
+			if (shown < 20) {
+				ss_log("  object %08lX +%lu bytes, %d word(s) changed, %d "
+				       "coordinate-like - %s\n",
+				       (unsigned long)base,
+				       (unsigned long)(end - base + 4), words, coords,
+				       heap ? "NOT in the last save, so a restore will "
+					      "not reach it"
+					    : "in the last save, so a restore puts it "
+					      "back");
+				shown++;
+			}
+		}
+		i = j;
+	}
+	ss_log("objects: %d cluster(s) of change, %d outside the last save and %d inside\n",
+	       clusters, in_heap, outside);
+	if (!g_ctl->cap_n)
+		ss_log("objects: %d look like positioned things - whether any of them "
+		       "survive a restore is UNKNOWN, because nothing has been saved "
+		       "to compare against\n",
+		       obj_heap + obj_out);
+	else
+		ss_log("objects: %d look like positioned things - %d of those survive a "
+		       "restore, %d do not. Anything alive for less than about half a "
+		       "second can be missed by a sweep this size\n",
+		       obj_heap + obj_out, obj_out, obj_heap);
 }
 
 void savestate_pos_watch(void)

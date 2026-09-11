@@ -6276,6 +6276,7 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	}
 	savestate_guard();
 	savestate_pos_watch();
+	savestate_object_watch();
 	/* F6 arms the soak driver, which then drives save and restore by itself.
 	 * Read once per frame outside the slot loop so the keystroke is consumed
 	 * exactly once however many slots there are. */
@@ -6357,6 +6358,7 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	}
 	if (savestate_key_edge(VK_F7)) {
 		savestate_chain_probe();
+		savestate_object_report();
 		savestate_probe_census();
 		savestate_census();
 		/* Reported next to the census because retiring objects trades memory

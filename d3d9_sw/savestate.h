@@ -113,6 +113,8 @@ void savestate_pos_restore(void);
  * accord and censuses the heaps across it, which is the only view we have of
  * what the game itself treats as per-load state versus permanent state. */
 void savestate_pos_watch(void);
+void savestate_object_watch(void);
+void savestate_object_report(void);
 /* F7. Takes a census right now, so two presses with only play between them
  * measure what play alone changes, uncontaminated by a load. */
 void savestate_probe_census(void);
