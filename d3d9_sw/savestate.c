@@ -9437,6 +9437,7 @@ static int ensure_committed(uintptr_t base, uintptr_t size, uintptr_t alloc_base
  * because it needs both the Slot layout and the entity lookup. */
 static void witness_save(Slot *s);
 static void witness_load(void);
+static void room_check(void);
 static void carry_save(void);
 static void carry_load(void);
 static void roster_save(void);
@@ -11506,6 +11507,7 @@ static int do_load(int slotno)
 	 * this line then the comparison after the restore has nothing to miss, and
 	 * the check reports health exactly as it did before it was written. */
 	heap_check("as the restore begins");
+	room_check();
 	roster_save();
 	poke_init();
 	g_clob_slot = -1;
@@ -13781,6 +13783,41 @@ static void carry_load(void)
 	ss_log("  carry: %d byte(s) written back to %08lX before the threads "
 	       "resume\n",
 	       g_ctl->carry_span, (unsigned long)ent);
+}
+
+/* Which room the game is standing in as the restore begins, against the one the
+ * save was taken in.
+ *
+ * Read here rather than after the restore, because afterwards the answer is
+ * always the saved room and the question disappears. A restore inside one room
+ * asks the game to accept slightly different values for things it already has.
+ * A restore across a room boundary asks it to un-happen a room change: the
+ * entity pool was torn down and rebuilt, so the allocations the save described
+ * have been freed and reissued, and the block map matches far less of what it
+ * expected. Those are different amounts of work and there is no reason to
+ * assume they have the same failure rate - but until this line existed the log
+ * could not tell them apart, so every restore looked alike in the record. */
+static void room_check(void)
+{
+	uintptr_t ent;
+	unsigned map = 0;
+
+	if (!g_ctl || !g_ctl->wit_valid)
+		return;
+	if (!rr_entity(&ent, &map)) {
+		ss_log("  room: cannot read the map id right now, so this restore is "
+		       "unclassified\n");
+		return;
+	}
+	if (map == g_ctl->wit_map)
+		ss_log("  room: restoring inside map %u, the same one the save was taken "
+		       "in\n", map);
+	else
+		ss_log("  room: restoring ACROSS a room change - saved in map %u, standing "
+		       "in map %u. The entity pool has been torn down and rebuilt since "
+		       "the save, so the block map is being asked to match allocations "
+		       "that were freed and reissued\n",
+		       g_ctl->wit_map, map);
 }
 
 static void witness_load(void)
