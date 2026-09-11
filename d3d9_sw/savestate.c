@@ -9929,16 +9929,26 @@ static int alloc_settle(void)
  * enough to "might be in the allocator" - the false positives are things like
  * critical section entry, which are over in microseconds and cost us one more
  * turn of the loop. */
-static int in_the_allocator(unsigned *who, uintptr_t *where)
+static uintptr_t g_ntd_lo, g_ntd_hi, g_stub_lo, g_stub_hi;
+
+/* Deliberately separate from the test below, and called with the process still
+ * running.
+ *
+ * GetProcAddress takes the loader lock and can allocate, and the test it feeds
+ * is only ever asked its question with every thread suspended. Doing the setup
+ * there too would mean reaching for the loader lock at the one moment nobody can
+ * hand it over, which is the shape of half the deadlocks this file already
+ * guards against. It costs nothing to look the addresses up early, so it happens
+ * early. */
+static void alloc_ranges_init(void)
 {
 	static uintptr_t lo, hi, stub_lo, stub_hi;
-	int i;
 
 	if (!hi) {
 		HMODULE m = GetModuleHandleA("ntdll.dll");
 		if (!m) {
 			hi = 1; /* cannot happen, but never look again if it does */
-			return 0;
+			goto publish;
 		}
 		{
 			IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)m;
@@ -9980,10 +9990,23 @@ static int in_the_allocator(unsigned *who, uintptr_t *where)
 				ss_log("  allocator settle: OFF - could not locate ntdll's "
 				       "system call stubs, so a parked thread cannot be told "
 				       "from one inside the heap\n");
-				return 0;
+				goto publish;
 			}
 		}
 	}
+publish:
+	g_ntd_lo = lo;
+	g_ntd_hi = hi;
+	g_stub_lo = stub_lo;
+	g_stub_hi = stub_hi;
+}
+
+static int in_the_allocator(unsigned *who, uintptr_t *where)
+{
+	uintptr_t lo = g_ntd_lo, hi = g_ntd_hi;
+	uintptr_t stub_lo = g_stub_lo, stub_hi = g_stub_hi;
+	int i;
+
 	if (hi <= 1)
 		return 0;
 	for (i = 0; i < g_ctl->nids; i++) {
@@ -10073,6 +10096,10 @@ static int do_save(int slotno)
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t0);
 	g_blk_save_n = 0;
+	/* Before collect_threads, because everything past this point runs with the
+	 * process held still and this reaches for the loader lock. */
+	if (alloc_settle())
+		alloc_ranges_init();
 	collect_threads();
 	suspend_all();
 	/* Let go and look again while anything is inside the JIT. Threads must be
