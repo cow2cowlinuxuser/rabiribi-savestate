@@ -1,0 +1,26 @@
+$$ Interrogate a live deadlock, non-invasively.
+$$
+$$ A hung process is better evidence than a dead one: every thread is still
+$$ standing where it stopped. Read-only, and it detaches rather than quitting,
+$$ so the game survives and can be dumped again if the first look is not enough.
+
+.sympath srv*C:\Users\zigmaster\.cursor\projects\f-rbo-fabre-proto-d3d9-sw\..\symbols-cache*https://msdl.microsoft.com/download/symbols;F:\rbo_fabre_proto\d3d9_sw\symbols
+.reload /f
+
+.echo ===MODULES===
+lm m d3d11
+lm m mono*
+lm m ntdll
+
+$$ The theory being tested: our own record spinlock was frozen in the held state
+$$ by a restore, so every later JIT registration piles up in fntab_lock, which is
+$$ inside d3d11.dll. If that is what happened, many threads share a stack whose
+$$ top frame is in d3d11 and whose caller is mono.
+.echo ===ALL STACKS===
+~*k
+
+.echo ===DUMP===
+.dump /ma F:\rbo_fabre_proto\d3d9_sw\hang_live.dmp
+
+.echo ===DONE===
+qd

@@ -1,0 +1,37 @@
+$$ Pass 2. Pass 1 established the list: ntdll!RtlpDynamicFunctionTable, an
+$$ InsertTailList whose head is a global in ntdll's MRDATA and whose tail entry
+$$ at the fault was 0000021780879470. What remains is which memory the entries
+$$ occupy, because that is what decides whether the rewind boundary runs through
+$$ the middle of this list.
+
+.symfix
+.sympath+ F:\rbo_fabre_proto\d3d9_sw\symbols
+.reload /f
+
+.echo ===ALL REGISTERS, unfiltered this time===
+r
+
+.echo ===THE LIST HEAD ITSELF===
+dq 00007ffd`f7b67060 L4
+.echo --- where the head lives ---
+!address 00007ffd`f7b67060
+
+.echo ===THE TAIL ENTRY THE CHECK REJECTED===
+dq 0000021780879470 L8
+.echo --- where the tail entry lives ---
+!address 0000021780879470
+.echo --- and which heap block, if any, contains it ---
+!heap -x 0000021780879470
+
+.echo ===THE NEW ENTRY BEING INSERTED (rbx)===
+dq 00000218456527d0 L8
+!address 00000218456527d0
+!heap -x 00000218456527d0
+
+.echo ===MONO CODE CHUNK RANGE BASE (arg1+0x10 said 000002184ee10000)===
+!address 000002184ee10000
+
+.echo ===MONO ENTRY STRUCT, which holds the runtime function array===
+!address 0000021845a4c600
+
+q

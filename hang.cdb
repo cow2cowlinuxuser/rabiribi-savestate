@@ -1,0 +1,7 @@
+.echo ===EXCEPTION
+.ecxr
+.echo ===FAULTING
+kb 24
+.echo ===HEAPCHK
+!heap -s
+q

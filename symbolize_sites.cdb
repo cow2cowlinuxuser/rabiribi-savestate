@@ -1,0 +1,95 @@
+$$ Frozen at the initial breakpoint — do not g. We only want symbols.
+.symfix F:\rbo_fabre_proto\d3d9_sw\symbols-cache
+.sympath+ F:\rbo_fabre_proto\d3d9_sw
+.reload /f
+
+.echo ===== lm (our modules) =====
+lm m ss_ctx
+lm m ucrtbase
+lm m ntdll
+lm m KERNEL32
+
+.echo ===== ln sites =====
+.echo --- ss_ctx.exe+2F54 (the one fault in our module) ---
+ln ss_ctx+2F54
+.echo --- ss_ctx.exe+2FFA (ntdll-family caller) ---
+ln ss_ctx+2FFA
+.echo --- ss_ctx.exe+124A2 (ucrt family caller) ---
+ln ss_ctx+124A2
+.echo --- ss_ctx.exe+3238 ---
+ln ss_ctx+3238
+.echo --- ss_ctx.exe+331D ---
+ln ss_ctx+331D
+.echo --- ss_ctx.exe+3063 (ucrtbase+3CCCB caller) ---
+ln ss_ctx+3063
+.echo --- ss_ctx.exe+32EF ---
+ln ss_ctx+32EF
+.echo --- ss_ctx.exe+3255 ---
+ln ss_ctx+3255
+
+.echo --- ntdll.dll+C559 ---
+ln ntdll+C559
+.echo --- ntdll.dll+C55C ---
+ln ntdll+C55C
+.echo --- ntdll.dll+D8E2 ---
+ln ntdll+D8E2
+.echo --- ntdll.dll+8C3FC ---
+ln ntdll+8C3FC
+.echo --- ntdll.dll+AC77 ---
+ln ntdll+AC77
+.echo --- ntdll.dll+DF5C ---
+ln ntdll+DF5C
+
+.echo --- ucrtbase.dll+3CCCB ---
+ln ucrtbase+3CCCB
+.echo --- ucrtbase.dll+12E7A ---
+ln ucrtbase+12E7A
+.echo --- ucrtbase.dll+1E558 ---
+ln ucrtbase+1E558
+.echo --- ucrtbase.dll+1E1A4 ---
+ln ucrtbase+1E1A4
+.echo --- ucrtbase.dll+19CD8 ---
+ln ucrtbase+19CD8
+.echo --- ucrtbase.dll+451E7 ---
+ln ucrtbase+451E7
+.echo --- ucrtbase.dll+19A76 ---
+ln ucrtbase+19A76
+.echo --- ucrtbase.dll+1E17B ---
+ln ucrtbase+1E17B
+.echo --- ucrtbase.dll+18588 ---
+ln ucrtbase+18588
+.echo --- ucrtbase.dll+1E541 ---
+ln ucrtbase+1E541
+
+.echo --- KERNEL32.DLL+2E8D7 ---
+ln KERNEL32+2E8D7
+.echo --- KERNEL32.DLL+842F0 ---
+ln KERNEL32+842F0
+
+.echo ===== uf from function boundary (never u) =====
+.echo --- UF ss_ctx+2F54 ---
+uf ss_ctx+2F54
+.echo --- UF ss_ctx+2FFA ---
+uf ss_ctx+2FFA
+.echo --- UF ss_ctx+124A2 ---
+uf ss_ctx+124A2
+.echo --- UF ss_ctx+3238 ---
+uf ss_ctx+3238
+.echo --- UF ss_ctx+3063 ---
+uf ss_ctx+3063
+.echo --- UF ss_ctx+32EF ---
+uf ss_ctx+32EF
+.echo --- UF ntdll+C559 ---
+uf ntdll+C559
+.echo --- UF ucrtbase+3CCCB ---
+uf ucrtbase+3CCCB
+.echo --- UF ucrtbase+12E7A ---
+uf ucrtbase+12E7A
+.echo --- UF ucrtbase+1E558 ---
+uf ucrtbase+1E558
+.echo --- UF ucrtbase+1E1A4 ---
+uf ucrtbase+1E1A4
+.echo --- UF ucrtbase+19CD8 ---
+uf ucrtbase+19CD8
+
+q

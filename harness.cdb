@@ -1,0 +1,33 @@
+$$ Run the savestate harness under the debugger and name whatever kills it.
+$$
+$$ The harness crashes on its first cycle in about a second, so unlike the game
+$$ there is no repro to perform - launch it, let it die, read the stack.
+$$
+$$ Deliberately no "sxe av". Mono implements null checks in hardware and handles
+$$ the resulting access violations itself, so first-chance AVs are routine here
+$$ and breaking on them stops the run on a non-event - which is exactly what the
+$$ first version of this script did. Second chance means nobody handled it.
+
+.symfix+ f:\rbo_fabre_proto\d3d9_sw\symbols-cache
+.sympath+ f:\rbo_fabre_proto\d3d9_sw
+.reload
+
+$$ These two are never legitimate, so they are worth a first-chance break: the
+$$ state that explains a corrupted list is gone by second chance.
+sxe c0000409
+sxe c0000374
+
+g
+
+.echo ===FAULT===
+r
+.echo ===FAULTING STACK===
+kv
+.echo ===ALL THREADS===
+~*k
+.echo ===MODULES===
+lm m mono*
+.echo ===ANALYZE===
+!analyze -v
+.logflush
+q

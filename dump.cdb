@@ -1,0 +1,12 @@
+.ecxr
+.echo ===DISASM
+u d3dx9_43!D3DXEffects::CEffect::Begin+0xa0 L18
+.echo ===OBJ
+dd 0c565980 L10
+.echo ===ESI
+dd 02e37294 L10
+.echo ===EBX
+dd 02e3df80 L10
+.echo ===VTABLES
+dps 0c565980 L8
+q

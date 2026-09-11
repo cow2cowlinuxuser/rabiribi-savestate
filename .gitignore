@@ -1,0 +1,29 @@
+# Build output
+*.exe
+*.dll
+*.pdb
+*.lib
+*.o
+*.obj
+x86/
+x86-lowspec/
+
+# Logs and captures. The savestate log alone reaches tens of megabytes in a
+# session, and a full-process dump of a 32-bit game is several gigabytes.
+*.log
+*.dmp
+*.txt
+*.csv
+*.err
+*.out
+*.bak
+runs/
+rr_run/
+
+# Symbol cache
+symbols/
+symbols-cache/
+
+# Generated
+gl_stubs.c
+opengl32.def

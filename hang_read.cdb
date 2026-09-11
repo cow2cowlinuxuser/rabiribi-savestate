@@ -1,0 +1,24 @@
+$$ Read the captured hang with OUR symbols on the path.
+$$
+$$ The first look resolved every frame in our wrapper to the nearest export,
+$$ D3D11CreateDeviceAndSwapChain, which says only "somewhere in d3d11.dll" - and
+$$ seventeen threads there is also what an idle sixteen-thread raster pool looks
+$$ like. d3d11.pdb sits in the build directory, so put it on the path and let the
+$$ frames name themselves before drawing any conclusion.
+
+.sympath F:\rbo_fabre_proto\d3d9_sw;F:\rbo_fabre_proto\d3d9_sw\symbols;srv*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://msdl.microsoft.com/download/symbols
+.reload /f
+
+.echo ===WHO IS WHERE===
+~*k
+
+.echo ===THE LOCK ITSELF===
+$$ g_fntabs is a static in d3d11.dll. If the theory holds, its lock word is 1
+$$ with no thread able to release it. Printed as a struct-less dump because the
+$$ first two LONGs are n and lock.
+dq d3d11!g_fntabs L1
+.echo ---- records: n, lock, removed, readded, failed, drifted, skipped, unstuck
+dd poi(d3d11!g_fntabs) L8
+
+.echo ===DONE===
+q

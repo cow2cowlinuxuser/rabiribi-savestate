@@ -1,0 +1,31 @@
+$$ Reopen a dump written by catch_failfast with the same symbols the live session
+$$ had. The point of keeping the dump at all is the question we did not think to
+$$ ask before the process died, and that has happened twice now.
+
+.symfix
+.sympath+ F:\rbo_fabre_proto\d3d9_sw\symbols
+.sympath+ SRV*F:\rbo_fabre_proto\d3d9_sw\symbols-cache*https://symbolserver.unity3d.com/
+.reload /f
+
+.echo === what killed it ===
+.exr -1
+.echo
+.echo === faulting thread, with frame pointers and inlines ===
+kv
+.echo
+.echo === the fail-fast subcode lives in rcx ===
+r rcx
+.echo
+.echo === every thread, briefly ===
+~*k
+.echo
+.echo === modules, to confirm which symbols actually resolved ===
+lm
+.echo
+.echo === automatic triage, read sceptically ===
+!analyze -v
+
+$$ Left interactive rather than quitting: the dump exists precisely so follow-up
+$$ questions can be asked, and the useful ones are never known in advance. Try
+$$ !list on the corrupt list head, dt _LIST_ENTRY on the entries either side, and
+$$ !address on any pointer whose provenance is in doubt.
