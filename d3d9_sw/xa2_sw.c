@@ -132,6 +132,8 @@ struct SwVoice {
 	 * kept in the shape it was given and folded in at mix time. */
 	int mtx_src, mtx_dst;
 	float mtx[8];
+	int chvol_n;
+	float chvol[8];
 	XA2_BUFFER q[XA2_MAX_QUEUED];
 };
 
@@ -510,6 +512,13 @@ static void mix_voice(SwVoice *v, int *acc, unsigned frames)
 		gl *= v->mtx[0];
 		gr *= v->mtx[1];
 	}
+	if (v->chvol_n == 1) {
+		gl *= v->chvol[0];
+		gr *= v->chvol[0];
+	} else if (v->chvol_n >= 2) {
+		gl *= v->chvol[0];
+		gr *= v->chvol[1];
+	}
 
 	for (f = 0; f < frames; f++) {
 		XA2_BUFFER *b;
@@ -519,7 +528,7 @@ static void mix_voice(SwVoice *v, int *acc, unsigned frames)
 		UINT32 idx;
 
 		if (!v->n) {
-			g_starved++;
+			g_starved += frames - f;
 			return;
 		}
 		b = &v->q[v->head];
@@ -600,7 +609,19 @@ static void pass_callbacks(unsigned frames)
 
 		if (!v || !v->alive || !v->started || v->kind != 0 || !v->cb)
 			continue;
-		need = (UINT32)((double)frames * v->rate_eff / (double)OUT_RATE + 1.0);
+		/* Ask far enough ahead to cover the round trip, not just the next
+		 * block. A request is posted here, drained on the game's thread a
+		 * frame later, and only then decoded and submitted - so asking for one
+		 * block's worth guarantees the mixer runs dry before the answer
+		 * arrives. Every dry frame is emitted as silence at the correct rate,
+		 * which is why the first mixing build sounded slow and crunchy without
+		 * sounding pitch-shifted: the pitch was right, there was simply
+		 * nothing there for part of each block. Asking for the whole output
+		 * buffer's depth puts about 93 ms between the request and the
+		 * shortfall it is meant to prevent. */
+		need = (UINT32)((double)(frames * OUT_BLOCKS) * v->rate_eff /
+					(double)OUT_RATE +
+				1.0);
 		for (k = 0; k < v->n; k++) {
 			const XA2_BUFFER *b = &v->q[(v->head + k) % XA2_MAX_QUEUED];
 			UINT32 total = buf_samples(v, b);
@@ -887,11 +908,19 @@ static void WINAPI V_GetVolume(SwVoice *v, float *vol)
 
 static HRESULT WINAPI V_SetChannelVolumes(SwVoice *v, UINT32 n, const float *vols, UINT32 op)
 {
-	(void)v;
-	(void)n;
-	(void)vols;
+	UINT32 i;
+
 	(void)op;
 	g_calls[M_CHANVOL]++;
+	/* This is how the game sets its levels - 586 calls a session against zero
+	 * for SetVolume - so ignoring it meant every sound played at full scale and
+	 * the sum of them clipped. That is the other half of "crunchy": gaps
+	 * account for the stutter, saturation for the distortion. */
+	EnterCriticalSection(&g_cs);
+	v->chvol_n = n > 8 ? 8 : (int)n;
+	for (i = 0; vols && i < (UINT32)v->chvol_n; i++)
+		v->chvol[i] = vols[i];
+	LeaveCriticalSection(&g_cs);
 	cb_flush();
 	return S_OK;
 }
@@ -1115,6 +1144,7 @@ static SwVoice *voice_new(int kind, UINT32 channels, UINT32 rate, UINT32 bits, X
 	v->block = v->channels * (v->bits / 8);
 	v->freq_ratio = 1.0f;
 	v->volume = 1.0f;
+	v->chvol[0] = v->chvol[1] = 1.0f;
 	v->rate_eff = (double)v->rate;
 	if (g_vn < XA2_MAX_VOICES)
 		g_vtab[g_vn++] = v;
@@ -1356,10 +1386,13 @@ void xa2_sw_report(void)
 
 	if (!g_ready)
 		return;
-	ss_log("xa2_sw: %lu voice(s), %lu buffer(s) submitted, %lu starve(s), %lu "
-	       "overflow(s). No XAudio2 threads, no mixer, no cursor moving while "
-	       "we copy - every callback ran on the game's own thread\n",
-	       g_voices, g_submits, g_starved, g_overflow);
+	/* Dry frames against blocks mixed is the ratio that names a stutter without
+	 * anyone having to listen for it: at 1024 frames a block, a few thousand
+	 * dry frames is an underrun and not a rounding error. */
+	ss_log("xa2_sw: %lu voice(s), %lu buffer(s) submitted, %lu block(s) mixed, "
+	       "%lu dry frame(s), %lu overflow(s), %lu callback(s) dropped. Every "
+	       "callback ran on the game's own thread\n",
+	       g_voices, g_submits, g_blocks_out, g_starved, g_overflow, g_pend_lost);
 	for (i = 0; i < M_MAX; i++)
 		if (g_calls[i])
 			ss_log("  %-22s %lu call(s)\n", g_mname[i], g_calls[i]);
