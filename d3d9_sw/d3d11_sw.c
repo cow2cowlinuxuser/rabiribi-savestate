@@ -2569,6 +2569,7 @@ static void hook_getprocaddress(void)
  * DisableThreadLibraryCalls, and it starts no threads, so there is no second
  * lock for it to want. */
 int ds_sw_take_over(void);
+int gameheap_install(void);
 
 static void dsound_claim(void)
 {
@@ -2648,6 +2649,10 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 		profile_seed_env();
 		hook_getprocaddress();
 		dsound_claim();
+		/* Last, and only if asked. Everything above reads memory; this
+		 * one changes where the game's future memory comes from, so it
+		 * goes in once the rest of the attach has succeeded. */
+		gameheap_install();
 	} else if (reason == DLL_PROCESS_DETACH)
 		d11_log("process detach (%s) after %ld presents",
 			reserved ? "process exiting" : "FreeLibrary", g_present_n);

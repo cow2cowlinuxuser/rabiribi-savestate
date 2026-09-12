@@ -7,7 +7,7 @@ $warn = @(
   "-Wno-incompatible-function-pointer-types"
 )
 
-$src = @("d3d9_sw.c", "swrast.c", "savestate.c", "vsinterp.c", "trace.c", "tramp.c", "allocwatch.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "d3d9.def")
+$src = @("d3d9_sw.c", "swrast.c", "savestate.c", "vsinterp.c", "trace.c", "tramp.c", "allocwatch.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "gameheap.c", "d3d9.def")
 
 & $zig cc @warn -DD3D9SW_VARIANT=stock -target x86_64-windows-gnu -shared -o d3d9_sw.dll @src -lgdi32 -luser32 -lwinmm
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # so an invariant can be asserted after every restore instead of waiting to see
 # whether something dies. Built from the same source the game loads - a harness
 # against a copy of the engine would prove nothing about the engine.
-& $zig cc @warn -target x86_64-windows-gnu -o ss_harness.exe ss_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c -luser32 -lwinmm
+& $zig cc @warn -target x86_64-windows-gnu -o ss_harness.exe ss_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c -luser32 -lwinmm
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "built ss_harness.exe (savestate engine, no game)"
 
@@ -26,19 +26,19 @@ Write-Host "built ss_harness.exe (savestate engine, no game)"
 # runs at in the games it is aimed at - Rabi-Ribi and DDPR are both PE32. The
 # x64 build alone left every pointer-width assumption in the engine untested
 # outside the game itself, which is the worst place to find one.
-& $zig cc @warn -target x86-windows-gnu -o ss_harness32.exe ss_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c -luser32 -lwinmm
+& $zig cc @warn -target x86-windows-gnu -o ss_harness32.exe ss_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c -luser32 -lwinmm
 
 # A DirectSound streaming loop with no game attached, to find out whether the
 # negative-length copy is a property of the arrangement or of how this game
 # uses it. 32-bit to match the title.
-& $zig cc @warn -target x86-windows-gnu -o ds_harness32.exe ds_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c -luser32 -lwinmm
+& $zig cc @warn -target x86-windows-gnu -o ds_harness32.exe ds_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c -luser32 -lwinmm
 if ($LASTEXITCODE -eq 0) { "built ds_harness32.exe (DirectSound rewind test, no game)" }
 
 # All four of the game's conditions at once - shared-heap objects, present-time
 # ntdll pool threads holding pointers across the rewind, callbacks and COM
 # vtables, and enough bulk that the by-block path actually engages. The other
 # two harnesses each cover at most two of those and both report "0 by block".
-& $zig cc @warn -target x86-windows-gnu -o rr_harness32.exe rr_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c -luser32 -lwinmm
+& $zig cc @warn -target x86-windows-gnu -o rr_harness32.exe rr_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c -luser32 -lwinmm
 if ($LASTEXITCODE -eq 0) { "built rr_harness32.exe (all four conditions, no game)" }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "built ss_harness32.exe (savestate engine, PE32)"
@@ -89,7 +89,7 @@ New-Item -ItemType Directory -Force -Path "x86-lowspec" | Out-Null
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Copy-Item -Force x86-lowspec\d3d9.dll x86-lowspec\d3d9_sw.dll
 
-$d3d11src = @("d3d11_sw.c", "dxbc.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "d3d11.def")
+$d3d11src = @("d3d11_sw.c", "dxbc.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "gameheap.c", "d3d11.def")
 # This backend rasterises far more per frame than the D3D9 title, so the pool
 # scales past that build's four threads; but it shares the CPU with the game's
 # own logic thread, and measurement put the crossover at one thread per physical
@@ -164,7 +164,7 @@ if (Test-Path $log) {
 
 python "$PSScriptRoot\gen_gl.py"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-$glsrc = @("gl_sw.c", "gl_stubs.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "opengl32.def")
+$glsrc = @("gl_sw.c", "gl_stubs.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "gameheap.c", "opengl32.def")
 New-Item -ItemType Directory -Force -Path "x86" | Out-Null
 & $zig cc @warn -Wno-inconsistent-dllimport -DD3D9SW_VARIANT=gl -DSWRAST_DEFAULT_THREADS=8 -target x86-windows-gnu -shared -o x86\opengl32.dll @glsrc -lgdi32 -luser32 -lwinmm
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

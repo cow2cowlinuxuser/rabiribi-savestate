@@ -830,6 +830,27 @@ static int patch_iat(HMODULE mod, void *from, void *to)
 	return n;
 }
 
+/* The same redirect, for the allocator hook in gameheap.c. It lives there rather
+ * than here because it is a policy about where the game's memory goes, not part
+ * of the rewind - but the patcher is here and there is no sense in two. */
+int savestate_patch_iat(HMODULE mod, void *from, void *to)
+{
+	return patch_iat(mod, from, to);
+}
+
+/* A heap the game's allocations were redirected into, when they were.
+ *
+ * Set before the first save. It makes game_crt_heap answer with a heap that has
+ * no other tenant, which is the whole point of the redirect: the classifier then
+ * takes the same branch it takes for a game that linked MSVCR100, and the heap
+ * is rewound whole instead of negotiated block by block. */
+static HANDLE g_redirect_heap;
+
+void savestate_game_heap(HANDLE h)
+{
+	g_redirect_heap = h;
+}
+
 static void ss_exclude(void *p, size_t n);
 
 #if !defined(_M_IX86) && !defined(__i386__)
@@ -1856,6 +1877,7 @@ void dsh_mark_present(void);
 void dsh_survey(void);
 void ds_sw_report(void);
 void xa2_sw_report(void);
+void gameheap_report(void);
 void xa2_sw_pump(void);
 void xa2_sw_park(void);
 void xa2_sw_resume(void);
@@ -4219,7 +4241,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_VTABVETO",	  "D3D9SW_CROSSWORLD",
 	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
-	"D3D9SW_RECYCLED",
+	"D3D9SW_RECYCLED",	  "D3D9SW_GAMEHEAP",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN"
 };
 
@@ -5348,6 +5370,13 @@ static HANDLE crt_heap(const char *dll)
 static HANDLE game_crt_heap(void)
 {
 	size_t i;
+
+	/* Ahead of asking the runtimes, because when the redirect is on this is
+	 * where the game's allocations actually are. Asking ucrtbase would
+	 * answer with the process heap and send us back down the shared-heap
+	 * path we installed the redirect to leave. */
+	if (g_redirect_heap)
+		return g_redirect_heap;
 	for (i = 0; i < sizeof(kCrtNames) / sizeof(kCrtNames[0]); i++) {
 		HANDLE h = crt_heap(kCrtNames[i]);
 		if (h) {
@@ -10870,6 +10899,7 @@ static int do_save(int slotno)
 	 * all - and the census is the one piece of evidence the run was for. */
 	ds_sw_report();
 	xa2_sw_report();
+	gameheap_report();
 	/* Before suspend_all, because the point is to have nothing playing for the
 	 * whole window rather than merely for the copy. */
 	dsh_quiet();
