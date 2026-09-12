@@ -978,6 +978,32 @@ static HRESULT WINAPI hook_dup(void *self, void *src, void **out)
  * object and therefore enough to read the pointer, and it is released
  * immediately. The game's device - created before or after this, by whatever
  * route - shares the table. */
+/* Ours if it sits in the same directory as this DLL. Comparing paths rather
+ * than looking for an export is what distinguishes the trampoline from
+ * System32's copy even before anything has called into it. */
+static int dsh_stub_is_ours(HMODULE ds)
+{
+	char theirs[MAX_PATH], mine[MAX_PATH];
+	HMODULE self = NULL;
+	char *a, *b;
+
+	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+					GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				(LPCSTR)(void *)dsh_stub_is_ours, &self) ||
+	    !self)
+		return 0;
+	if (!GetModuleFileNameA(ds, theirs, MAX_PATH) ||
+	    !GetModuleFileNameA(self, mine, MAX_PATH))
+		return 0;
+	a = strrchr(theirs, '\\');
+	b = strrchr(mine, '\\');
+	if (!a || !b)
+		return 0;
+	*a = 0;
+	*b = 0;
+	return lstrcmpiA(theirs, mine) == 0;
+}
+
 void dsh_install(void)
 {
 	HMODULE ds;
@@ -990,6 +1016,19 @@ void dsh_install(void)
 	ds = GetModuleHandleA("dsound.dll");
 	if (!ds)
 		return; /* not loaded yet; called again next frame */
+	if (dsh_stub_is_ours(ds)) {
+		/* The software DirectSound in ds_sw.c answered the game instead of
+		 * Windows'. Everything below this point exists to make somebody else's
+		 * audio stack survive a rewind, and there is no longer somebody else:
+		 * no vtable of theirs to patch, no hardware cursor to wind back, no
+		 * mixer thread reading while we copy. Leaving it armed would have us
+		 * hooking our own methods to correct for a card that is not there. */
+		g_armed = 1;
+		ss_log("dsound: the same-folder stub answered, so the Windows hooks "
+		       "stand down - there is no foreign audio stack left to correct "
+		       "for\n");
+		return;
+	}
 	create8 = (PFN_DSCREATE8)(void *)GetProcAddress(ds, "DirectSoundCreate8");
 	if (!create8) {
 		g_armed = 1; /* nothing to hook, and no point retrying every frame */
