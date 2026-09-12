@@ -492,6 +492,69 @@ static void ss_unwind(const CONTEXT *c)
 }
 #endif
 
+#if defined(_M_IX86) || defined(__i386__)
+static void ss_where_reg(const char *name, uintptr_t v);
+
+/* Walk the saved-EBP chain, and read the callee-saved registers out of it.
+ *
+ * The stack scan below finds code addresses and calls them leads, which is
+ * honest and nearly useless: it cannot tell a live frame from one that returned
+ * an hour ago. On x86 with frame pointers there is a real chain sitting right
+ * there - [ebp] is the caller's ebp and [ebp+4] is the return address - and it
+ * costs two reads per frame to follow.
+ *
+ * The words just below each ebp matter more than the chain itself. A function
+ * that sets up its frame and then pushes esi, edi and ebx leaves them at ebp-4,
+ * ebp-8 and so on, which means a caller's object pointer is recoverable from a
+ * crash three frames deeper. That is not hypothetical: rabiribi.exe+6E9F8 died
+ * inside a memcpy whose destination came from a field of an object held in its
+ * grandparent's esi, and the only reason we could not say which object was that
+ * nothing was reading those slots. Each one goes through the same describer the
+ * registers do, so the log says outright whether the value points at memory the
+ * save restored, memory held in the present, or neither.
+ *
+ * Anything found this way is still a guess about which slot held which register
+ * - that depends on the push order of a function we have not disassembled - so
+ * the values are labelled by slot and left for a human to match up. */
+static void ss_frames(const CONTEXT *c)
+{
+	uintptr_t fp = (uintptr_t)c->Ebp;
+	int n;
+
+	for (n = 0; n < 12 && fp; n++) {
+		uintptr_t next, ret;
+		const char *in;
+		unsigned off = 0;
+		int k;
+
+		if (!ss_readable(fp, 2 * sizeof(uintptr_t)))
+			break;
+		next = ((const uintptr_t *)fp)[0];
+		ret = ((const uintptr_t *)fp)[1];
+		if (!ss_is_code(ret))
+			break;
+		in = ss_module(ret, &off);
+		ss_raw("       frame %d: ebp %08lX, returns to %08lX in %s+%X\n", n,
+		       (unsigned long)fp, (unsigned long)ret, in ? in : "unknown", off);
+		for (k = 1; k <= 4; k++) {
+			uintptr_t slot = fp - (uintptr_t)k * sizeof(uintptr_t);
+			char label[32];
+
+			if (!ss_readable(slot, sizeof(uintptr_t)))
+				break;
+			wsprintfA(label, "         saved [ebp-%X]", (unsigned)(k * 4));
+			ss_where_reg(label, *(const uintptr_t *)slot);
+		}
+		/* Frames grow downwards, so the next ebp must be above this one, and
+		 * a jump of more than a stack's worth means we are following data
+		 * that happens to look like a chain. */
+		if (next <= fp || next - fp > 0x10000)
+			break;
+		fp = next;
+	}
+}
+#endif
+
 /* Kept, but demoted and relabelled. This is a GUESS: words on the stack that
  * could be code addresses, including ones belonging to calls that returned long
  * ago. It is printed after the real unwind, and only because when the unwind
@@ -511,6 +574,8 @@ static void ss_callers(const CONTEXT *c)
 	ss_unwind(c);
 #endif
 #if defined(_M_IX86) || defined(__i386__)
+	/* Before the scan, because it is the part that can be trusted. */
+	ss_frames(c);
 	sp = (uintptr_t)c->Esp;
 #else
 	sp = (uintptr_t)c->Rsp;
