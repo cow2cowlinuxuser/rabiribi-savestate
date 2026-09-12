@@ -458,6 +458,44 @@ static int site_wire(HMODULE exe, struct Site *s)
 	return 1;
 }
 
+/* The floor, under everything.
+ *
+ * The five detours cover the runtime's allocator, and the runtime's allocator
+ * is not the only thing in this executable that frees memory. Three other
+ * functions call HeapFree against GetProcessHeap() directly - a custom pair and
+ * a teardown path - and they are not allocators we can replace: they take no
+ * pointer argument, they read globals and release what they computed. There is
+ * no entry point to detour.
+ *
+ * Whether any of them can ever be handed a block of ours is a question two
+ * design notes wanted settled before arming anything. It does not need
+ * settling, because it can be made moot. Every one of them reaches HeapFree
+ * through a single import slot, and so does the runtime's own free. One patch
+ * there puts an ownership check underneath every freer in the process,
+ * including the ones nobody has identified.
+ *
+ * A count of zero here across a long session is the measurement those notes
+ * asked for. A count above zero is a wrong-heap free that would have been
+ * silent corruption. Either answer is worth having; only one of them needed
+ * code to prevent. */
+static BOOL(WINAPI *r_heapfree)(HANDLE, DWORD, LPVOID);
+static unsigned long g_caught;
+
+static BOOL WINAPI gh_heapfree(HANDLE heap, DWORD flags, LPVOID p)
+{
+	GhHead *h;
+
+	/* Our own HeapFree calls do not come back through here - those go direct
+	 * to the real one - so this only ever sees the game's. */
+	if (g_ready && (h = ours(p)) != NULL) {
+		h->magic = 0;
+		g_caught++;
+		g_freed_ours++;
+		return HeapFree(g_heap, flags, h);
+	}
+	return r_heapfree(heap, flags, p);
+}
+
 static int on(void)
 {
 	char v[8];
@@ -537,6 +575,22 @@ int gameheap_install(void)
 			ss_log("gameheap: %-10s could not be made writable\n",
 			       g_sites[i].name);
 	}
+	{
+		HMODULE k32 = GetModuleHandleA("kernel32.dll");
+		void *real = k32 ? (void *)GetProcAddress(k32, "HeapFree") : NULL;
+		int n = 0;
+
+		if (real) {
+			r_heapfree = (BOOL(WINAPI *)(HANDLE, DWORD, LPVOID))real;
+			n = savestate_patch_iat(exe, real, (void *)gh_heapfree);
+		}
+		if (!n)
+			r_heapfree = NULL;
+		ss_log("gameheap: HeapFree %d import slot(s) patched as a floor under "
+		       "every freer in the executable, the three that are not "
+		       "allocators included\n",
+		       n);
+	}
 	savestate_game_heap(g_heap);
 	ss_log("gameheap: %d of %d allocator site(s) in the game's own code now run "
 	       "on a private heap at %p. The runtime is linked statically, so these "
@@ -557,6 +611,13 @@ void gameheap_report(void)
 	ss_log("gameheap: %lu allocation(s) served, %lu freed to us, %lu passed back "
 	       "to the runtime, %lu too big to take, %lu region(s) mapped\n",
 	       g_alloc, g_freed_ours, g_freed_theirs, g_toobig, (unsigned long)g_nreg);
+	/* The number two design notes wanted before anything was armed. Zero says
+	 * the runtime's allocator and the executable's other Heap callers never
+	 * traded a block; anything else says they do, and says we caught it. */
+	ss_log("gameheap: %lu block(s) of ours reached HeapFree by a route that is "
+	       "not the runtime's free%s\n",
+	       g_caught,
+	       r_heapfree ? "" : " - UNMEASURED, the HeapFree floor is not in");
 	if (g_fellback || g_regfull || g_stale)
 		ss_log("gameheap: %lu allocation(s) fell back to the runtime, %lu region(s) "
 		       "past the table, %lu pointer(s) inside our range with no header - "

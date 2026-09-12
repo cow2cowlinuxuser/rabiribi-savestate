@@ -5378,6 +5378,62 @@ static HANDLE crt_heap(const char *dll)
 	return get ? (HANDLE)get() : NULL;
 }
 
+/* Does this executable name a C runtime in its imports at all?
+ *
+ * Asking a loaded runtime for its heap only answers for a game that calls that
+ * runtime. Rabi-Ribi does not: it links the UCRT statically, so its malloc is a
+ * private function in its own .text and the ucrtbase.dll in the process belongs
+ * to Windows, which loads it for itself in every modern process. We asked
+ * ucrtbase, it truthfully said "the process heap", and we wrote that down as the
+ * game's runtime heap. The heap was right and the sentence was wrong, and the
+ * wrong half is the one a reader builds a theory on.
+ *
+ * An executable with no CRT import has a static one, and a static UCRT takes
+ * GetProcessHeap() for its own - which the game's own image confirms from the
+ * other side, since it contains no call to HeapCreate anywhere. */
+static const char *exe_crt_import(void)
+{
+	static const char *const kCrtPrefix[] = { "ucrtbase", "msvcr", "msvcrt",
+						  "api-ms-win-crt" };
+	HMODULE m = GetModuleHandleA(NULL);
+	IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)m;
+	IMAGE_NT_HEADERS *nt;
+	IMAGE_IMPORT_DESCRIPTOR *imp;
+	DWORD rva;
+
+	if (!m || dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return NULL;
+	nt = (IMAGE_NT_HEADERS *)((char *)m + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return NULL;
+	rva = nt->OptionalHeader
+		      .DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
+		      .VirtualAddress;
+	if (!rva)
+		return NULL;
+	imp = (IMAGE_IMPORT_DESCRIPTOR *)((char *)m + rva);
+	for (; imp->Name; imp++) {
+		const char *n = (const char *)m + imp->Name;
+		size_t k;
+
+		for (k = 0; k < sizeof(kCrtPrefix) / sizeof(kCrtPrefix[0]); k++) {
+			const char *a = n, *b = kCrtPrefix[k];
+
+			while (*b && *a) {
+				char ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a;
+
+				if (ca != *b)
+					break;
+				a++;
+				b++;
+			}
+			if (!*b)
+				return n;
+		}
+	}
+	return NULL;
+}
+
 /* The D3D9 title's runtime is tried first so its partition is unchanged; a
  * Unity player links the UCRT instead and would otherwise leave the rewind with
  * no anchored game heap at all. */
@@ -5391,6 +5447,20 @@ static HANDLE game_crt_heap(void)
 	 * path we installed the redirect to leave. */
 	if (g_redirect_heap)
 		return g_redirect_heap;
+	/* Before any runtime is asked, because a loaded runtime will answer for
+	 * itself whether or not this game has ever called it. */
+	if (!exe_crt_import()) {
+		HANDLE h = GetProcessHeap();
+
+		ss_log("    game runtime heap %p: this executable imports no C "
+		       "runtime, so it links one statically and its allocator is "
+		       "its own code. The heap is the process heap, shared with "
+		       "Windows - not because a runtime DLL said so, but because a "
+		       "static runtime takes GetProcessHeap() and this image never "
+		       "calls HeapCreate\n",
+		       h);
+		return h;
+	}
 	for (i = 0; i < sizeof(kCrtNames) / sizeof(kCrtNames[0]); i++) {
 		HANDLE h = crt_heap(kCrtNames[i]);
 		if (h) {
@@ -7363,7 +7433,7 @@ static void blk_sys_mark(void)
 	uintptr_t lo_all = (uintptr_t)-1, hi_all = 0;
 	unsigned qh = 0, qn = 0, marked = 0, both = 0, i;
 	HANDLE proc = GetProcessHeap();
-	int k, nroot = 0, nteb = 0, nteb_sys = 0;
+	int k, nroot = 0, nteb = 0, nteb_sys = 0, nteb_hits = 0;
 	LARGE_INTEGER t0, t1, pf;
 	BlkWalk w;
 
@@ -7471,45 +7541,45 @@ static void blk_sys_mark(void)
 		 * shows workers dying 0 frames after restore with wild pointers
 		 * in CRT and ntdll paths on those same threads.
 		 *
-		 * For a transient (system) thread, scan the full TEB page and one
-		 * hop of small private allocations reachable from it. This is the
-		 * same scan audit_present_threads does, promoted from advisory to
-		 * veto: any block the system closure reaches from a system TEB is
-		 * marked as system-owned and will not be written back. Game threads
-		 * still get only the activation-context pointer, which is the only
-		 * TEB field pointing at a heap block that the game's side needs. */
+		 * Only the blocks a TEB word points at directly. No closure from
+		 * their contents, and no hop into the small private allocations the
+		 * TEB reaches.
+		 *
+		 * That wider walk is what this used to do, and it was measured
+		 * wrong: feeding the TEB page into the closure took system-owned
+		 * from 3317 blocks to 7483, because every TEB pointer that lands in
+		 * the heap fans out through the whole object graph and drags the
+		 * game's own state out of the restore with it. The advisory count
+		 * was always about eight, and eight is the honest number - that is
+		 * how many blocks the thread can reach without going through
+		 * something else, and reaching through something else is the
+		 * game's business, not Windows'.
+		 *
+		 * Over-vetoing does not announce itself. It looks like a restore
+		 * that ran clean and a game that quietly did not come back.
+		 *
+		 * Game threads still get only the activation-context pointer, which
+		 * is the one TEB field pointing at a heap block their side needs.
+		 * (Ported from rabiribi-savestate PR 1, which measured it.) */
 		if (g_ctl->transient[i]) {
 			const uintptr_t *tw = (const uintptr_t *)teb;
 			unsigned tk;
-			uintptr_t hops[16];
-			int nhops = 0, tj;
 
-			w.root = (uintptr_t)teb;
-			blk_scan_range((uintptr_t)teb, 0x1000, &w);
 			nteb_sys++;
+			for (tk = 0; tk < 0x1000 / sizeof(uintptr_t); tk++) {
+				uintptr_t v = tw[tk];
+				int bi;
 
-			for (tk = 0; tk < 0x1000 / sizeof(uintptr_t) && nhops < 16; tk++) {
-				MEMORY_BASIC_INFORMATION tmbi;
-				uintptr_t tab, tspan;
-
-				if (tw[tk] < 0x10000 ||
-				    VirtualQuery((LPCVOID)tw[tk], &tmbi, sizeof(tmbi)) !=
-					    sizeof(tmbi))
+				if (v < lo_all || v >= hi_all)
 					continue;
-				if (tmbi.State != MEM_COMMIT || tmbi.Type != MEM_PRIVATE ||
-				    (tmbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+				bi = blk_find(v);
+				if (bi < 0)
 					continue;
-				tab = (uintptr_t)tmbi.AllocationBase;
-				tspan = alloc_span(tab);
-				if (!tspan || tspan > 0x10000 || heap_index_of(tab) >= 0)
+				if (exact_only && v != g_blk_save[bi].base)
 					continue;
-				for (tj = 0; tj < nhops; tj++)
-					if (hops[tj] == tab)
-						break;
-				if (tj == nhops) {
-					hops[nhops++] = tab;
-					w.root = tab;
-					blk_scan_range(tab, tspan, &w);
+				if (!g_blk_sys[bi]) {
+					g_blk_sys[bi] = 1;
+					nteb_hits++;
 				}
 			}
 			nroot++;
@@ -7547,14 +7617,15 @@ static void blk_sys_mark(void)
 	 * hole the loader crashes were coming through. Zero means they were not
 	 * coming from here and the next theory is somewhere else. */
 	ss_log("  system reach: %u of %u matched block(s) reachable from %s, %u "
-	       "contested, over %d root(s) (%d system TEBs scanned as veto roots), "
-	       "%u exact hit(s), %.1f ms%s\n",
+	       "contested, over %d root(s), %u exact hit(s), %.1f ms. TEB veto: %d "
+	       "system thread(s) scanned, %d block(s) directly held%s\n",
 	       marked, g_blk_match_n,
 	       mode == 3  ? "ntdll and the audio stack"
 	       : mode < 2 ? "ntdll"
 			  : "everything left in the present",
-	       both, nroot, nteb_sys, g_reach_exact,
+	       both, nroot, g_reach_exact,
 	       (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)pf.QuadPart,
+	       nteb_sys, nteb_hits,
 	       qn >= SS_BLK_QCAP ? " <<< QUEUE FULL, closure is incomplete" : "");
 }
 
