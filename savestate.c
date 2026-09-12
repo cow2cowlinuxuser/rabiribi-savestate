@@ -4949,20 +4949,100 @@ static HANDLE crt_heap(const char *dll)
 	return get ? (HANDLE)get() : NULL;
 }
 
-/* The D3D9 title's runtime is tried first so its partition is unchanged; a
- * Unity player links the UCRT instead and would otherwise leave the rewind with
- * no anchored game heap at all. */
-static HANDLE game_crt_heap(void)
+/* Does the main executable actually import a given DLL by name?
+ *
+ * A DLL being *loaded* in the process does not mean the game uses it. Windows
+ * loads ucrtbase.dll for its own purposes in every modern process; a game that
+ * statically links the CRT has no import descriptor naming it, and any heap
+ * handle obtained from that module belongs to Windows, not the game.
+ *
+ * Walking the import descriptors rather than calling GetModuleHandle, because
+ * the question is not "is it loaded" but "does the game reach it". */
+static int exe_imports_dll(const char *dll)
+{
+	HMODULE exe = GetModuleHandleA(NULL);
+	unsigned char *base;
+	IMAGE_DOS_HEADER *dos;
+	IMAGE_NT_HEADERS *nt;
+	IMAGE_IMPORT_DESCRIPTOR *imp;
+	DWORD rva;
+
+	if (!exe)
+		return 0;
+	base = (unsigned char *)exe;
+	dos = (IMAGE_DOS_HEADER *)base;
+	if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return 0;
+	nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return 0;
+	rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+	if (!rva)
+		return 0;
+	for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + rva); imp->Name; imp++) {
+		const char *name = (const char *)(base + imp->Name);
+		if (lstrcmpiA(name, dll) == 0)
+			return 1;
+	}
+	return 0;
+}
+
+/* Does the main executable import any of the known CRT DLLs?
+ *
+ * If not, the game statically links its CRT. Any CRT DLL found loaded in the
+ * process (typically ucrtbase.dll) belongs to Windows, not the game, and its
+ * heap handle is Windows' process heap rather than a game-owned resource. */
+static int exe_imports_any_crt(void)
 {
 	size_t i;
 	for (i = 0; i < sizeof(kCrtNames) / sizeof(kCrtNames[0]); i++) {
+		if (exe_imports_dll(kCrtNames[i]))
+			return 1;
+	}
+	return 0;
+}
+
+/* The D3D9 title's runtime is tried first so its partition is unchanged; a
+ * Unity player links the UCRT instead and would otherwise leave the rewind with
+ * no anchored game heap at all.
+ *
+ * Static-CRT case (rabiribi.exe): the game's import table names no CRT DLL at
+ * all — only KERNEL32, USER32, GDI32, SHELL32, STEAM_API. The CRT is compiled
+ * into the game's own .text section. Meanwhile Windows loads ucrtbase.dll for
+ * its own purposes, and the static CRT's heap is GetProcessHeap(). The old
+ * code found ucrtbase in the process, asked it for _get_heap_handle, and logged
+ * "game runtime heap from ucrtbase.dll" — a misattribution that made it look
+ * like IAT redirects into ucrtbase could reach the game's allocator. They
+ * cannot: the game never calls ucrtbase. Correct isolation requires detouring
+ * the game's private CRT copies at known RVAs inside the executable image. */
+static HANDLE game_crt_heap(void)
+{
+	size_t i;
+	int exe_has_crt = exe_imports_any_crt();
+
+	for (i = 0; i < sizeof(kCrtNames) / sizeof(kCrtNames[0]); i++) {
 		HANDLE h = crt_heap(kCrtNames[i]);
 		if (h) {
-			/* Whether the runtime shares the process heap decides who
-			 * really owns it. Windows keeps the dynamic function table
-			 * and critical section lists there, and their heads live in
-			 * ntdll's image, which is never rewound; rewinding the nodes
-			 * alone is what raises FAST_FAIL_CORRUPT_LIST_ENTRY. */
+			if (!exe_has_crt) {
+				/* The DLL is loaded but the game does not import it.
+				 * This is the static-CRT case: the game compiled the
+				 * CRT into its own image and the DLL is Windows'.
+				 * The heap handle still works (it IS the process
+				 * heap), but the attribution is wrong. */
+				ss_log("    game uses static CRT (no CRT DLL in exe "
+				       "imports); %s is loaded by Windows, not the "
+				       "game\n", kCrtNames[i]);
+				ss_log("    game heap is GetProcessHeap() %p (static "
+				       "UCRT sets its heap to the process heap)\n",
+				       GetProcessHeap());
+				ss_log("    NOTE: IAT redirects into %s cannot reach "
+				       "the game's allocator — the game's "
+				       "malloc/free/realloc are private copies in "
+				       "exe .text. Isolation requires in-image "
+				       "detours at known RVAs\n", kCrtNames[i]);
+				return GetProcessHeap();
+			}
+			/* The game dynamically links this CRT. Standard case. */
 			ss_log("    game runtime heap %p from %s%s\n", h, kCrtNames[i],
 			       h == GetProcessHeap() ? ", which IS the process heap"
 						     : ", separate from the process heap");
@@ -4972,6 +5052,156 @@ static HANDLE game_crt_heap(void)
 	ss_log("    no game runtime heap found; relying on module votes\n");
 	return NULL;
 }
+
+/* ---------------------------------------------------------------------------
+ * Rabi-Ribi allocator detour scaffold.
+ *
+ * rabiribi.exe statically links the UCRT, so the game's malloc/free/realloc/
+ * calloc are private functions in the executable's own .text section at known
+ * RVAs (see docs/rabiribi_static_crt.md). IAT redirects cannot reach them.
+ *
+ * This scaffold prepares for inline detours at those RVAs but does NOT enable
+ * them by default. Enabling requires:
+ *
+ *   1. The free-set closure: every function that can pass a game-allocated
+ *      block to HeapFree must have a matching detour. Three free-like sites
+ *      have been identified (365 / 7 / 87 references); the full set is being
+ *      enumerated via a Ghidra script (RRAllocSurface). Until that surface is
+ *      confirmed complete, enabling detours risks HeapFree on the wrong heap.
+ *
+ *   2. Prologue bytes: the expected first ~16 bytes of each function, pasted
+ *      from a Ghidra dump. Without them the prologue check cannot verify the
+ *      build, and the detour refuses to arm.
+ *
+ *   3. _msize / _expand: if present in the image at separate RVAs, they need
+ *      entries here too.
+ *
+ * Gated on: savestate_host_is("rabiribi.exe") AND env D3D9SW_RR_DETOUR=1.
+ * ---------------------------------------------------------------------------
+ */
+#if defined(_M_IX86) || defined(__i386__)
+
+typedef struct {
+	const char *name;
+	DWORD rva;
+	const unsigned char *expected_prologue;
+	unsigned prologue_len;
+	int verified;
+} RrDetourEntry;
+
+/* Expected prologue bytes for each function.
+ *
+ * TODO: fill these from a Ghidra dump of the specific rabiribi.exe build.
+ * Until they are filled, prologue verification will refuse to arm any detour.
+ * The placeholder NULL / 0 means "not yet known". */
+static const unsigned char rr_malloc_prologue[] = { 0 };  /* TODO: paste bytes */
+static const unsigned char rr_free_prologue[]   = { 0 };  /* TODO: paste bytes */
+static const unsigned char rr_realloc_prologue[] = { 0 }; /* TODO: paste bytes */
+static const unsigned char rr_calloc_prologue[] = { 0 };  /* TODO: paste bytes */
+
+static RrDetourEntry g_rr_detours[] = {
+	{ "_malloc",       0x36E6B2, NULL, 0, 0 },
+	{ "_free",         0x369754, NULL, 0, 0 },
+	{ "_realloc",      0x36E744, NULL, 0, 0 },
+	{ "__calloc_impl", 0x37EBF7, NULL, 0, 0 },
+	/* TODO: add _msize / _expand if they exist at separate RVAs.
+	 * TODO: add the other free-like variants once the Ghidra surface
+	 *       analysis (RRAllocSurface) confirms the closed set. */
+};
+
+#define RR_DETOUR_COUNT (sizeof(g_rr_detours) / sizeof(g_rr_detours[0]))
+
+/* Verify that the bytes at exe_base + RVA match the expected prologue.
+ * Returns 1 on match, 0 on mismatch or if expected bytes are not yet filled. */
+static int rr_verify_prologue(uintptr_t exe_base, RrDetourEntry *e)
+{
+	const unsigned char *code;
+	MEMORY_BASIC_INFORMATION mbi;
+	const DWORD exec = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+			   PAGE_EXECUTE_WRITECOPY;
+
+	if (!e->expected_prologue || e->prologue_len == 0) {
+		ss_log("    rr_detour: %s at +%lX: prologue bytes not yet filled "
+		       "(TODO) — refusing to arm\n", e->name, (unsigned long)e->rva);
+		return 0;
+	}
+	code = (const unsigned char *)(exe_base + e->rva);
+	if (!VirtualQuery(code, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT ||
+	    (mbi.Protect & exec) == 0) {
+		ss_log("    rr_detour: %s at +%lX: page is not executable — "
+		       "refusing to arm\n", e->name, (unsigned long)e->rva);
+		return 0;
+	}
+	if (memcmp(code, e->expected_prologue, e->prologue_len) != 0) {
+		ss_log("    rr_detour: %s at +%lX: prologue mismatch (different "
+		       "build?) — refusing to arm\n", e->name, (unsigned long)e->rva);
+		return 0;
+	}
+	e->verified = 1;
+	return 1;
+}
+
+/* Report the scaffold state. Called once at startup when the host is
+ * rabiribi.exe, regardless of whether detours are enabled. */
+static void rr_detour_report(void)
+{
+	uintptr_t exe_base;
+	unsigned i, verified = 0;
+	char val[8];
+
+	if (!savestate_host_is("rabiribi.exe"))
+		return;
+
+	exe_base = (uintptr_t)GetModuleHandleA(NULL);
+	ss_log("  rr_detour: rabiribi.exe detected, exe base %p\n", (void *)exe_base);
+	ss_log("  rr_detour: known allocator RVAs (%u entries):\n",
+	       (unsigned)RR_DETOUR_COUNT);
+
+	for (i = 0; i < RR_DETOUR_COUNT; i++) {
+		RrDetourEntry *e = &g_rr_detours[i];
+		int ok = rr_verify_prologue(exe_base, e);
+		if (ok)
+			verified++;
+		ss_log("    %-16s  +%lX  → %p  prologue %s\n",
+		       e->name, (unsigned long)e->rva,
+		       (void *)(exe_base + e->rva),
+		       ok ? "VERIFIED" : "NOT VERIFIED");
+	}
+
+	ss_log("  rr_detour: %u / %u prologues verified\n", verified,
+	       (unsigned)RR_DETOUR_COUNT);
+
+	if (ss_getenv("D3D9SW_RR_DETOUR", val, sizeof(val)) && val[0] == '1') {
+		/*
+		 * WARNING: Do NOT enable detours until the free-set is closed.
+		 *
+		 * Hooking malloc alone (or malloc + one free variant) while
+		 * missing other free-like functions means some frees will call
+		 * HeapFree on the wrong heap → silent corruption.
+		 *
+		 * The Ghidra surface analysis (RRAllocSurface script) is
+		 * enumerating all call sites of HeapAlloc / HeapFree /
+		 * HeapReAlloc / HeapSize. Until that surface is in-repo and
+		 * confirmed complete, this path logs a refusal.
+		 */
+		ss_log("  rr_detour: D3D9SW_RR_DETOUR=1 but detours are NOT "
+		       "armed — the free-set closure is not yet confirmed. "
+		       "See docs/rabiribi_static_crt.md for what is needed "
+		       "before enabling\n");
+	} else {
+		ss_log("  rr_detour: detours OFF (set D3D9SW_RR_DETOUR=1 to "
+		       "enable once the free-set closure is confirmed)\n");
+	}
+}
+
+#else /* !__i386__ */
+
+static void rr_detour_report(void)
+{
+	/* rabiribi.exe is 32-bit; nothing to do in a 64-bit build. */
+}
+
+#endif /* __i386__ */
 
 /* Every segment of every heap, not just the first.
  *
@@ -5392,9 +5622,11 @@ static void heaps_partition(void)
 		 * one of them, and when it is, leaving it in the present has to win.
 		 *
 		 * A CRT that creates its own heap - MSVCR100, as DDPR uses - makes
-		 * these distinct handles and the ordering never mattered. ucrtbase
-		 * allocates from the process heap directly, so for a game linked
-		 * against it the first test matched and rewound the very heap the
+		 * these distinct handles and the ordering never mattered. Any CRT
+		 * that uses GetProcessHeap() - whether dynamically linked ucrtbase
+		 * or a static UCRT compiled into the executable - makes the game's
+		 * heap and the process heap the same handle. Without this ordering
+		 * the first test matched and rewound the very heap the
 		 * branch below exists to protect. Windows keeps its own lists there
 		 * and does not rewind with us, so the restore put back heap metadata
 		 * that no longer described the blocks the system had allocated since
@@ -5405,10 +5637,13 @@ static void heaps_partition(void)
 			g_ctl->heap_ours[k] = 0;
 			who = "the process heap";
 		} else if (h == proc) {
-			/* The game's runtime heap IS the process heap, which happens
-			 * with ucrtbase and does not with MSVCR100. Both answers are
-			 * wrong in different ways and there is no third option while
-			 * the game and Windows share one heap:
+			/* The game's runtime heap IS the process heap. This happens
+			 * with any CRT that uses GetProcessHeap() — dynamically
+			 * linked ucrtbase, or a static UCRT compiled into the exe
+			 * (rabiribi.exe). It does not happen with MSVCR100, which
+			 * creates a private heap. Both answers are wrong in
+			 * different ways and there is no third option while the game
+			 * and Windows share one heap:
 			 *
 			 * Rewinding it puts back heap metadata that no longer
 			 * describes what Windows allocated since the save, and a
@@ -6223,9 +6458,12 @@ static int heap_rewound_at(uintptr_t a)
 
 /* Is this address in a heap the system allocates from as well as the game?
  *
- * Only the process heap qualifies here, and only because this game's runtime
- * happens to be ucrtbase, which does not create a private heap. The game's
- * other heaps are its alone and every block in them is safe to put back. */
+ * Only the process heap qualifies here. For a game that dynamically links
+ * ucrtbase, that runtime uses GetProcessHeap() rather than creating a private
+ * heap. For a game that statically links the CRT (e.g. rabiribi.exe), the
+ * static UCRT also sets its heap to GetProcessHeap(). Either way the game and
+ * Windows share one heap. The game's other heaps are its alone and every block
+ * in them is safe to put back. */
 static int heap_is_shared(uintptr_t a)
 {
 	int k = heap_index_of(a);
@@ -6654,9 +6892,10 @@ static void blk_sys_mod(uintptr_t mbase, uintptr_t mhi, BlkWalk *k)
 /* Which of the modules we leave in the present get a vote.
  *
  * 1, the default, is ntdll alone. 2 is all of them, which sounds like the safer
- * setting and is the opposite: the game's runtime heap is the process heap and
- * it belongs to ucrtbase, so the CRT's globals reach every object the game has
- * ever malloc'd. At 2 the system closure contested 7920 of the 8326 blocks the
+ * setting and is the opposite: the game's runtime heap is the process heap, and
+ * the CRT's globals (whether in a loaded ucrtbase or baked into the exe) reach
+ * every object the game has ever malloc'd. At 2 the system closure contested
+ * 7920 of the 8326 blocks the
  * game's closure had claimed - 95 percent - and the restore wrote 246 blocks
  * where the run before it wrote 1481. That is not a veto, it is turning block
  * restore off by another name, and the restore after it did not survive.
@@ -6685,9 +6924,10 @@ static int sys_root_mode(void)
  * do. At mode 1 it has no vote, so nothing protects what it is still reading.
  *
  * Mode 2 would protect it and everything else besides, which the notes above
- * record as ruinous: the game's runtime heap is the process heap and belongs to
- * ucrtbase, so the CRT's globals reach every object the game ever allocated, and
- * the system closure contested 95 percent of the game's blocks.
+ * record as ruinous: the game's runtime heap is the process heap (whether
+ * through a loaded ucrtbase or a static CRT), so the CRT's globals reach every
+ * object the game ever allocated, and the system closure contested 95 percent
+ * of the game's blocks.
  *
  * So the audio stack by name, and nothing else. Naming modules is exactly what
  * the closure was designed to avoid, and it is still the right instinct - but
@@ -7216,7 +7456,7 @@ static int heapcheck_mode(void)
 
 /* Asks every heap whether its own bookkeeping is self-consistent.
  *
- * Aimed at one specific failure. The current death is a write into ucrtbase's
+ * Aimed at one specific failure. The current death is a write into the CRT's
  * read-only image reached from sprintf, with RtlAllocateHeap in the same call
  * chain and Mono as the caller, which reads as the allocator handing out
  * something that was never a heap block - a free list containing garbage. This
@@ -12160,6 +12400,7 @@ static int ensure_helper(void)
 	 * succeeds here the per-frame attempt never runs, and if it fails it says
 	 * why. */
 	decoder_patch_once();
+	rr_detour_report();
 	ss_log("hooks: %d clock import(s) redirected, %d event import(s), %ld event(s) seen\n",
 	       g_hooked_time, g_hooked_event, g_events ? g_events->n : 0);
 	/* Not reported here: Mono resolves its unwind-table calls lazily, and at
