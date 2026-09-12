@@ -3921,10 +3921,19 @@ static Control *g_ctl;
  * there would be rewound by every restore and re-read mid-copy, which is the
  * trap verify_mode fell into. Read once and never touched inside the suspended
  * window. */
-#define SS_CFG_MAX 4096
+/* Four kilobytes was enough when the file was a list of settings. It is a list
+ * of settings and the reasoning behind each one, which is the right way to keep
+ * them, and it crossed the line at 4259 bytes - so D3D9SW_GAMEHEAP=1, the last
+ * line in the file, was read as unset and an entire feature sat switched off
+ * while the file plainly asked for it. The read was silently short and nothing
+ * anywhere said so. */
+#define SS_CFG_MAX (32u * 1024u)
 static char *g_cfg;
 static int g_cfg_len;
 static int g_cfg_tried;
+/* Bytes of the file that did not fit. Reported at the session header rather than
+ * here, because cfg_load runs long before there is a log to write to. */
+static unsigned g_cfg_over;
 
 /* Loads d3d9_sw.cfg from the working directory - the same place the log is
  * written, so the two always sit together. Format is NAME=value, one per line,
@@ -3946,8 +3955,13 @@ static void cfg_load(void)
 			OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE)
 		return;
-	if (ReadFile(h, g_cfg, SS_CFG_MAX, &got, NULL))
+	if (ReadFile(h, g_cfg, SS_CFG_MAX, &got, NULL)) {
+		DWORD hi = 0, size = GetFileSize(h, &hi);
+
 		g_cfg_len = (int)got;
+		if (hi || size > got)
+			g_cfg_over = hi ? 0xFFFFFFFFu : size - got;
+	}
 	CloseHandle(h);
 }
 
@@ -13758,6 +13772,16 @@ static int ensure_helper(void)
 		}
 		ss_log("settings: d3d9_sw.cfg %s\n",
 		       g_cfg_len > 0 ? "found" : "not present (environment only)");
+		/* Loud, and above the knob list, because the failure it describes
+		 * looks exactly like a knob nobody set. */
+		if (g_cfg_over)
+			ss_log("  WARNING: d3d9_sw.cfg is %u byte(s) longer than this "
+			       "build reads. Everything past the first %u bytes was "
+			       "never parsed, so any setting near the end of the file "
+			       "is in force at its default no matter what the line "
+			       "says. Move the settings you care about to the top, or "
+			       "shorten the comments\n",
+			       g_cfg_over, (unsigned)SS_CFG_MAX);
 		for (i = 0; i < (int)(sizeof(g_knobs) / sizeof(g_knobs[0])); i++) {
 			char envv[64];
 			int from_env = GetEnvironmentVariableA(knobs[i], envv, sizeof(envv)) > 0;
