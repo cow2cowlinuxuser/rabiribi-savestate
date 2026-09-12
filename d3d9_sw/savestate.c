@@ -4188,7 +4188,8 @@ static const char *const g_knobs[] = {
 	"D3D9SW_PROBE",           "D3D9SW_WATCH",
 	"D3D9SW_NOTHREAD",        "D3D9SW_RUNAWAY",
 	"D3D9SW_REWIND_TEXTINPUT", "D3D9SW_HELDVETO",
-	"D3D9SW_VTABVETO",
+	"D3D9SW_VTABVETO",	  "D3D9SW_CROSSWORLD",
+	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN"
 };
@@ -9618,7 +9619,7 @@ static int ensure_committed(uintptr_t base, uintptr_t size, uintptr_t alloc_base
  * because it needs both the Slot layout and the entity lookup. */
 static void witness_save(Slot *s);
 static void witness_load(void);
-static void room_check(void);
+static int room_check(void);
 static void carry_save(void);
 static void carry_load(void);
 static void roster_save(void);
@@ -12216,7 +12217,9 @@ static int do_load(int slotno)
 	 * this line then the comparison after the restore has nothing to miss, and
 	 * the check reports health exactly as it did before it was written. */
 	heap_check("as the restore begins");
-	room_check();
+	/* Before anything moves, so a refusal costs nothing at all. */
+	if (!room_check())
+		return 0;
 	roster_save();
 	poke_init();
 	g_clob_slot = -1;
@@ -14629,27 +14632,66 @@ static void carry_load(void)
  * expected. Those are different amounts of work and there is no reason to
  * assume they have the same failure rate - but until this line existed the log
  * could not tell them apart, so every restore looked alike in the record. */
-static void room_check(void)
+/* Returns 0 to refuse the restore outright.
+ *
+ * Every cross-world restore ever logged has killed the process, and the ones
+ * measured carefully killed it at frame zero: four for four in one session, and
+ * again under -softsound and -xaudio2 once those were tried. Same-world
+ * restores survive, and saving inside a newly entered world is fine. It is
+ * specifically going back across a world boundary that cannot be done.
+ *
+ * The reason is not mysterious and is not something a better copy fixes. The
+ * entity pool is torn down and rebuilt on a world change, so the block map is
+ * being asked to match allocations that were freed and reissued in the
+ * meantime. Addresses are identity here: an object restored into memory that
+ * now belongs to something else is not that object, and no amount of care
+ * about which bytes we write changes who owns them.
+ *
+ * So refuse, and say so. A refusal costs the player one reload; letting it
+ * proceed costs them the process, and has every time. This is the same
+ * judgement the block ownership tests make - convict rather than acquit, and
+ * withhold when we cannot show the memory is ours to move.
+ *
+ * D3D9SW_CROSSWORLD=1 allows it anyway, because the day the underlying problem
+ * is fixed this is how it gets tested. */
+static int room_check(void)
 {
 	uintptr_t ent;
 	unsigned map = 0;
+	char v[8];
+	DWORD got;
 
 	if (!g_ctl || !g_ctl->wit_valid)
-		return;
+		return 1;
 	if (!rr_entity(&ent, &map)) {
 		ss_log("  room: cannot read the map id right now, so this restore is "
 		       "unclassified\n");
-		return;
+		return 1;
 	}
-	if (map == g_ctl->wit_map)
+	if (map == g_ctl->wit_map) {
 		ss_log("  room: restoring inside map %u, the same one the save was taken "
 		       "in\n", map);
-	else
+		return 1;
+	}
+	got = ss_getenv("D3D9SW_CROSSWORLD", v, sizeof(v));
+	if (got > 0 && got < sizeof(v) && v[0] == '1') {
 		ss_log("  room: restoring ACROSS a room change - saved in map %u, standing "
 		       "in map %u. The entity pool has been torn down and rebuilt since "
 		       "the save, so the block map is being asked to match allocations "
-		       "that were freed and reissued\n",
+		       "that were freed and reissued. Allowed by D3D9SW_CROSSWORLD=1, "
+		       "and this has never once survived\n",
 		       g_ctl->wit_map, map);
+		return 1;
+	}
+	ss_log("  room: REFUSED - the save was taken in map %u and you are standing in "
+	       "map %u. The entity pool was torn down and rebuilt on the way between "
+	       "them, so the addresses in the save now belong to other objects and "
+	       "restoring would write this world's memory with the last one's. Nothing "
+	       "has been touched; the game is exactly as it was. Walk back to map %u "
+	       "and the same save will load, or set D3D9SW_CROSSWORLD=1 to try it "
+	       "anyway\n",
+	       g_ctl->wit_map, map, g_ctl->wit_map);
+	return 0;
 }
 
 static void witness_load(void)
