@@ -13575,6 +13575,12 @@ static int ensure_helper(void)
 		int i, shown = 0;
 		char v[64];
 
+		/* The game's own switches matter as much as ours and were nowhere in
+		 * this log. Rabi-Ribi takes -softsound, which changes how DxLib
+		 * mixes, and a session was read as evidence about it while the only
+		 * honest answer was that nothing here records how the game was
+		 * started. Same reason the knobs are printed even when unset. */
+		ss_log("settings: the game was started as: %s\n", GetCommandLineA());
 		ss_log("settings: d3d9_sw.cfg %s\n",
 		       g_cfg_len > 0 ? "found" : "not present (environment only)");
 		for (i = 0; i < (int)(sizeof(g_knobs) / sizeof(g_knobs[0])); i++) {
