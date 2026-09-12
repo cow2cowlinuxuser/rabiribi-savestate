@@ -758,10 +758,35 @@ static void out_start(void)
  * wait is bounded because a mixer that will not stop must not be allowed to
  * hold up a save; if it ever times out the log says so rather than continuing
  * on an assumption. */
+/* Nothing queued before a rewind may be delivered after one.
+ *
+ * The pending ring is a static in a module we hold, so it is present tense, and
+ * the XA2Callback pointers in it are the game's - which is past tense the moment
+ * a restore lands. An entry queued for an object the game created after the save
+ * survives the rewind pointing at memory whose first word is now whatever stood
+ * there at save time, and cb_flush reads that word as a vtable. Measured: a
+ * fault at cb_flush+0x92 reading F5C8BE54, zero frames after a restore, on the
+ * instruction that indexes the callback's table.
+ *
+ * Dropping them is not a compromise. These callbacks say "the mixer wants more
+ * samples" and "a buffer finished"; both are re-asked on the next pass, and the
+ * world they were asked about no longer exists. */
+static void cb_drop(void)
+{
+	EnterCriticalSection(&g_cs);
+	g_pend_lost += (unsigned long)g_pend_n;
+	g_pend_head = 0;
+	g_pend_n = 0;
+	LeaveCriticalSection(&g_cs);
+}
+
 void xa2_sw_park(void)
 {
 	int spins;
 
+	/* Ahead of the g_out_live test: the ring fills from the game's own calls,
+	 * so it has entries to drop whether or not a mixer was ever started. */
+	cb_drop();
 	if (!g_out_live)
 		return;
 	InterlockedExchange(&g_mix_park, 1);

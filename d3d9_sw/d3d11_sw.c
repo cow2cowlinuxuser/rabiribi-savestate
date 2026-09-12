@@ -2649,10 +2649,6 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 		profile_seed_env();
 		hook_getprocaddress();
 		dsound_claim();
-		/* Last, and only if asked. Everything above reads memory; this
-		 * one changes where the game's future memory comes from, so it
-		 * goes in once the rest of the attach has succeeded. */
-		gameheap_install();
 	} else if (reason == DLL_PROCESS_DETACH)
 		d11_log("process detach (%s) after %ld presents",
 			reserved ? "process exiting" : "FreeLibrary", g_present_n);
@@ -6442,6 +6438,20 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 			for (bit = 0; bit < 32; bit++)
 				if (fresh & (1u << bit))
 					d11_log("VS opcode %d unimplemented", w * 32 + bit);
+		}
+	}
+	/* Not at DLL_PROCESS_ATTACH, which is where this went first and where it
+	 * was invisible: the savestate log does not exist that early, so every
+	 * line the installer wrote went nowhere, and the config read as unset
+	 * while the session header printed it as 1. Here both are up, and the
+	 * result lands in the log the reader is already looking at. */
+	{
+		static int gh_tried;
+
+		if (!gh_tried) {
+			gh_tried = 1;
+			d11_log("gameheap: %d import slot(s) redirected",
+				gameheap_install());
 		}
 	}
 	savestate_guard();
