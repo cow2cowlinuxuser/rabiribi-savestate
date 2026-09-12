@@ -1,0 +1,200 @@
+image base 00850000   (rabiribi.exe.dump_00850000.exe)
+
+=== who calls the Heap* floor ===
+
+  HeapAlloc:
+    0087bd4a  in FUN_0087bc20                       entry 0087bc20  RVA 0002BC20
+    0087bf8c  in FUN_0087bc20                       entry 0087bc20  RVA 0002BC20
+    00bbe6f5  in _malloc                            entry 00bbe6b2  RVA 0036E6B2
+    00bcec36  in __calloc_impl                      entry 00bcebf7  RVA 0037EBF7
+    00bdbe82  in FUN_00bdbe12                       entry 00bdbe12  RVA 0038BE12
+    00bf10d8  (no function - data slot)
+
+  HeapFree:
+    0087c09f  in FUN_0087c070                       entry 0087c070  RVA 0002C070
+    008dffb8  in FUN_008dfef0                       entry 008dfef0  RVA 0008FEF0
+    00bb9768  in FID_conflict:_free                 entry 00bb9754  RVA 00369754
+    00bdbf2b  in FUN_00bdbe12                       entry 00bdbe12  RVA 0038BE12
+    00bf10dc  (no function - data slot)
+
+  HeapReAlloc:
+    00bbe781  in _realloc                           entry 00bbe744  RVA 0036E744
+    00bf11ac  (no function - data slot)
+
+  HeapSize:
+    00bc8083  in FUN_00bc805a                       entry 00bc805a  RVA 0037805A
+    00bf1220  (no function - data slot)
+
+  HeapCreate:
+    none
+
+  GetProcessHeap:
+    0087bd43  in FUN_0087bc20                       entry 0087bc20  RVA 0002BC20
+    0087bf85  in FUN_0087bc20                       entry 0087bc20  RVA 0002BC20
+    0087c098  in FUN_0087c070                       entry 0087c070  RVA 0002C070
+    008dffb1  in FUN_008dfef0                       entry 008dfef0  RVA 0008FEF0
+    00bdbe7b  in FUN_00bdbe12                       entry 00bdbe12  RVA 0038BE12
+    00bdbf24  in FUN_00bdbe12                       entry 00bdbe12  RVA 0038BE12
+    00bf10e0  (no function - data slot)
+
+  HeapDestroy:
+    none
+
+=== the set, with prologue bytes ===
+  a detour overwrites the first 5 bytes with a jump, so it needs to
+  know what it is overwriting and to refuse if the bytes moved
+
+  FUN_0087bc20   entry 0087bc20   RVA 0002BC20   callers 7
+    bytes 55 8B EC 81 EC C8 04 00 00 A1 40 E9 D1 00 33 C5 
+    0087bc20  PUSH EBP
+    0087bc21  MOV EBP,ESP
+    0087bc23  SUB ESP,0x4c8
+    0087bc29  MOV EAX,[0x00d1e940]
+    0087bc2e  XOR EAX,EBP
+    0087bc30  MOV dword ptr [EBP + -0x4],EAX
+    0087bc33  PUSH ESI
+    0087bc34  PUSH EDI
+    0087bc35  PUSH 0xbf2a9c
+    0087bc3a  CALL 0x008ab130
+    0087bc3f  CALL 0x008ab470
+    0087bc44  PUSH 0x94
+    0087bc49  LEA EAX,[EBP + 0xffffff68]
+    0087bc4f  PUSH 0x0
+
+  FUN_0087c070   entry 0087c070   RVA 0002C070   callers 1
+    bytes A1 60 EA D4 00 56 48 74 0C 48 75 0E E8 EF A1 07 
+    0087c070  MOV EAX,[0x00d4ea60]
+    0087c075  PUSH ESI
+    0087c076  DEC EAX
+    0087c077  JZ 0x0087c085
+    0087c079  DEC EAX
+    0087c07a  JNZ 0x0087c08a
+    0087c07c  CALL 0x008f6270
+    0087c081  MOV ESI,EAX
+    0087c083  JMP 0x0087c08c
+    0087c085  CALL 0x008dffd0
+    0087c08a  XOR ESI,ESI
+    0087c08c  MOV EAX,[0x00d20a9c]
+    0087c091  TEST EAX,EAX
+    0087c093  JZ 0x0087c0af
+
+  FUN_008dfef0   entry 008dfef0   RVA 0008FEF0   callers 2
+    bytes E8 3B 08 00 00 E8 86 FD FF FF 83 3D 58 EA D4 00 
+    008dfef0  CALL 0x008e0730
+    008dfef5  CALL 0x008dfc80
+    008dfefa  CMP dword ptr [0x00d4ea58],0x0
+    008dff01  JZ 0x008dff17
+    008dff03  PUSH 0x0
+    008dff05  PUSH 0x0
+    008dff07  MOV dword ptr [0x00d4ea58],0x0
+    008dff11  CALL dword ptr [0x00bf1338]
+    008dff17  MOV EAX,[0x010a716c]
+    008dff1c  TEST EAX,EAX
+    008dff1e  JZ 0x008dff33
+    008dff20  PUSH EAX
+    008dff21  CALL 0x008c7c80
+    008dff26  ADD ESP,0x4
+
+  FID_conflict:_free   entry 00bb9754   RVA 00369754   callers 107
+    bytes 55 8B EC 83 7D 08 00 74 2D FF 75 08 6A 00 FF 35 
+    00bb9754  PUSH EBP
+    00bb9755  MOV EBP,ESP
+    00bb9757  CMP dword ptr [EBP + 0x8],0x0
+    00bb975b  JZ 0x00bb978a
+    00bb975d  PUSH dword ptr [EBP + 0x8]
+    00bb9760  PUSH 0x0
+    00bb9762  PUSH dword ptr [0x0118e588]
+    00bb9768  CALL dword ptr [0x00bf10dc]
+    00bb976e  TEST EAX,EAX
+    00bb9770  JNZ 0x00bb978a
+    00bb9772  PUSH ESI
+    00bb9773  CALL 0x00bbe61e
+    00bb9778  MOV ESI,EAX
+    00bb977a  CALL dword ptr [0x00bf113c]
+
+  _malloc   entry 00bbe6b2   RVA 0036E6B2   callers 54
+    bytes 55 8B EC 56 8B 75 08 83 FE E0 77 6F 53 57 A1 88 
+    00bbe6b2  PUSH EBP
+    00bbe6b3  MOV EBP,ESP
+    00bbe6b5  PUSH ESI
+    00bbe6b6  MOV ESI,dword ptr [EBP + 0x8]
+    00bbe6b9  CMP ESI,-0x20
+    00bbe6bc  JA 0x00bbe72d
+    00bbe6be  PUSH EBX
+    00bbe6bf  PUSH EDI
+    00bbe6c0  MOV EAX,[0x0118e588]
+    00bbe6c5  TEST EAX,EAX
+    00bbe6c7  JNZ 0x00bbe6e6
+    00bbe6c9  CALL 0x00bcc089
+    00bbe6ce  PUSH 0x1e
+    00bbe6d0  CALL 0x00bcc0e6
+
+  _realloc   entry 00bbe744   RVA 0036E744   callers 15
+    bytes 55 8B EC 83 7D 08 00 75 0B FF 75 0C E8 5D FF FF 
+    00bbe744  PUSH EBP
+    00bbe745  MOV EBP,ESP
+    00bbe747  CMP dword ptr [EBP + 0x8],0x0
+    00bbe74b  JNZ 0x00bbe758
+    00bbe74d  PUSH dword ptr [EBP + 0xc]
+    00bbe750  CALL 0x00bbe6b2
+    00bbe755  POP ECX
+    00bbe756  POP EBP
+    00bbe757  RET
+    00bbe758  PUSH ESI
+    00bbe759  MOV ESI,dword ptr [EBP + 0xc]
+    00bbe75c  TEST ESI,ESI
+    00bbe75e  JNZ 0x00bbe76d
+    00bbe760  PUSH dword ptr [EBP + 0x8]
+
+  FUN_00bc805a   entry 00bc805a   RVA 0037805A   callers 2
+    bytes 55 8B EC 83 7D 08 00 75 15 E8 B6 65 FF FF C7 00 
+    00bc805a  PUSH EBP
+    00bc805b  MOV EBP,ESP
+    00bc805d  CMP dword ptr [EBP + 0x8],0x0
+    00bc8061  JNZ 0x00bc8078
+    00bc8063  CALL 0x00bbe61e
+    00bc8068  MOV dword ptr [EAX],0x16
+    00bc806e  CALL 0x00bc50a7
+    00bc8073  OR EAX,0xffffffff
+    00bc8076  POP EBP
+    00bc8077  RET
+    00bc8078  PUSH dword ptr [EBP + 0x8]
+    00bc807b  PUSH 0x0
+    00bc807d  PUSH dword ptr [0x0118e588]
+    00bc8083  CALL dword ptr [0x00bf1220]
+
+  __calloc_impl   entry 00bcebf7   RVA 0037EBF7   callers 2
+    bytes 55 8B EC 56 8B 75 08 85 F6 74 1B 6A E0 33 D2 58 
+    00bcebf7  PUSH EBP
+    00bcebf8  MOV EBP,ESP
+    00bcebfa  PUSH ESI
+    00bcebfb  MOV ESI,dword ptr [EBP + 0x8]
+    00bcebfe  TEST ESI,ESI
+    00bcec00  JZ 0x00bcec1d
+    00bcec02  PUSH -0x20
+    00bcec04  XOR EDX,EDX
+    00bcec06  POP EAX
+    00bcec07  DIV ESI
+    00bcec09  CMP EAX,dword ptr [EBP + 0xc]
+    00bcec0c  JNC 0x00bcec1d
+    00bcec0e  CALL 0x00bbe61e
+    00bcec13  MOV dword ptr [EAX],0xc
+
+  FUN_00bdbe12   entry 00bdbe12   RVA 0038BE12   callers 1
+    bytes 55 8B EC 83 EC 18 53 56 57 8B 7D 08 33 F6 6A 01 
+    00bdbe12  PUSH EBP
+    00bdbe13  MOV EBP,ESP
+    00bdbe15  SUB ESP,0x18
+    00bdbe18  PUSH EBX
+    00bdbe19  PUSH ESI
+    00bdbe1a  PUSH EDI
+    00bdbe1b  MOV EDI,dword ptr [EBP + 0x8]
+    00bdbe1e  XOR ESI,ESI
+    00bdbe20  PUSH 0x1
+    00bdbe22  PUSH ESI
+    00bdbe23  PUSH ESI
+    00bdbe24  PUSH EDI
+    00bdbe25  MOV EBX,ESI
+    00bdbe27  MOV dword ptr [EBP + -0x8],ESI
+
+=== done ===

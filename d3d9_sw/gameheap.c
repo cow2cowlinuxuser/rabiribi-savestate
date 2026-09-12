@@ -320,8 +320,65 @@ static void *gh_expand(void *p, size_t n)
 	return p;
 }
 
-struct Slot {
+/* Where the allocator actually is.
+ *
+ * The premise above is wrong in one detail that turns out to decide the method.
+ * Rabi-Ribi does not link ucrtbase; it links the runtime statically. Its import
+ * list is KERNEL32, USER32, GDI32, SHELL32 and STEAM_API and nothing else, so
+ * the ucrtbase in the process belongs to Windows and the game never calls it.
+ * That is why redirecting imports found nothing to redirect: there is no import
+ * to redirect. The conclusion the log drew - that the game's runtime heap comes
+ * from ucrtbase - named the right heap for the wrong reason.
+ *
+ * The allocator is in the game's own .text, and Ghidra found the whole of it by
+ * working back from the floor that every allocator has to reach. Five functions
+ * touch the runtime's heap handle, and only five:
+ *
+ *   malloc   0036E6B2 -> HeapAlloc      54 callers
+ *   calloc   0037EBF7 -> HeapAlloc       2 callers   (__calloc_impl)
+ *   realloc  0036E744 -> HeapReAlloc    15 callers
+ *   free     00369754 -> HeapFree      107 callers
+ *   _msize   0037805A -> HeapSize        2 callers
+ *
+ * All five read the handle from one global at 0118E588, which is __acrt_heap. A
+ * static UCRT sets it to GetProcessHeap(), and that single assignment is the
+ * origin of every ownership heuristic in savestate.c.
+ *
+ * The three other free-shaped functions in the image were the reason to go
+ * looking. None of them touches HeapFree; they tail-call this one. The set is
+ * closed, which is the property that makes hooking it safe - a block allocated
+ * through us and released through a routine we missed would go to HeapFree on a
+ * heap it does not belong to.
+ *
+ * Nothing outside the runtime shares these. The four other Heap* callers in the
+ * image ask GetProcessHeap for themselves and free what they themselves
+ * allocated; they never see a pointer of ours.
+ *
+ * So we detour the game's private copies rather than redirecting an import.
+ * That is better than the original plan, not a fallback from it: the copies
+ * belong to the game alone, so the redirect cannot reach Windows even by
+ * accident. Windows keeps ucrtbase; the game gets a heap with no other tenant.
+ *
+ * Tempting and rejected: write our heap handle into __acrt_heap and change no
+ * code at all. Every allocation already live at that moment came from the
+ * process heap, and the next free would hand it to HeapFree against a heap that
+ * never issued it. The swap is only safe before the runtime initialises, and we
+ * are loaded by LoadLibrary long after. Detours dispatch per pointer, so the
+ * mixed period is correct by construction. */
+#define GH_PRO 7
+
+/* Seven bytes because five is the jump and the eighth would split an
+ * instruction. Both shapes end on an instruction boundary and neither contains
+ * a relative operand, so the bytes can be moved to a trampoline unchanged. */
+static const unsigned char kProSaveEsi[GH_PRO] = { 0x55, 0x8B, 0xEC, 0x56,
+						   0x8B, 0x75, 0x08 };
+static const unsigned char kProTestArg[GH_PRO] = { 0x55, 0x8B, 0xEC, 0x83,
+						   0x7D, 0x08, 0x00 };
+
+struct Site {
 	const char *name;
+	unsigned rva; /* 0 where this target has no such function */
+	const unsigned char *pro;
 	void **real;
 	void *ours;
 };
@@ -333,75 +390,72 @@ struct Slot {
  * self-consistent. Hook one and not the other and it is not. Aligning by hand on
  * our own heap is possible but it is more surface than the state it would buy.
  *
- * _strdup allocates through the runtime's own malloc, which is not this one - it
- * is an internal call, not an import - so its blocks stay on the process heap
- * and come back to us through free, where the dispatch sends them home. */
-static struct Slot g_slots[] = {
-	{ "malloc", (void **)&r_malloc, (void *)(uintptr_t)0 },
-	{ "calloc", (void **)&r_calloc, (void *)(uintptr_t)0 },
-	{ "realloc", (void **)&r_realloc, (void *)(uintptr_t)0 },
-	{ "free", (void **)&r_free, (void *)(uintptr_t)0 },
-	{ "_msize", (void **)&r_msize, (void *)(uintptr_t)0 },
-	{ "_recalloc", (void **)&r_recalloc, (void *)(uintptr_t)0 },
-	{ "_expand", (void **)&r_expand, (void *)(uintptr_t)0 }
+ * _strdup allocates through malloc, so its blocks arrive here on their own.
+ *
+ * _recalloc and _expand carry no RVA because this executable does not contain
+ * them. They stay in the table so the log says we looked rather than leaving the
+ * reader to wonder, and so their handlers are not quietly dropped if a later
+ * target does have them. */
+static struct Site g_sites[] = {
+	{ "malloc", 0x0036E6B2, kProSaveEsi, (void **)&r_malloc, NULL },
+	{ "calloc", 0x0037EBF7, kProSaveEsi, (void **)&r_calloc, NULL },
+	{ "realloc", 0x0036E744, kProTestArg, (void **)&r_realloc, NULL },
+	{ "free", 0x00369754, kProTestArg, (void **)&r_free, NULL },
+	{ "_msize", 0x0037805A, kProTestArg, (void **)&r_msize, NULL },
+	{ "_recalloc", 0, NULL, (void **)&r_recalloc, NULL },
+	{ "_expand", 0, NULL, (void **)&r_expand, NULL }
 };
 
-static const char *const kCrt[] = { "ucrtbase.dll", "msvcrt.dll", "msvcr100.dll",
-				    "msvcr120.dll" };
+#define GH_SITES ((int)(sizeof(g_sites) / sizeof(g_sites[0])))
 
-/* What to do when there is no import table worth the name.
+/* The bytes have to be the ones we were promised.
  *
- * rabiribi.exe is packed - Steam's DRM, in a .bind section - and a packer does
- * not leave a directory for the loader to fill. It resolves what it needs by
- * hand and writes the answers into a table of its own, which is just bytes in
- * the image. Those bytes are still pointers, and a pointer to malloc is a
- * pointer to malloc however it got there, so we go and find it.
- *
- * Only sections that cannot execute. The same four bytes sitting in .text would
- * be the immediate of a real instruction, and rewriting that is how you turn a
- * working game into a puzzle. A data slot we can change; code we leave alone. */
-static int patch_scan(HMODULE mod, void *from, void *to)
+ * An RVA is only meaningful against the build it was read from. Point it at a
+ * patched executable, a different version, or a target that is not this game at
+ * all, and five bytes of jump land in the middle of an instruction - which does
+ * not fail, it misbehaves. So every site is checked against the prologue Ghidra
+ * recorded, and one mismatch stops the whole install. Patching four of five is
+ * worse than patching none. */
+static int site_ok(HMODULE exe, const struct Site *s)
 {
-	IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)mod;
-	IMAGE_NT_HEADERS *nt;
-	IMAGE_SECTION_HEADER *sec;
-	int hits = 0;
-	unsigned i;
+	const unsigned char *t = (const unsigned char *)exe + s->rva;
+	MEMORY_BASIC_INFORMATION mbi;
 
-	if (!mod || dos->e_magic != IMAGE_DOS_SIGNATURE)
+	if (!VirtualQuery(t, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT)
 		return 0;
-	nt = (IMAGE_NT_HEADERS *)((char *)mod + dos->e_lfanew);
-	if (nt->Signature != IMAGE_NT_SIGNATURE)
+	return memcmp(t, s->pro, GH_PRO) == 0;
+}
+
+/* The displaced bytes, then a jump back to what follows them. Built for every
+ * site before any target is written, because the moment the first jump goes in
+ * another thread can arrive in our free and needs the real one to forward to. */
+static void site_tramp(HMODULE exe, struct Site *s, unsigned char *tr)
+{
+	unsigned char *t = (unsigned char *)exe + s->rva;
+
+	memcpy(tr, t, GH_PRO);
+	tr[GH_PRO] = 0xE9;
+	*(LONG *)(tr + GH_PRO + 1) = (LONG)(t + GH_PRO - (tr + GH_PRO + 5));
+	*s->real = tr;
+}
+
+static int site_wire(HMODULE exe, struct Site *s)
+{
+	unsigned char *t = (unsigned char *)exe + s->rva;
+	DWORD old;
+
+	if (!VirtualProtect(t, GH_PRO, PAGE_EXECUTE_READWRITE, &old))
 		return 0;
-	sec = IMAGE_FIRST_SECTION(nt);
-	for (i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++) {
-		char *base = (char *)mod + sec->VirtualAddress;
-		size_t len = sec->Misc.VirtualSize;
-		MEMORY_BASIC_INFORMATION mbi;
-		size_t off;
-
-		if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)
-			continue;
-		if (len < sizeof(void *))
-			continue;
-		/* The header says how big the section is; the process says whether
-		 * it is actually there. A packer can leave a section reserved. */
-		if (!VirtualQuery(base, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT)
-			continue;
-		for (off = 0; off + sizeof(void *) <= len; off += sizeof(void *)) {
-			void **p = (void **)(base + off);
-			DWORD old;
-
-			if (*p != from)
-				continue;
-			if (!VirtualProtect(p, sizeof(void *), PAGE_READWRITE, &old))
-				continue;
-			*p = to;
-			VirtualProtect(p, sizeof(void *), old, &old);
-			hits++;
-		}
-	}
-	return hits;
+	t[0] = 0xE9;
+	*(LONG *)(t + 1) = (LONG)((unsigned char *)s->ours - (t + 5));
+	/* The two bytes the jump does not cover. Never executed, because nothing
+	 * branches between a function's entry and its fourth byte, but a decoder
+	 * reading them should see one instruction rather than half of one. */
+	t[5] = 0x90;
+	t[6] = 0x90;
+	VirtualProtect(t, GH_PRO, old, &old);
+	FlushInstructionCache(GetCurrentProcess(), t, GH_PRO);
+	return 1;
 }
 
 static int on(void)
@@ -415,88 +469,82 @@ static int on(void)
 int gameheap_install(void)
 {
 	HMODULE exe = GetModuleHandleA(NULL);
-	HMODULE crt = NULL;
-	size_t i;
-	int patched = 0, missing = 0, scanned = 0;
-	const char *crtname = NULL;
+	unsigned char *pool;
+	int live = 0, bad = 0, wired = 0;
+	int i;
 
-	g_slots[0].ours = (void *)gh_malloc;
-	g_slots[1].ours = (void *)gh_calloc;
-	g_slots[2].ours = (void *)gh_realloc;
-	g_slots[3].ours = (void *)gh_free;
-	g_slots[4].ours = (void *)gh_msize;
-	g_slots[5].ours = (void *)gh_recalloc;
-	g_slots[6].ours = (void *)gh_expand;
+	g_sites[0].ours = (void *)gh_malloc;
+	g_sites[1].ours = (void *)gh_calloc;
+	g_sites[2].ours = (void *)gh_realloc;
+	g_sites[3].ours = (void *)gh_free;
+	g_sites[4].ours = (void *)gh_msize;
+	g_sites[5].ours = (void *)gh_recalloc;
+	g_sites[6].ours = (void *)gh_expand;
 
 	if (g_ready || !on())
 		return 0;
-	for (i = 0; i < sizeof(kCrt) / sizeof(kCrt[0]) && !crt; i++) {
-		crt = GetModuleHandleA(kCrt[i]);
-		crtname = kCrt[i];
+	if (!exe)
+		return 0;
+
+	/* Look before touching anything. */
+	for (i = 0; i < GH_SITES; i++) {
+		if (!g_sites[i].rva)
+			continue;
+		live++;
+		if (site_ok(exe, &g_sites[i]))
+			continue;
+		bad++;
+		ss_log("gameheap: %-10s at +%08X does not begin with the bytes this "
+		       "build was told to expect\n",
+		       g_sites[i].name, g_sites[i].rva);
 	}
-	if (!exe || !crt) {
-		ss_log("gameheap: no C runtime module is loaded, so there is nothing to "
-		       "redirect\n");
+	if (!live || bad) {
+		ss_log("gameheap: %d of %d allocator site(s) did not match, so nothing "
+		       "was touched. These offsets were read from one build of one "
+		       "executable and mean nothing against another\n",
+		       bad, live);
 		return 0;
 	}
-	for (i = 0; i < sizeof(g_slots) / sizeof(g_slots[0]); i++) {
-		*g_slots[i].real = (void *)GetProcAddress(crt, g_slots[i].name);
-		if (!*g_slots[i].real)
-			missing++;
-	}
-	/* Without all seven the dispatch has a hole in it, and a hole here is a
-	 * block freed to the wrong allocator. */
-	if (missing) {
-		ss_log("gameheap: %s is missing %d of the %d entry point(s) this needs, "
-		       "so nothing was redirected\n",
-		       crtname, missing, (int)(sizeof(g_slots) / sizeof(g_slots[0])));
+
+	/* Executable, and ours, so nothing the game does can reclaim it. */
+	pool = (unsigned char *)VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE,
+					     PAGE_EXECUTE_READWRITE);
+	if (!pool) {
+		ss_log("gameheap: no memory for trampolines, error %lu\n", GetLastError());
 		return 0;
 	}
 	g_heap = HeapCreate(0, 1u << 20, 0);
 	if (!g_heap) {
 		ss_log("gameheap: HeapCreate failed, error %lu\n", GetLastError());
+		VirtualFree(pool, 0, MEM_RELEASE);
 		return 0;
 	}
 	InitializeCriticalSection(&g_cs);
-	/* Live before the first redirected call, because the first one can arrive
-	 * on another thread while this one is still patching. */
-	g_ready = 1;
-	for (i = 0; i < sizeof(g_slots) / sizeof(g_slots[0]); i++) {
-		int n = savestate_patch_iat(exe, *g_slots[i].real, g_slots[i].ours);
-		int m = 0;
 
-		/* Only where the front door was locked, so an ordinary import is
-		 * never patched twice. */
-		if (!n) {
-			m = patch_scan(exe, *g_slots[i].real, g_slots[i].ours);
-			scanned += m;
-		}
-		patched += n + m;
-		ss_log("gameheap: %-10s %d import slot(s), %d in the image\n",
-		       g_slots[i].name, n, m);
-	}
-	if (!patched) {
-		/* The executable reaches the runtime some other way - a delay load,
-		 * or a packer that resolves by hand. Leaving the heap in place with
-		 * nothing pointing at it is harmless; claiming we moved the game's
-		 * memory when we did not is not. */
-		g_ready = 0;
-		ss_log("gameheap: neither the import table nor the image itself holds "
-		       "any of %s's allocator addresses. The executable reaches the "
-		       "runtime by a route we cannot see from here, and its memory is "
-		       "where it was\n",
-		       crtname);
-		return 0;
+	/* Every forwarding path complete before any jump exists, then ready, then
+	 * the jumps. A call arriving midway through the last step reaches a
+	 * handler that can already forward. */
+	for (i = 0; i < GH_SITES; i++)
+		if (g_sites[i].rva)
+			site_tramp(exe, &g_sites[i], pool + (size_t)i * 16);
+	g_ready = 1;
+	for (i = 0; i < GH_SITES; i++) {
+		if (!g_sites[i].rva)
+			continue;
+		if (site_wire(exe, &g_sites[i]))
+			wired++;
+		else
+			ss_log("gameheap: %-10s could not be made writable\n",
+			       g_sites[i].name);
 	}
 	savestate_game_heap(g_heap);
-	ss_log("gameheap: %d slot(s) redirected from %s into a private heap at %p, %d "
-	       "of them found by scanning the image rather than the import table. "
-	       "Allocations under %lu KB the executable makes from here on have no "
-	       "other tenant, which is the arrangement DDPR gets from MSVCR100 for "
-	       "free\n",
-	       patched, crtname, (void *)g_heap, scanned,
-	       (unsigned long)(GH_BIG >> 10));
-	return patched;
+	ss_log("gameheap: %d of %d allocator site(s) in the game's own code now run "
+	       "on a private heap at %p. The runtime is linked statically, so these "
+	       "are the game's copies and nothing Windows uses passes through them. "
+	       "Allocations under %lu KB from here on have no other tenant, which is "
+	       "the arrangement DDPR gets from MSVCR100 for free\n",
+	       wired, live, (void *)g_heap, (unsigned long)(GH_BIG >> 10));
+	return wired;
 }
 
 void gameheap_report(void)
