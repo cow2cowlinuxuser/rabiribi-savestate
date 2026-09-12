@@ -327,6 +327,25 @@ static uint32_t blend_add(uint32_t src, uint32_t dst, uint32_t sa)
 	return out;
 }
 
+/* dst*src, the scalar twin of span_blend_mod. Nothing here that blend_pixel
+ * would not also compute; it just skips the eight factor dispatches to get
+ * there, for the tiles the vector kernel still declines. */
+static uint32_t blend_mod(uint32_t src, uint32_t dst)
+{
+	uint32_t out = 0;
+	int ch;
+
+	for (ch = 0; ch < 4; ch++) {
+		int shift = ch * 8;
+		/* Both operands are 0..255, so the quotient cannot exceed 255 and
+		 * needs no clamp. */
+		out |= (uint32_t)div255((int)((src >> shift) & 255) *
+					(int)((dst >> shift) & 255))
+		       << shift;
+	}
+	return out;
+}
+
 static uint32_t blend_pixel(uint32_t src, uint32_t dst, const SwState *st)
 {
 	uint32_t out = 0;
@@ -518,7 +537,7 @@ typedef struct SwSpan {
 	int bilinear, persp, white, seq_u;
 	uint32_t flat;
 	int alpha_test, alpha_func, alpha_ref;
-	int blend_over, blend_add;
+	int blend_over, blend_add, blend_mod;
 	float w0, w1, w2, dw0, dw1, dw2;
 	float u, v, du, dv, iw, diw;
 } SwSpan;
@@ -802,6 +821,31 @@ static __m256i span_blend_add(__m256i src, __m256i dst, __m256i sa)
 	}
 }
 
+/* dst*src, every channel. src=ZERO with dst=SRCCOLOR reduces to exactly that:
+ * the source contributes nothing of itself and only scales what is already
+ * there. Alpha is multiplied like any other channel because the factor is the
+ * colour, so unlike over and add there is no alpha term to shortcut on.
+ * Matches blend_pixel()'s div255 rounding. */
+__attribute__((target("avx2")))
+static __m256i span_blend_mod(__m256i src, __m256i dst)
+{
+	const __m256i lomask = _mm256_set1_epi32(0x00ff00ff);
+	/* 255*255 + 128 is 65153, so every 16-bit lane stays below 65536. */
+	__m256i srb = _mm256_and_si256(src, lomask);
+	__m256i sag = _mm256_and_si256(_mm256_srli_epi32(src, 8), lomask);
+	__m256i drb = _mm256_and_si256(dst, lomask);
+	__m256i dag = _mm256_and_si256(_mm256_srli_epi32(dst, 8), lomask);
+	__m256i rb = _mm256_add_epi16(_mm256_mullo_epi16(srb, drb),
+				      _mm256_set1_epi16(128));
+	__m256i ag = _mm256_add_epi16(_mm256_mullo_epi16(sag, dag),
+				      _mm256_set1_epi16(128));
+
+	rb = _mm256_srli_epi16(_mm256_add_epi16(rb, _mm256_srli_epi16(rb, 8)), 8);
+	ag = _mm256_srli_epi16(_mm256_add_epi16(ag, _mm256_srli_epi16(ag, 8)), 8);
+	return _mm256_or_si256(_mm256_and_si256(rb, lomask),
+			       _mm256_slli_epi32(_mm256_and_si256(ag, lomask), 8));
+}
+
 __attribute__((target("avx2")))
 static __m256i span_alpha_pass(int func, __m256i alpha, int ref)
 {
@@ -903,6 +947,13 @@ static void span_avx2(const SwSpan *s, int xs, int xe)
 								    live);
 				col = span_blend_add(col, dst, alpha);
 			}
+		} else if (s->blend_mod) {
+			/* No alpha shortcut here. A transparent source still
+			 * multiplies the destination to black, which is the whole
+			 * point of the mode, so every live lane must be read. */
+			__m256i dst = _mm256_maskload_epi32((const int *)(s->crow + x), live);
+
+			col = span_blend_mod(col, dst);
 		}
 		if (evex)
 			span_store_evex(s->crow + x, live, col);
@@ -972,7 +1023,8 @@ static void triangle_rect(SwRast *r, SwVert a, SwVert b, SwVert c, const SwTex *
 	int persp, textured, flat_col, depth_test, depth_write;
 	SwTex ltex;
 	int l_bilinear, l_addr_u, l_addr_v, l_z_func, l_alpha_test, l_alpha_func;
-	int l_alpha_ref, l_blend, l_blend_over, l_blend_add, l_white, l_alpha_sharpen;
+	int l_alpha_ref, l_blend, l_blend_over, l_blend_add, l_blend_mod, l_white,
+		l_alpha_sharpen;
 #ifdef SWRAST_X86
 	int use_simd = 0;
 	SwSpan simd_span;
@@ -1092,21 +1144,27 @@ static void triangle_rect(SwRast *r, SwVert a, SwVert b, SwVert c, const SwTex *
 		       st->dst_blend == D3DBLEND_INVSRCALPHA;
 	l_blend_add = l_blend && st->blend_op == D3DBLENDOP_ADD &&
 		      st->src_blend == D3DBLEND_SRCALPHA && st->dst_blend == D3DBLEND_ONE;
+	/* Multiply. Measured at 23% of the town's shaded area and, because the
+	 * scalar path costs roughly six times what the vector one does, at well
+	 * over half its raster time. */
+	l_blend_mod = l_blend && st->blend_op == D3DBLENDOP_ADD &&
+		      st->src_blend == D3DBLEND_ZERO && st->dst_blend == D3DBLEND_SRCCOLOR;
 	/* An opaque white vertex colour makes the modulate a no-op. */
 	l_white = flat_col && a.color == 0xffffffffu;
 #ifdef SWRAST_X86
 	use_simd = simd_enabled() && (swrast_cpu_features() & CPU_AVX2) && textured &&
 		   flat_col &&
 		   !depth_test && !depth_write && !idbase && l_mask == 0xffffffffu &&
-		   (!l_blend || l_blend_over || l_blend_add) &&
+		   (!l_blend || l_blend_over || l_blend_add || l_blend_mod) &&
 		   /* Alpha sharpening is not in the vector kernel, and the two
 		    * paths have to agree pixel for pixel. Only text asks for it,
 		    * which the mix counters put at about one percent of area, so
 		    * sending those draws down the scalar path costs nothing. */
 		   !l_alpha_sharpen &&
-		   /* Multiply blends never reach the vector kernel today, so this
-		    * is belt and braces: the identity fade is scalar only, and the
-		    * two paths must agree pixel for pixel. */
+		   /* The identity fade is scalar only and the two paths have to
+		    * agree pixel for pixel. This used to be belt and braces,
+		    * resting on multiply never reaching the vector kernel; it now
+		    * does, so this condition is the only thing holding the line. */
 		   !l_mul_identity &&
 		   span_kernel_ok(&ltex, l_addr_u, l_addr_v, st->uv_in_bounds);
 	if (use_simd) {
@@ -1136,6 +1194,7 @@ static void triangle_rect(SwRast *r, SwVert a, SwVert b, SwVert c, const SwTex *
 		simd_span.alpha_ref = l_alpha_ref;
 		simd_span.blend_over = l_blend_over;
 		simd_span.blend_add = l_blend_add;
+		simd_span.blend_mod = l_blend_mod;
 		simd_span.dw0 = dw0dx;
 		simd_span.dw1 = dw1dx;
 		simd_span.dw2 = dw2dx;
@@ -1209,7 +1268,7 @@ static void triangle_rect(SwRast *r, SwVert a, SwVert b, SwVert c, const SwTex *
 			reason = SR_DEPTH;
 		else if (idbase || l_mask != 0xffffffffu)
 			reason = SR_MASK;
-		else if (l_blend && !l_blend_over && !l_blend_add)
+		else if (l_blend && !l_blend_over && !l_blend_add && !l_blend_mod)
 			reason = SR_BLEND;
 		else if (!use_simd &&
 			 ((ltex.width & (ltex.width - 1)) || (ltex.height & (ltex.height - 1))))
@@ -1341,6 +1400,8 @@ static void triangle_rect(SwRast *r, SwVert a, SwVert b, SwVert c, const SwTex *
 						if (sa == 0)
 							goto next_pixel;
 						col = blend_add(col, crow[x], sa);
+					} else if (l_blend_mod) {
+						col = blend_mod(col, crow[x]);
 					} else {
 						col = blend_pixel(col, crow[x], st);
 					}
@@ -1716,6 +1777,42 @@ enum { MIX_TEX, MIX_BILIN, MIX_OVER, MIX_ADD, MIX_BLENDOTHER, MIX_ATEST, MIX_ZTE
        MIX_FLAT, MIX_LINEARU, MIX_N };
 static double g_mix[MIX_N];
 
+/* Distinct blend triples that reached neither fast path, with the area each
+ * painted. Eight is plenty: the whole game has only ever shown three src/dst
+ * pairs, so anything beyond a handful means the assumption is wrong. */
+#define BLEND_OTHER_N 8
+static struct {
+	int op, src, dst;
+	double area;
+} g_blend_other[BLEND_OTHER_N];
+
+/* Sorted by area, largest first, so the caller can print only the top few.
+ * Reading clears, matching every other counter in this file. */
+int swrast_prof_blend_other(int *op, int *src, int *dst, double *area, int n)
+{
+	int got = 0, i, k;
+
+	for (i = 0; i < n; i++) {
+		int best = -1;
+
+		for (k = 0; k < BLEND_OTHER_N; k++)
+			if (g_blend_other[k].area > 0.0 &&
+			    (best < 0 || g_blend_other[k].area > g_blend_other[best].area))
+				best = k;
+		if (best < 0)
+			break;
+		op[got] = g_blend_other[best].op;
+		src[got] = g_blend_other[best].src;
+		dst[got] = g_blend_other[best].dst;
+		area[got] = g_blend_other[best].area;
+		g_blend_other[best].area = 0.0;
+		got++;
+	}
+	for (k = 0; k < BLEND_OTHER_N; k++)
+		g_blend_other[k].area = 0.0;
+	return got;
+}
+
 void swrast_prof_mix(double *out, int n)
 {
 	int i;
@@ -1946,8 +2043,28 @@ void swrast_triangles(SwRast *r, const SwTri *tris, int count, const SwTex *tex,
 			g_mix[MIX_OVER] += total;
 		else if (add)
 			g_mix[MIX_ADD] += total;
-		else if (st->blend_enable)
+		else if (st->blend_enable) {
+			int k;
+
 			g_mix[MIX_BLENDOTHER] += total;
+			/* Which blend is turning the vector kernel away. The mix
+			 * counter says how much area takes the scalar path but not
+			 * what it is, and the per-texture report logs src and dst
+			 * without the operation - which is the one field both fast
+			 * paths insist on, so it is the one that can hide here. */
+			for (k = 0; k < BLEND_OTHER_N; k++) {
+				if (g_blend_other[k].area == 0.0 ||
+				    (g_blend_other[k].op == st->blend_op &&
+				     g_blend_other[k].src == st->src_blend &&
+				     g_blend_other[k].dst == st->dst_blend)) {
+					g_blend_other[k].op = st->blend_op;
+					g_blend_other[k].src = st->src_blend;
+					g_blend_other[k].dst = st->dst_blend;
+					g_blend_other[k].area += total;
+					break;
+				}
+			}
+		}
 		if (st->alpha_test)
 			g_mix[MIX_ATEST] += total;
 		if (st->z_enable && r->depth)
