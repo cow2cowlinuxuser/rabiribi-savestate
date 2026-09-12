@@ -3139,6 +3139,10 @@ static unsigned g_n_draws, g_n_verts, g_n_tris_in, g_n_tris_out;
  * coordinates never leave the texture. Counted because it is a deliberate
  * substitution, not an identity, and the number is how visible it could be. */
 static unsigned g_n_npot_clamped;
+/* Readbacks of rendered output, and how many were answered with the rendered
+ * pixels rather than whatever the cpu plane happened to hold. These are not
+ * per-frame: they run at transitions, so they accumulate for the session. */
+static unsigned g_n_readback, g_n_readback_served;
 
 /* Flush time that happened inside the draw and present zones, so the rest can
  * be named as flushes triggered from elsewhere rather than being lumped in with
@@ -3975,6 +3979,59 @@ static void res_copy_tex_rect(Sw11Res *d, UINT dx, UINT dy, Sw11Res *s, UINT sx,
 		res_ensure_pixels(d);
 	if (d->pixels)
 		res_after_cpu_copy(d, s);
+}
+
+/* pixels -> cpu, the one direction the decode path never has to run.
+ *
+ * Rendered output lives in the pixels plane. The cpu plane holds whatever was
+ * last uploaded, and nothing uploads to a render target, so for the backbuffer
+ * it has never been written at all. A readback asks for the rendered image and
+ * an ordinary copy hands over the other plane, which is how the game has been
+ * reading memory no one initialised.
+ *
+ * Returns 0 without writing anything where it cannot do the job, so the caller
+ * can say so plainly instead of leaving wrong colours behind.
+ */
+static int res_readback_pixels(Sw11Res *d, Sw11Res *s)
+{
+	UINT x, y, w, h;
+	int swap;
+
+	if (!d || !s || !d->cpu || !s->pixels || !d->row_pitch)
+		return 0;
+	/* Aliased planes are the same memory, so the ordinary copy already moves
+	 * the rendered pixels and this would be a second opinion on bytes that
+	 * are not in dispute. */
+	if (s->pixels_alias)
+		return 0;
+	if (fmt_bc_block(d->format) || fmt_stride(d->format) != 4)
+		return 0;
+	if (fmt_pixels_swappable(d->format))
+		swap = 1; /* R8G8B8A8, against a rasteriser that works in BGRA */
+	else if (d->format == DXGI_FORMAT_B8G8R8A8_UNORM ||
+		 d->format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
+		 d->format == DXGI_FORMAT_B8G8R8A8_TYPELESS)
+		swap = 0;
+	else
+		return 0;
+	w = d->width < s->width ? d->width : s->width;
+	h = d->height < s->height ? d->height : s->height;
+	for (y = 0; y < h; y++) {
+		const uint32_t *sp = s->pixels + (size_t)y * s->width;
+		uint32_t *dp = (uint32_t *)(d->cpu + (size_t)y * d->row_pitch);
+
+		if (!swap) {
+			memcpy(dp, sp, (size_t)w * 4);
+			continue;
+		}
+		for (x = 0; x < w; x++) {
+			uint32_t v = sp[x];
+
+			dp[x] = (v & 0xff00ff00u) | ((v & 0x00ff0000u) >> 16) |
+				((v & 0x000000ffu) << 16);
+		}
+	}
+	return 1;
 }
 
 /* Point-sampled stretch over the full extent of both surfaces.
@@ -8243,22 +8300,27 @@ static HRESULT WINAPI Ctx_Map(ID3D11DeviceContext1 *this, ID3D11Resource *res, U
 		 *
 		 * A staging texture with CPU read access, mapped, is the game
 		 * reading back what was drawn - and that is the one thing that
-		 * would stop the GPU from ever being a disposable cache. It is also
-		 * broken today: rasterising writes the render target's pixels
-		 * plane, every copy and Map path reads the cpu plane, and nothing
-		 * encodes one into the other, so a readback of rendered output
-		 * returns a plane that was never written. Black is what that looks
-		 * like on screen. */
+		 * would stop the GPU from ever being a disposable cache.
+		 *
+		 * It used to be broken as well: rasterising writes the render
+		 * target's pixels plane, every copy and Map path reads the cpu
+		 * plane, and nothing encoded one into the other, so a readback of
+		 * rendered output returned a plane that was never written. The
+		 * copy into staging now does that encoding, and the count below
+		 * says whether the plane about to be read got it. */
 		if (r->usage == D3D11_USAGE_STAGING &&
 		    (r->cpu_access & D3D11_CPU_ACCESS_READ)) {
 			static long seen;
 
 			if (InterlockedIncrement(&seen) <= 8)
 				d11_log("READBACK: the game mapped staging texture #%d "
-					"%ux%u for READ (type=%u). This is a real "
-					"readback of rendered output, and the cpu plane "
-					"it reads was never written by the rasteriser",
-					r->id, r->width, r->height, type);
+					"%ux%u for READ (type=%u). %u readback copy(s) "
+					"this session, %u served with rendered pixels%s",
+					r->id, r->width, r->height, type, g_n_readback,
+					g_n_readback_served,
+					g_n_readback > g_n_readback_served
+						? " <<< the shortfall is read as stale bytes"
+						: "");
 		}
 		d11_trace("Map tex #%d %ux%u fmt=%d type=%u flags=%x", r->id, r->width, r->height,
 			(int)r->format, type, flags);
@@ -8428,16 +8490,27 @@ static void WINAPI Ctx_CopyResource(ID3D11DeviceContext1 *this, ID3D11Resource *
 	 * surface is how the data gets there before it is mapped. Naming the
 	 * source says whether it is the backbuffer or a render target, which is
 	 * what decides whether the GPU could ever be non-authoritative here. */
-	if (d->usage == D3D11_USAGE_STAGING && (d->cpu_access & D3D11_CPU_ACCESS_READ)) {
+	if (d->usage == D3D11_USAGE_STAGING && (d->cpu_access & D3D11_CPU_ACCESS_READ) &&
+	    (s->is_bb || (s->bind & D3D11_BIND_RENDER_TARGET))) {
 		static long seen;
+		int ok = res_readback_pixels(d, s);
 
 		if (InterlockedIncrement(&seen) <= 8)
 			d11_log("READBACK: CopyResource into staging #%d %ux%u from #%d "
-				"%ux%u (backbuffer=%d, render target=%d). The source's "
-				"rendered pixels live in its pixels plane and this copies "
-				"its cpu plane, which nothing writes",
+				"%ux%u (backbuffer=%d, render target=%d): %s",
 				d->id, d->width, d->height, s->id, s->width, s->height,
-				s->is_bb, (s->bind & D3D11_BIND_RENDER_TARGET) ? 1 : 0);
+				s->is_bb, (s->bind & D3D11_BIND_RENDER_TARGET) ? 1 : 0,
+				ok ? "rendered pixels encoded into the staging plane"
+				   : "NOT SERVED - the rendered plane could not be "
+				     "encoded into this destination, so the game will "
+				     "read whatever the cpu plane already held");
+		g_n_readback++;
+		if (ok) {
+			/* The plane the map will read is now correct, and letting the
+			 * ordinary copy run would put the stale one straight back. */
+			g_n_readback_served++;
+			return;
+		}
 	}
 	if (d->kind == 1 && s->kind == 1) {
 		d11_trace("CopyResource #%d %ux%u fmt=%d bb=%d <- #%d %ux%u fmt=%d", d->id, d->width,
