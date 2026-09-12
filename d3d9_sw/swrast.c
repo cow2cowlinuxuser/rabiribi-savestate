@@ -922,8 +922,28 @@ enum { SR_OK, SR_NOAVX2, SR_NOTEX, SR_NOTFLAT, SR_DEPTH, SR_MASK, SR_BLEND, SR_N
 #define SR_SLOTS 33
 #define SR_STRIDE 16 /* doubles: 128 bytes, so no slot shares a line */
 static double g_simd_area[SR_SLOTS * SR_STRIDE];
-/* 0 is the thread that drives the flush; workers claim 1..n. */
-static __thread int g_worker_slot;
+/* 0 is the thread that drives the flush; workers claim 1..n.
+ *
+ * Held as a table of thread ids rather than a __thread int on purpose. Being
+ * held keeps this module's statics out of the rewind, but thread-local storage
+ * is not this module's: the loader allocates the per-thread block and the array
+ * that indexes it on a process heap, and that heap we do rewind. A restore can
+ * therefore leave the array slot reading back as zero, and the next worker to
+ * touch the variable reads through a null block - which is exactly the fault at
+ * address 4 that ended the 01:50 session. A table in our own data cannot go
+ * that way. */
+static DWORD g_worker_tid[SR_SLOTS - 1];
+
+static int worker_slot(void)
+{
+	DWORD id = GetCurrentThreadId();
+	int i;
+
+	for (i = 0; i < SR_SLOTS - 1; i++)
+		if (g_worker_tid[i] == id)
+			return i + 1;
+	return 0;
+}
 
 void swrast_prof_simd(double *out, int n)
 {
@@ -1202,9 +1222,7 @@ static void triangle_rect(SwRast *r, SwVert a, SwVert b, SwVert c, const SwTex *
 		reason = SR_NOAVX2;
 #endif
 		{
-			int slot = g_worker_slot;
-			if (slot < 0 || slot >= SR_SLOTS)
-				slot = 0;
+			int slot = worker_slot();
 			g_simd_area[slot * SR_STRIDE + reason] +=
 				(double)(maxx - minx + 1) * (double)(maxy - miny + 1);
 		}
@@ -1594,7 +1612,7 @@ static void run_tile(int t)
 
 static DWORD WINAPI tile_worker(LPVOID param)
 {
-	g_worker_slot = (int)(intptr_t)param + 1;
+	g_worker_tid[(int)(intptr_t)param] = GetCurrentThreadId();
 	for (;;) {
 		WaitForSingleObject(g_wake[(int)(intptr_t)param], INFINITE);
 		if (g_die)
