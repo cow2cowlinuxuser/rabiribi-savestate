@@ -5958,9 +5958,28 @@ static void heaps_partition(void)
 			/* Mode 2 keeps an unclaimed heap rather than stranding it,
 			 * since the only heaps that must stay behind are the ones
 			 * Windows reaches from data outside the save. */
-			g_ctl->heap_ours[k] = mode == 2
-						      ? (char)!os_owned_heap(who)
-						      : (char)(m >= 0 ? g_ctl->mod_rewound[m] : 0);
+			/* A heap belonging to a module we hold in the present goes
+			 * with its module.
+			 *
+			 * os_owned_heap is a list of four names, written when the
+			 * only offenders anyone had seen were ntdll's and the text
+			 * input stack's. XAudio2 does not appear on it, so launching
+			 * the game with -xaudio2 produced this: heap 07810000 claimed
+			 * by xaudio2_9.DLL with 19669 votes, 7.06 MB over four
+			 * segments, REWOUND with the game - while xaudio2_9.DLL ran
+			 * thirty-two threads that never stopped. The game died on
+			 * every restore, and it was not subtle about why.
+			 *
+			 * The list was never the rule, only the instances of it. The
+			 * rule is that a module and its allocations belong to the same
+			 * era: rewinding one while holding the other is the split this
+			 * whole file exists to avoid, and we were manufacturing it for
+			 * any audio backend nobody had happened to name yet. */
+			g_ctl->heap_ours[k] =
+				mode == 2
+					? (char)!(os_owned_heap(who) ||
+						  (m >= 0 && !g_ctl->mod_rewound[m]))
+					: (char)(m >= 0 ? g_ctl->mod_rewound[m] : 0);
 		}
 		/* One switch over every Windows heap, because the write set says this
 		 * game does not keep its state in them.
@@ -13580,7 +13599,20 @@ static int ensure_helper(void)
 		 * mixes, and a session was read as evidence about it while the only
 		 * honest answer was that nothing here records how the game was
 		 * started. Same reason the knobs are printed even when unset. */
-		ss_log("settings: the game was started as: %s\n", GetCommandLineA());
+		/* Converted from the Unicode command line rather than taken from
+		 * GetCommandLineA, which in this process returns eleven characters -
+		 * the line came out as "C:\Program and stopped, which reads as a
+		 * formatter bug and is not one. */
+		{
+			const WCHAR *wc = GetCommandLineW();
+			char cl[512];
+
+			if (!wc || !WideCharToMultiByte(CP_ACP, 0, wc, -1, cl, sizeof(cl),
+							NULL, NULL))
+				lstrcpynA(cl, "(the command line could not be read)",
+					  sizeof(cl));
+			ss_log("settings: the game was started as: %s\n", cl);
+		}
 		ss_log("settings: d3d9_sw.cfg %s\n",
 		       g_cfg_len > 0 ? "found" : "not present (environment only)");
 		for (i = 0; i < (int)(sizeof(g_knobs) / sizeof(g_knobs[0])); i++) {
