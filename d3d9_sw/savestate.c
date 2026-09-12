@@ -838,6 +838,72 @@ int savestate_patch_iat(HMODULE mod, void *from, void *to)
 	return patch_iat(mod, from, to);
 }
 
+/* The same redirect, found by name rather than by address.
+ *
+ * Matching on the address GetProcAddress returns works for an ordinary export
+ * and fails for a forwarder. kernel32!HeapFree is one: its export entry is the
+ * string "NTDLL.RtlFreeHeap", so GetProcAddress resolves through to ntdll and
+ * hands back an address that need not be the one the loader wrote into this
+ * executable's import slot. Our HeapFree patch found nothing for exactly that
+ * reason, and reported an honest zero.
+ *
+ * The name is not ambiguous the way the address is, so walk the names. The
+ * original thunk array keeps them after binding, which is what it is for; an
+ * import bound by ordinal has no name and is skipped, and says so by matching
+ * nothing rather than by matching the wrong thing.
+ *
+ * The address that was there is handed back so the caller has something to
+ * forward to, which is the one thing the address-matching version got for free.
+ */
+int savestate_patch_iat_named(HMODULE mod, const char *dll, const char *fn, void *to,
+			      void **prev)
+{
+	unsigned char *base = (unsigned char *)mod;
+	IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
+	IMAGE_NT_HEADERS *nt;
+	IMAGE_IMPORT_DESCRIPTOR *imp;
+	DWORD rva;
+	int n = 0;
+
+	if (!mod || dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return 0;
+	nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return 0;
+	rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+	if (!rva)
+		return 0;
+	for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + rva); imp->Name; imp++) {
+		const char *name = (const char *)(base + imp->Name);
+		IMAGE_THUNK_DATA *orig, *cur;
+
+		if (dll && lstrcmpiA(name, dll))
+			continue;
+		if (!imp->OriginalFirstThunk)
+			continue;
+		orig = (IMAGE_THUNK_DATA *)(base + imp->OriginalFirstThunk);
+		cur = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+		for (; orig->u1.AddressOfData; orig++, cur++) {
+			IMAGE_IMPORT_BY_NAME *by;
+			DWORD old;
+
+			if (orig->u1.Ordinal & IMAGE_ORDINAL_FLAG)
+				continue;
+			by = (IMAGE_IMPORT_BY_NAME *)(base + orig->u1.AddressOfData);
+			if (lstrcmpA((const char *)by->Name, fn))
+				continue;
+			if (prev)
+				*prev = (void *)cur->u1.Function;
+			if (!VirtualProtect(cur, sizeof(void *), PAGE_READWRITE, &old))
+				continue;
+			cur->u1.Function = (ULONG_PTR)to;
+			VirtualProtect(cur, sizeof(void *), old, &old);
+			n++;
+		}
+	}
+	return n;
+}
+
 /* A heap the game's allocations were redirected into, when they were.
  *
  * Set before the first save. It makes game_crt_heap answer with a heap that has
@@ -5376,6 +5442,25 @@ static HANDLE crt_heap(const char *dll)
 		return NULL;
 	get = (intptr_t(__cdecl *)(void))(void *)GetProcAddress(m, "_get_heap_handle");
 	return get ? (HANDLE)get() : NULL;
+}
+
+/* Does an address range fall inside a module the roster says we are holding?
+ *
+ * The module roster and the captured region list are built by different code
+ * and have never been checked against each other. If a region we write back
+ * lies inside a held module, one of the two is lying about what is ours, and
+ * the restore is reaching into a peer that is still running. */
+static int held_mod_at(uintptr_t lo, uintptr_t hi)
+{
+	int k;
+
+	if (!g_ctl)
+		return -1;
+	for (k = 0; k < g_ctl->nmods; k++)
+		if (!g_ctl->mod_rewound[k] && lo < g_ctl->mod_hi[k] &&
+		    hi > g_ctl->mod_lo[k])
+			return k;
+	return -1;
 }
 
 /* Does this executable name a C runtime in its imports at all?
@@ -12889,6 +12974,7 @@ static int do_load(int slotno)
 		Window wv;
 		unsigned long long vwords = 0;
 		int vdiffer = 0, vunchecked = 0, vnamed = 0, vmode = verify_mode();
+	int pstraddle = 0, pdelta = 0, pnamed = 0;
 		LARGE_INTEGER v0, v1, vf;
 
 		QueryPerformanceFrequency(&vf);
@@ -12996,9 +13082,54 @@ static int do_load(int slotno)
 			if (writable && !by_block)
 				der_apply(i, (unsigned char *)base, (size_t)size);
 			/* Back to the protection the region had when it was saved, not the
-			 * one it happened to have a moment ago. */
-			if (writable)
+			 * one it happened to have a moment ago.
+			 *
+			 * That is right for memory we own and dangerous for memory we do
+			 * not, so both ways it can be wrong are now counted.
+			 *
+			 * A session ended with Steam's vstdlib_s.dll faulting on a REP
+			 * STOSB into one of its own globals, zero frames after a restore,
+			 * on a page reading PAGE_READONLY. The destination was a fixed
+			 * address with a tidy length, which is a memset doing exactly what
+			 * it was written to do - so the pointer was fine and the page was
+			 * not. This line is the only thing in the engine that can make a
+			 * page less writable than the process left it.
+			 *
+			 * Two questions, because they have different answers. Does a
+			 * captured region overlap a module we said we were holding - which
+			 * would mean the module roster and the region list disagree about
+			 * what is ours. And did the protection change between the save and
+			 * now - a copy-on-write page promoted to read-write after we wrote
+			 * the value down is handed back read-only, and its next writer
+			 * dies without either list being wrong. */
+			if (writable) {
+				MEMORY_BASIC_INFORMATION pmbi;
+				int hm = held_mod_at((uintptr_t)base,
+						     (uintptr_t)base + (uintptr_t)size);
+
+				if (hm >= 0) {
+					pstraddle++;
+					if (pnamed++ < 8)
+						ss_log("  STRADDLE: region %d at %p (%llu "
+						       "byte(s)) lies inside %s, which the "
+						       "module roster says is held. We are "
+						       "about to set its protection from a "
+						       "value we recorded\n",
+						       i, base, (unsigned long long)size,
+						       g_ctl->mod_name[hm]);
+				}
+				if (VirtualQuery(base, &pmbi, sizeof(pmbi)) == sizeof(pmbi) &&
+				    pmbi.Protect != s->regs[i].prot) {
+					pdelta++;
+					if (pnamed++ < 8)
+						ss_log("  PROTECT: region %d at %p is %08lX "
+						       "now and was %08lX at the save; "
+						       "handing back the saved value\n",
+						       i, base, (unsigned long)pmbi.Protect,
+						       (unsigned long)s->regs[i].prot);
+				}
 				VirtualProtect(base, size, s->regs[i].prot, &old);
+			}
 			pos += size;
 		}
 		win_close(&wv);
@@ -13321,6 +13452,13 @@ static int do_load(int slotno)
 			blk_probe_after();
 		}
 		QueryPerformanceCounter(&v1);
+		if (pstraddle || pdelta)
+			ss_log("  protection: %d region(s) inside a held module, %d "
+			       "whose protection had changed since the save%s\n",
+			       pstraddle, pdelta,
+			       pstraddle ? " <<< the module roster and the region "
+					   "list disagree about what is ours"
+					 : "");
 		if (vmode)
 			ss_log("  verify at restore: %d region(s), %d WRONG (%llu word(s)), %d "
 			       "unchecked, %.1f ms%s\n",
@@ -15018,6 +15156,33 @@ static int pos_ready(void);
  * the rest of our image on every restore, and a key that was down at save time
  * would read as a fresh press afterwards - which on F5 means restoring again,
  * forever. */
+/* Is the game the window the keyboard is actually talking to?
+ *
+ * GetAsyncKeyState reads the keyboard, not this window's share of it, so
+ * every hotkey here fires from whatever the user is typing into - a browser,
+ * an editor, a remote-desktop client, the middle of an IME composition. A
+ * stray F5 then takes a save, or worse a restore, against a game that is not
+ * even on screen, and the log records a session the player did not ask for.
+ *
+ * It is also wrong in a way that outlives the keypress. A restore delivered
+ * while another window owns the focus resumes the game holding a keyboard
+ * state it never saw arrive at, because the presses in between were addressed
+ * to somebody else.
+ *
+ * Asked of the foreground window's process rather than a saved HWND: the game
+ * has more than one window over its life, and the one that has focus is the
+ * one the keys are going to. */
+static int ours_has_focus(void)
+{
+	HWND fg = GetForegroundWindow();
+	DWORD pid = 0;
+
+	if (!fg)
+		return 0;
+	GetWindowThreadProcessId(fg, &pid);
+	return pid == GetCurrentProcessId();
+}
+
 int savestate_key_edge(int vk)
 {
 	static unsigned fallback[8];
@@ -15035,8 +15200,19 @@ int savestate_key_edge(int vk)
 		g_ctl->key_seeded = 1;
 	}
 	bits = g_ctl ? g_ctl->key_down : fallback;
+	/* Tracked even when it is not ours, so a key held down across an alt-tab
+	 * back into the game is already marked down and does not read as a fresh
+	 * press the moment focus returns. The edge is suppressed; the state is
+	 * not. */
 	down = (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
 	was = (bits[(vk >> 5) & 7] >> (vk & 31)) & 1;
+	if (!ours_has_focus()) {
+		if (down)
+			bits[(vk >> 5) & 7] |= 1u << (vk & 31);
+		else
+			bits[(vk >> 5) & 7] &= ~(1u << (vk & 31));
+		return 0;
+	}
 
 	if (down)
 		bits[(vk >> 5) & 7] |= 1u << (vk & 31);
@@ -15047,7 +15223,7 @@ int savestate_key_edge(int vk)
 
 int savestate_key_held(int vk)
 {
-	return (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
+	return ours_has_focus() && (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
 }
 
 void savestate_probe_census(void)

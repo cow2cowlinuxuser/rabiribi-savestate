@@ -51,6 +51,8 @@
 
 void savestate_log_line(const char *s);
 int savestate_patch_iat(HMODULE mod, void *from, void *to);
+int savestate_patch_iat_named(HMODULE mod, const char *dll, const char *fn, void *to,
+			      void **prev);
 void savestate_game_heap(HANDLE h);
 
 static void ss_log(const char *fmt, ...)
@@ -576,20 +578,22 @@ int gameheap_install(void)
 			       g_sites[i].name);
 	}
 	{
-		HMODULE k32 = GetModuleHandleA("kernel32.dll");
-		void *real = k32 ? (void *)GetProcAddress(k32, "HeapFree") : NULL;
-		int n = 0;
+		void *prev = NULL;
+		/* By name. kernel32!HeapFree is a forwarder to ntdll!RtlFreeHeap,
+		 * so the address GetProcAddress returns is not necessarily the one
+		 * in the import slot - which is why matching by address found
+		 * nothing and said so. */
+		int n = savestate_patch_iat_named(exe, "KERNEL32.dll", "HeapFree",
+						  (void *)gh_heapfree, &prev);
 
-		if (real) {
-			r_heapfree = (BOOL(WINAPI *)(HANDLE, DWORD, LPVOID))real;
-			n = savestate_patch_iat(exe, real, (void *)gh_heapfree);
-		}
 		if (!n)
-			r_heapfree = NULL;
+			n = savestate_patch_iat_named(exe, NULL, "HeapFree",
+						      (void *)gh_heapfree, &prev);
+		r_heapfree = n ? (BOOL(WINAPI *)(HANDLE, DWORD, LPVOID))prev : NULL;
 		ss_log("gameheap: HeapFree %d import slot(s) patched as a floor under "
 		       "every freer in the executable, the three that are not "
-		       "allocators included\n",
-		       n);
+		       "allocators included%s\n",
+		       n, n ? "" : " - the census below cannot measure what it claims");
 	}
 	savestate_game_heap(g_heap);
 	ss_log("gameheap: %d of %d allocator site(s) in the game's own code now run "
