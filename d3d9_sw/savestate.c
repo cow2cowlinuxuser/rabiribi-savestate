@@ -4188,6 +4188,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_PROBE",           "D3D9SW_WATCH",
 	"D3D9SW_NOTHREAD",        "D3D9SW_RUNAWAY",
 	"D3D9SW_REWIND_TEXTINPUT", "D3D9SW_HELDVETO",
+	"D3D9SW_VTABVETO",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN"
 };
@@ -10226,6 +10227,45 @@ static int g_held_n;
 static int g_held_full;
 static int g_held_threads;
 
+/* Is this block somebody else's object, judged by the vtable at its head?
+ *
+ * Cheap and exact where it fires: read the first word, ask which module it
+ * lands in, and if that module is one we hold in the present then the object is
+ * that module's and rewinding its contents is a lie told to code that never
+ * went back. Anything else - a word that is not a pointer, a pointer into a
+ * module we do rewind, a pointer into the heap - falls through and is judged by
+ * the ownership tests as before. */
+static int vtab_on(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_VTABVETO", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+static int foreign_object(uintptr_t b, unsigned long n)
+{
+	uintptr_t w;
+	int m;
+
+	if (!vtab_on() || n < sizeof(uintptr_t) || !g_ctl)
+		return 0;
+	if (!ss_readable(b, sizeof(uintptr_t)))
+		return 0;
+	w = *(const uintptr_t *)b;
+	if (w < 0x10000)
+		return 0;
+	m = module_of(w);
+	if (m < 0)
+		return 0;
+	return !g_ctl->mod_rewound[m];
+}
+
 static int held_on(void)
 {
 	static int cached = -1;
@@ -12770,9 +12810,9 @@ static int do_load(int slotno)
 			int recycled = 0;
 			unsigned long long recycled_bytes = 0;
 			uintptr_t recycled_first = 0;
-			int heldveto = 0;
-			unsigned long long heldbytes = 0;
-			uintptr_t heldfirst = 0, heldbigat = 0;
+			int heldveto = 0, vtabveto = 0;
+			unsigned long long heldbytes = 0, vtabbytes = 0;
+			uintptr_t heldfirst = 0, heldbigat = 0, vtabfirst = 0;
 			unsigned long heldbig = 0;
 
 			held_build();
@@ -12802,6 +12842,39 @@ static int do_load(int slotno)
 					}
 					heldveto++;
 					heldbytes += n;
+					continue;
+				}
+				/* An object whose vtable belongs to somebody else is
+				 * somebody else's object.
+				 *
+				 * DirectSound allocates its COM objects out of a heap
+				 * we attribute to rabiribi.exe and rewind wholesale, and
+				 * the game holding a pointer to one does not make its
+				 * contents the game's to move. Two faults in one session
+				 * said so directly: dsound.dll+282E2 wrote through a
+				 * field of a block whose first word was 6A0412C8, and
+				 * dsound.dll+5C6F8 called a function pointer out of one
+				 * whose first word was 6A042AB4 - both inside the vtable
+				 * range our own hook logged at startup, and one of them
+				 * marked WRITTEN by the last restore.
+				 *
+				 * The held-pointer veto catches these only when a thread
+				 * happens to be pointing at one at the instant we
+				 * freeze, which is why it helps and does not cure. This
+				 * test does not depend on timing.
+				 *
+				 * Deliberately narrow. Any first word that lands in a
+				 * module would do as a heuristic, but a game object
+				 * whose first field is a callback would be caught by it
+				 * and silently stop rewinding, so it asks instead
+				 * whether the module is one we are already holding in
+				 * the present. Those are the only ones where leaving the
+				 * object alone is consistent rather than arbitrary. */
+				if (foreign_object(b, n)) {
+					if (!vtabveto)
+						vtabfirst = b;
+					vtabveto++;
+					vtabbytes += n;
 					continue;
 				}
 				/* Only the shared heap needs vetting; the game's own
@@ -12915,6 +12988,13 @@ static int do_load(int slotno)
 				       heldveto, (double)heldbytes / (1024.0 * 1024.0),
 				       g_held_n, g_held_threads, (void *)heldfirst,
 				       (void *)heldbigat, heldbig);
+			if (vtab_on())
+				ss_log("  foreign: %d block(s) (%.2f MB) left in the present "
+				       "because the vtable at their head belongs to a "
+				       "module we do not rewind - somebody else's objects "
+				       "living in a heap we call the game's. First at %p\n",
+				       vtabveto, (double)vtabbytes / (1024.0 * 1024.0),
+				       (void *)vtabfirst);
 			if (vmode_b && vbad)
 				ss_log("  verify by block: %d of %d written block(s) do NOT "
 				       "match what we wrote, %llu word(s) differ, %d "
