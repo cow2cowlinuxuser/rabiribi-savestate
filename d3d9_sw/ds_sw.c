@@ -714,6 +714,78 @@ __declspec(dllexport) HRESULT WINAPI ds_sw_create(const GUID *dev, void **out, v
 	return S_OK;
 }
 
+/* ---------------------------------------------------------------- install */
+
+/* Winning the name was the clean way and it is not available. Steam has
+ * C:\WINDOWS\System32\dsound.dll in the process before our DLL attaches, and a
+ * plain LoadLibrary name matches an already-loaded module before any directory
+ * is searched, so the same-folder stub never gets asked. The mechanism was
+ * never at fault - a probe run from the game folder does get our copy - we were
+ * simply second.
+ *
+ * So take the entry point instead of the file. DirectSoundCreate8 in the loaded
+ * module gets a jump to ds_sw_create, and whoever calls it gets a software
+ * device no matter which dsound.dll won the loader's argument. Nothing of
+ * Windows' DirectSound runs after that: no device, no buffers, no mixer thread,
+ * and nothing of theirs holding a pointer into memory we rewind.
+ *
+ * The original is never called, so there is no trampoline to build - the five
+ * bytes are simply gone. Both signatures are stdcall with three arguments and
+ * the same meaning, so ds_sw_create can stand in for either directly. */
+static int g_patched;
+
+__declspec(dllexport) HRESULT WINAPI ds_sw_create(const GUID *dev, void **out, void *outer);
+
+static int jmp_patch(void *at, void *to)
+{
+	unsigned char *p = (unsigned char *)at;
+	DWORD old;
+	INT_PTR rel;
+
+	if (!p || !to)
+		return 0;
+	rel = (INT_PTR)((unsigned char *)to - (p + 5));
+	if (rel != (INT_PTR)(int)rel)
+		return 0; /* out of rel32 reach; would need a longer form */
+	if (!VirtualProtect(p, 5, PAGE_EXECUTE_READWRITE, &old))
+		return 0;
+	p[0] = 0xE9;
+	*(int *)(p + 1) = (int)rel;
+	VirtualProtect(p, 5, old, &old);
+	FlushInstructionCache(GetCurrentProcess(), p, 5);
+	return 1;
+}
+
+int ds_sw_hooked(void)
+{
+	return g_patched || g_ready;
+}
+
+/* Returns how many entry points were taken. Called from DLL attach, which is
+ * the earliest moment we exist and, more to the point, earlier than DxLib's
+ * sound init - the survey's 705 buffer creations were all seen by hooks armed
+ * from the same place. */
+int ds_sw_take_over(void)
+{
+	HMODULE ds;
+	void *f;
+	int n = 0;
+
+	if (g_patched)
+		return g_patched;
+	ds = GetModuleHandleA("dsound.dll");
+	if (!ds)
+		return 0;
+	f = (void *)GetProcAddress(ds, "DirectSoundCreate8");
+	if (f && jmp_patch(f, (void *)ds_sw_create))
+		n++;
+	f = (void *)GetProcAddress(ds, "DirectSoundCreate");
+	if (f && jmp_patch(f, (void *)ds_sw_create))
+		n++;
+	g_patched = n;
+	return n;
+}
+
 /* DxLib calls neither of these in the survey, but a device enumeration that
  * returns nothing is a legitimate answer that some callers handle badly, so
  * report one default device. */

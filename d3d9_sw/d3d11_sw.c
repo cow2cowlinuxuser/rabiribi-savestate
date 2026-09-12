@@ -2554,6 +2554,8 @@ static void hook_getprocaddress(void)
  * nothing but kernel32, its attach handler only calls
  * DisableThreadLibraryCalls, and it starts no threads, so there is no second
  * lock for it to want. */
+int ds_sw_take_over(void);
+
 static void dsound_claim(void)
 {
 	wchar_t path[MAX_PATH], *slash;
@@ -2562,11 +2564,18 @@ static void dsound_claim(void)
 
 	h = GetModuleHandleA("dsound.dll");
 	if (h) {
+		int took;
+
 		if (!GetModuleFileNameA(h, shown, MAX_PATH))
 			lstrcpynA(shown, "(no path)", MAX_PATH);
-		d11_log("dsound: already loaded before we attached, from %s - the stub "
-			"cannot win a name that is already taken",
-			shown);
+		/* Second to the name, so take the entry point instead. Which file won
+		 * stops mattering once DirectSoundCreate8 lands in our code. */
+		took = ds_sw_take_over();
+		d11_log("dsound: already loaded before we attached, from %s - %s", shown,
+			took ? "so we took its create entry point(s) instead; the game "
+			       "will get a software device"
+			     : "and its create entry point could not be taken either, so "
+			       "the game gets Windows' DirectSound");
 		return;
 	}
 	GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |

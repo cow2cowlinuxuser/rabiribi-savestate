@@ -187,6 +187,7 @@ static void *lock_sink(void)
 static void **g_buf_vtbl;
 
 void savestate_log_line(const char *s); /* the engine's log, shared deliberately */
+int ds_sw_hooked(void); /* the software DirectSound has the create entry point */
 
 /* wsprintfA rather than the CRT: no floats are printed here and it drags in
  * nothing. It does not understand %p, though, and the two messages that used one
@@ -1026,7 +1027,7 @@ void dsh_install(void)
 			lstrcpynA(path, "(no path)", MAX_PATH);
 		ss_log("dsound: the name resolved to %s\n", path);
 	}
-	if (dsh_stub_is_ours(ds)) {
+	if (dsh_stub_is_ours(ds) || ds_sw_hooked()) {
 		/* The software DirectSound in ds_sw.c answered the game instead of
 		 * Windows'. Everything below this point exists to make somebody else's
 		 * audio stack survive a rewind, and there is no longer somebody else:
