@@ -62,6 +62,10 @@
 #define DSB_SET_FREQ 17
 #define DSB_STOP 18
 #define DSB_UNLOCK 19
+#define DSB_RESTORE 20
+
+#define DSERR_BUFFERLOST 0x88780096L
+#define DS_OK 0L
 
 typedef HRESULT(WINAPI *PFN_DSCREATE8)(const GUID *, void **, void *);
 typedef HRESULT(WINAPI *PFN_CREATEBUF)(void *, const void *, void **, void *);
@@ -160,6 +164,26 @@ static PFN_DUP g_real_dup;
 static PFN_RELEASE g_real_release;
 static PFN_GETPOS g_real_getpos;
 static PFN_LOCK g_real_lock;
+
+typedef HRESULT(WINAPI *PFN_RESTORE)(void *);
+
+/* Where a failed Lock sends the game's audio. Big enough for any single fill
+ * DxLib asks for, and excluded from the snapshot so a restore cannot move it
+ * out from under a write that is already in flight. */
+#define SINK_BYTES (256 * 1024)
+static void *g_sink;
+static unsigned long g_lock_fail;
+
+static void *lock_sink(void)
+{
+	if (!g_sink) {
+		g_sink = VirtualAlloc(NULL, SINK_BYTES, MEM_COMMIT | MEM_RESERVE,
+				      PAGE_READWRITE);
+		if (g_sink)
+			savestate_exclude(g_sink, SINK_BYTES);
+	}
+	return g_sink;
+}
 static void **g_buf_vtbl;
 
 void savestate_log_line(const char *s); /* the engine's log, shared deliberately */
@@ -614,6 +638,58 @@ static HRESULT WINAPI hook_lock(void *self, DWORD off, DWORD bytes, void **p1, D
 {
 	HRESULT hr = g_real_lock(self, off, bytes, p1, b1, p2, b2, flags);
 
+	/* A failed Lock is fatal here, and not because of anything DirectSound
+	 * does. DxLib does not check the HRESULT: DxSound.cpp locks a buffer into
+	 * a stack-local pair of region pointers and then feeds decoded PCM through
+	 * them regardless. When Lock fails those locals are never written, so the
+	 * fill loop copies through whatever the stack happened to be holding.
+	 *
+	 * Disassembly of the crash we kept hitting says exactly that. rabiribi.exe
+	 * +6E9F8 is a memcpy whose destination was 00BF2C14 - the .rdata string
+	 * "..\..\..\..\..\Source\Library\Main\DxSound.cpp". That literal is pushed
+	 * as an argument by thirty-one error-reporting call sites and stored
+	 * nowhere, and the frame walk found a second copy of it lying in an
+	 * unrelated frame on the same stack. It was residue, read as lpvAudioPtr1.
+	 *
+	 * So the failure is handled here or it is not handled at all. A lost
+	 * buffer is what DirectSound asks the application to fix and DxLib never
+	 * does, so restore it and try once more. If that does not work, hand back
+	 * a scratch buffer: the game writes a frame of audio into a bin, the sound
+	 * glitches, and the process lives. That is a lie, and a deliberate one -
+	 * the alternative is a write through a string constant, and unlike the
+	 * lies this project usually refuses, nothing downstream reads it back. */
+	if (FAILED(hr)) {
+		g_lock_fail++;
+		if (hr == DSERR_BUFFERLOST) {
+			void **v = *(void ***)self;
+
+			((PFN_RESTORE)v[DSB_RESTORE])(self);
+			hr = g_real_lock(self, off, bytes, p1, b1, p2, b2, flags);
+			ss_log("dsound: Lock returned DSERR_BUFFERLOST for %lu bytes at "
+			       "offset %lu; after Restore it %s\n",
+			       (unsigned long)bytes, (unsigned long)off,
+			       SUCCEEDED(hr) ? "succeeded" : "failed again");
+		}
+		if (FAILED(hr)) {
+			if (!lock_sink())
+				return hr;
+			if (p1)
+				*p1 = g_sink;
+			if (b1)
+				*b1 = bytes < SINK_BYTES ? bytes : SINK_BYTES;
+			if (p2)
+				*p2 = NULL;
+			if (b2)
+				*b2 = 0;
+			ss_log("dsound: Lock FAILED (%08lX) for %lu bytes at offset %lu. "
+			       "DxLib does not check, so it would have written through "
+			       "an uninitialised stack slot - handed it a scratch "
+			       "buffer instead and lost a frame of audio\n",
+			       (unsigned long)hr, (unsigned long)bytes,
+			       (unsigned long)off);
+			return DS_OK;
+		}
+	}
 	g_lock_calls++;
 	/* Counted for the survey too. This slot was already hooked before the
 	 * survey existed, so the survey's own counter never saw it and the
@@ -759,6 +835,10 @@ static HRESULT WINAPI hook_getstatus(void *self, DWORD *s)
 static HRESULT WINAPI hook_unlock(void *self, void *p1, DWORD b1, void *p2, DWORD b2)
 {
 	g_calls[C_UNLOCK]++;
+	/* The scratch buffer never belonged to this device, so unlocking it would
+	 * be asking DirectSound to account for memory it never handed out. */
+	if (p1 && p1 == g_sink)
+		return DS_OK;
 	return g_real_unlock(self, p1, b1, p2, b2);
 }
 
