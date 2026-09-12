@@ -10235,6 +10235,11 @@ static int g_held_threads;
  * went back. Anything else - a word that is not a pointer, a pointer into a
  * module we do rewind, a pointer into the heap - falls through and is judged by
  * the ownership tests as before. */
+/* Which module's objects, tallied per restore. A count alone cannot tell
+ * "DirectSound's buffers" from "half the game", and that is the only question
+ * worth asking about a rule that withholds memory from the rewind. */
+static int g_vtab_bymod[SS_MAX_MODS];
+
 static int vtab_on(void)
 {
 	static int cached = -1;
@@ -10248,9 +10253,9 @@ static int vtab_on(void)
 	return cached;
 }
 
-static int foreign_object(uintptr_t b, unsigned long n)
+static int foreign_object(uintptr_t b, unsigned long n, int *who)
 {
-	uintptr_t w;
+	uintptr_t w, f;
 	int m;
 
 	if (!vtab_on() || n < sizeof(uintptr_t) || !g_ctl)
@@ -10261,9 +10266,30 @@ static int foreign_object(uintptr_t b, unsigned long n)
 	if (w < 0x10000)
 		return 0;
 	m = module_of(w);
-	if (m < 0)
+	if (m < 0 || g_ctl->mod_rewound[m])
 		return 0;
-	return !g_ctl->mod_rewound[m];
+	/* Confirm it is a vtable rather than merely a pointer into a module.
+	 *
+	 * The first version asked only whether the head word landed in a module we
+	 * hold, and that caught 10220 blocks averaging 82 bytes apiece - small
+	 * objects whose first field happens to be a pointer to a DLL's data, which
+	 * is an ordinary thing for a C++ program to contain. Not rewinding ten
+	 * thousand of the game's own objects to protect a few hundred of
+	 * DirectSound's is a bad trade in the direction that does not announce
+	 * itself.
+	 *
+	 * A vtable is a table of function pointers, so read the first slot. If it
+	 * is executable and in the same module as the table, this is an object
+	 * with virtual methods belonging to that module. A pointer to a locale
+	 * struct or a string constant will not survive both tests. */
+	if (!ss_readable(w, sizeof(uintptr_t)))
+		return 0;
+	f = *(const uintptr_t *)w;
+	if (!ss_is_code(f) || module_of(f) != m)
+		return 0;
+	if (who)
+		*who = m;
+	return 1;
 }
 
 static int held_on(void)
@@ -12810,9 +12836,11 @@ static int do_load(int slotno)
 			int recycled = 0;
 			unsigned long long recycled_bytes = 0;
 			uintptr_t recycled_first = 0;
-			int heldveto = 0, vtabveto = 0;
+			int heldveto = 0, vtabveto = 0, vtabmod = -1;
 			unsigned long long heldbytes = 0, vtabbytes = 0;
 			uintptr_t heldfirst = 0, heldbigat = 0, vtabfirst = 0;
+
+			memset(g_vtab_bymod, 0, sizeof(g_vtab_bymod));
 			unsigned long heldbig = 0;
 
 			held_build();
@@ -12870,9 +12898,11 @@ static int do_load(int slotno)
 				 * whether the module is one we are already holding in
 				 * the present. Those are the only ones where leaving the
 				 * object alone is consistent rather than arbitrary. */
-				if (foreign_object(b, n)) {
+				if (foreign_object(b, n, &vtabmod)) {
 					if (!vtabveto)
 						vtabfirst = b;
+					if (vtabmod >= 0 && vtabmod < SS_MAX_MODS)
+						g_vtab_bymod[vtabmod]++;
 					vtabveto++;
 					vtabbytes += n;
 					continue;
@@ -12988,13 +13018,32 @@ static int do_load(int slotno)
 				       heldveto, (double)heldbytes / (1024.0 * 1024.0),
 				       g_held_n, g_held_threads, (void *)heldfirst,
 				       (void *)heldbigat, heldbig);
-			if (vtab_on())
+			if (vtab_on()) {
+				int mi, shown;
+
 				ss_log("  foreign: %d block(s) (%.2f MB) left in the present "
 				       "because the vtable at their head belongs to a "
 				       "module we do not rewind - somebody else's objects "
 				       "living in a heap we call the game's. First at %p\n",
 				       vtabveto, (double)vtabbytes / (1024.0 * 1024.0),
 				       (void *)vtabfirst);
+				/* Named, because the count is only reassuring if the
+				 * names on it are the ones we meant to protect. */
+				for (shown = 0; shown < 6; shown++) {
+					int best = -1;
+
+					for (mi = 0; mi < g_ctl->nmods; mi++)
+						if (g_vtab_bymod[mi] &&
+						    (best < 0 ||
+						     g_vtab_bymod[mi] > g_vtab_bymod[best]))
+							best = mi;
+					if (best < 0)
+						break;
+					ss_log("    foreign: %d belong to %s\n",
+					       g_vtab_bymod[best], g_ctl->mod_name[best]);
+					g_vtab_bymod[best] = 0;
+				}
+			}
 			if (vmode_b && vbad)
 				ss_log("  verify by block: %d of %d written block(s) do NOT "
 				       "match what we wrote, %llu word(s) differ, %d "
