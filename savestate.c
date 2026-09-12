@@ -5060,23 +5060,35 @@ static HANDLE game_crt_heap(void)
  * calloc are private functions in the executable's own .text section at known
  * RVAs (see docs/rabiribi_static_crt.md). IAT redirects cannot reach them.
  *
- * This scaffold prepares for inline detours at those RVAs but does NOT enable
- * them by default. Enabling requires:
+ * The complete Heap* call-site surface was enumerated by a Ghidra script
+ * (RRAllocSurface) walking HeapAlloc / HeapFree / HeapReAlloc / HeapSize
+ * call sites in rabiribi.exe.dump_00850000.exe (image base 0x00850000).
  *
- *   1. The free-set closure: every function that can pass a game-allocated
- *      block to HeapFree must have a matching detour. Three free-like sites
- *      have been identified (365 / 7 / 87 references); the full set is being
- *      enumerated via a Ghidra script (RRAllocSurface). Until that surface is
- *      confirmed complete, enabling detours risks HeapFree on the wrong heap.
+ * CRT allocator set (private-heap candidates):
+ *   _malloc        +0x36E6B2   HeapAlloc
+ *   _free          +0x369754   HeapFree
+ *   _realloc       +0x36E744   HeapReAlloc (null ptr → _malloc)
+ *   __calloc_impl  +0x37EBF7   HeapAlloc
+ *   _msize         +0x37805A   HeapSize
+ *   FUN_00bdbe12   +0x38BE12   HeapAlloc + HeapFree + GetProcessHeap
  *
- *   2. Prologue bytes: the expected first ~16 bytes of each function, pasted
- *      from a Ghidra dump. Without them the prologue check cannot verify the
- *      build, and the detour refuses to arm.
+ * Non-CRT allocators that also hit the process heap directly:
+ *   FUN_0087bc20   +0x2BC20    HeapAlloc + GetProcessHeap (game/custom)
+ *   FUN_0087c070   +0x2C070    HeapFree (game/custom)
+ *   FUN_008dfef0   +0x8FEF0    HeapFree (teardown/shutdown path)
  *
- *   3. _msize / _expand: if present in the image at separate RVAs, they need
- *      entries here too.
+ * _expand: NOT present in this surface.
  *
- * Gated on: savestate_host_is("rabiribi.exe") AND env D3D9SW_RR_DETOUR=1.
+ * Moving only the CRT set to a private heap does NOT fully isolate the
+ * process heap — FUN_0087bc20 / FUN_0087c070 allocate and free on
+ * GetProcessHeap() outside the CRT. A CRT-only private heap would leave
+ * those paths on the process heap, and any cross-path free (CRT block freed
+ * by the non-CRT path or vice versa) is a wrong-heap free. The design must
+ * account for these before arming.
+ *
+ * This scaffold verifies prologue bytes and reports the surface at startup
+ * but does NOT arm detours. Arming requires D3D9SW_RR_DETOUR=1 AND a design
+ * that handles the non-CRT allocator paths.
  * ---------------------------------------------------------------------------
  */
 #if defined(_M_IX86) || defined(__i386__)
@@ -5087,26 +5099,65 @@ typedef struct {
 	const unsigned char *expected_prologue;
 	unsigned prologue_len;
 	int verified;
+	int is_crt;
 } RrDetourEntry;
 
-/* Expected prologue bytes for each function.
- *
- * TODO: fill these from a Ghidra dump of the specific rabiribi.exe build.
- * Until they are filled, prologue verification will refuse to arm any detour.
- * The placeholder NULL / 0 means "not yet known". */
-static const unsigned char rr_malloc_prologue[] = { 0 };  /* TODO: paste bytes */
-static const unsigned char rr_free_prologue[]   = { 0 };  /* TODO: paste bytes */
-static const unsigned char rr_realloc_prologue[] = { 0 }; /* TODO: paste bytes */
-static const unsigned char rr_calloc_prologue[] = { 0 };  /* TODO: paste bytes */
+/* Prologue bytes from ghidra_surface.txt (image base 0x00850000,
+ * rabiribi.exe.dump_00850000.exe). First 16 bytes of each function. */
+/* clang-format off */
+static const unsigned char rr_malloc_prologue[16] = {
+	0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0x83,
+	0xFE, 0xE0, 0x77, 0x6F, 0x53, 0x57, 0xA1, 0x88
+};
+static const unsigned char rr_free_prologue[16] = {
+	0x55, 0x8B, 0xEC, 0x83, 0x7D, 0x08, 0x00, 0x74,
+	0x2D, 0xFF, 0x75, 0x08, 0x6A, 0x00, 0xFF, 0x35
+};
+static const unsigned char rr_realloc_prologue[16] = {
+	0x55, 0x8B, 0xEC, 0x83, 0x7D, 0x08, 0x00, 0x75,
+	0x0B, 0xFF, 0x75, 0x0C, 0xE8, 0x5D, 0xFF, 0xFF
+};
+static const unsigned char rr_calloc_prologue[16] = {
+	0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0x85,
+	0xF6, 0x74, 0x1B, 0x6A, 0xE0, 0x33, 0xD2, 0x58
+};
+static const unsigned char rr_msize_prologue[16] = {
+	0x55, 0x8B, 0xEC, 0x83, 0x7D, 0x08, 0x00, 0x75,
+	0x15, 0xE8, 0xB6, 0x65, 0xFF, 0xFF, 0xC7, 0x00
+};
+static const unsigned char rr_fun_bdbe12_prologue[16] = {
+	0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0x53, 0x56,
+	0x57, 0x8B, 0x7D, 0x08, 0x33, 0xF6, 0x6A, 0x01
+};
+static const unsigned char rr_fun_87bc20_prologue[16] = {
+	0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xC8, 0x04, 0x00,
+	0x00, 0xA1, 0x40, 0xE9, 0xD1, 0x00, 0x33, 0xC5
+};
+static const unsigned char rr_fun_87c070_prologue[16] = {
+	0xA1, 0x60, 0xEA, 0xD4, 0x00, 0x56, 0x48, 0x74,
+	0x0C, 0x48, 0x75, 0x0E, 0xE8, 0xEF, 0xA1, 0x07
+};
+static const unsigned char rr_fun_8dfef0_prologue[16] = {
+	0xE8, 0x3B, 0x08, 0x00, 0x00, 0xE8, 0x86, 0xFD,
+	0xFF, 0xFF, 0x83, 0x3D, 0x58, 0xEA, 0xD4, 0x00
+};
+/* clang-format on */
 
 static RrDetourEntry g_rr_detours[] = {
-	{ "_malloc",       0x36E6B2, NULL, 0, 0 },
-	{ "_free",         0x369754, NULL, 0, 0 },
-	{ "_realloc",      0x36E744, NULL, 0, 0 },
-	{ "__calloc_impl", 0x37EBF7, NULL, 0, 0 },
-	/* TODO: add _msize / _expand if they exist at separate RVAs.
-	 * TODO: add the other free-like variants once the Ghidra surface
-	 *       analysis (RRAllocSurface) confirms the closed set. */
+	/* CRT allocator set — candidates for private-heap redirection */
+	{ "_malloc",       0x36E6B2, rr_malloc_prologue,    16, 0, 1 },
+	{ "_free",         0x369754, rr_free_prologue,      16, 0, 1 },
+	{ "_realloc",      0x36E744, rr_realloc_prologue,   16, 0, 1 },
+	{ "__calloc_impl", 0x37EBF7, rr_calloc_prologue,    16, 0, 1 },
+	{ "_msize",        0x37805A, rr_msize_prologue,     16, 0, 1 },
+	{ "FUN_00bdbe12",  0x38BE12, rr_fun_bdbe12_prologue,16, 0, 1 },
+	/* Non-CRT paths that also hit the process heap directly.
+	 * These are NOT part of the CRT private-heap set but are tracked
+	 * so the scaffold can verify the build and warn that a CRT-only
+	 * private heap does not fully isolate the process heap. */
+	{ "FUN_0087bc20",  0x2BC20,  rr_fun_87bc20_prologue,16, 0, 0 },
+	{ "FUN_0087c070",  0x2C070,  rr_fun_87c070_prologue,16, 0, 0 },
+	{ "FUN_008dfef0",  0x8FEF0,  rr_fun_8dfef0_prologue,16, 0, 0 },
 };
 
 #define RR_DETOUR_COUNT (sizeof(g_rr_detours) / sizeof(g_rr_detours[0]))
@@ -5146,7 +5197,7 @@ static int rr_verify_prologue(uintptr_t exe_base, RrDetourEntry *e)
 static void rr_detour_report(void)
 {
 	uintptr_t exe_base;
-	unsigned i, verified = 0;
+	unsigned i, v_crt = 0, v_noncrt = 0, n_crt = 0, n_noncrt = 0;
 	char val[8];
 
 	if (!savestate_host_is("rabiribi.exe"))
@@ -5154,43 +5205,50 @@ static void rr_detour_report(void)
 
 	exe_base = (uintptr_t)GetModuleHandleA(NULL);
 	ss_log("  rr_detour: rabiribi.exe detected, exe base %p\n", (void *)exe_base);
-	ss_log("  rr_detour: known allocator RVAs (%u entries):\n",
-	       (unsigned)RR_DETOUR_COUNT);
+	ss_log("  rr_detour: Heap* call-site surface (%u entries, from "
+	       "ghidra_surface.txt):\n", (unsigned)RR_DETOUR_COUNT);
 
 	for (i = 0; i < RR_DETOUR_COUNT; i++) {
 		RrDetourEntry *e = &g_rr_detours[i];
 		int ok = rr_verify_prologue(exe_base, e);
-		if (ok)
-			verified++;
-		ss_log("    %-16s  +%lX  → %p  prologue %s\n",
+		if (e->is_crt) {
+			n_crt++;
+			if (ok) v_crt++;
+		} else {
+			n_noncrt++;
+			if (ok) v_noncrt++;
+		}
+		ss_log("    %-16s  +%05lX  %p  %s  prologue %s\n",
 		       e->name, (unsigned long)e->rva,
 		       (void *)(exe_base + e->rva),
+		       e->is_crt ? "CRT    " : "non-CRT",
 		       ok ? "VERIFIED" : "NOT VERIFIED");
 	}
 
-	ss_log("  rr_detour: %u / %u prologues verified\n", verified,
-	       (unsigned)RR_DETOUR_COUNT);
+	ss_log("  rr_detour: CRT set %u / %u verified, non-CRT %u / %u verified\n",
+	       v_crt, n_crt, v_noncrt, n_noncrt);
+
+	if (v_noncrt > 0)
+		ss_log("  rr_detour: WARNING — %u non-CRT function(s) also hit "
+		       "GetProcessHeap() directly. A CRT-only private heap does "
+		       "NOT fully isolate the process heap; cross-path frees are "
+		       "a wrong-heap risk\n", v_noncrt);
 
 	if (ss_getenv("D3D9SW_RR_DETOUR", val, sizeof(val)) && val[0] == '1') {
-		/*
-		 * WARNING: Do NOT enable detours until the free-set is closed.
-		 *
-		 * Hooking malloc alone (or malloc + one free variant) while
-		 * missing other free-like functions means some frees will call
-		 * HeapFree on the wrong heap → silent corruption.
-		 *
-		 * The Ghidra surface analysis (RRAllocSurface script) is
-		 * enumerating all call sites of HeapAlloc / HeapFree /
-		 * HeapReAlloc / HeapSize. Until that surface is in-repo and
-		 * confirmed complete, this path logs a refusal.
-		 */
+		/* The CRT free-set is now known (ghidra_surface.txt delivered),
+		 * but the non-CRT allocator paths (FUN_0087bc20 / FUN_0087c070)
+		 * also hit the process heap. Until the design explicitly
+		 * accounts for those — either by detouring them too, or by
+		 * proving they never exchange blocks with the CRT set — arming
+		 * a CRT-only private heap risks HeapFree on the wrong heap. */
 		ss_log("  rr_detour: D3D9SW_RR_DETOUR=1 but detours are NOT "
-		       "armed — the free-set closure is not yet confirmed. "
-		       "See docs/rabiribi_static_crt.md for what is needed "
-		       "before enabling\n");
+		       "armed — the non-CRT process-heap paths "
+		       "(FUN_0087bc20 / FUN_0087c070) are not yet accounted "
+		       "for in the private-heap design. "
+		       "See docs/rabiribi_static_crt.md\n");
 	} else {
-		ss_log("  rr_detour: detours OFF (set D3D9SW_RR_DETOUR=1 to "
-		       "enable once the free-set closure is confirmed)\n");
+		ss_log("  rr_detour: detours OFF (set D3D9SW_RR_DETOUR=1 once "
+		       "the non-CRT allocator paths are accounted for)\n");
 	}
 }
 
