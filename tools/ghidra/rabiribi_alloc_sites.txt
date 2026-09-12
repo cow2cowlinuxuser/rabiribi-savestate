@@ -1,0 +1,155 @@
+=== program ===
+  name            rabiribi.exe.dump_00850000.exe
+  path            /C:/Program Files (x86)/Steam/steamapps/common/Rabi-Ribi/rabiribi.exe.dump_00850000.exe
+  format          Portable Executable (PE)
+  language        x86:LE:32:default
+  image base      00850000
+  md5             d66075103cf8e1a3e15d2ec10774e1d2
+
+=== memory blocks ===
+  the packer's section is the one that is writable and has no name
+  you recognise; a section with no bytes behind it was never dumped
+  Headers    00850000..008503ff       1024  r-- has bytes
+  .text      00851000..00bf0fff    3801088  r-x has bytes
+  .rdata     00bf1000..00c87fff     618496  r-- has bytes
+  .data      00c88000..01822fff   12169216  rw- has bytes
+  _RDATA     01823000..01823fff       4096  r-- has bytes
+  .rsrc      01824000..018c8fff     675840  r-- has bytes
+  .reloc     018c9000..018fdfff     217088  r-- has bytes
+  .bind      018fe000..0191dfff     131072  r-x has bytes
+
+=== external libraries the loader recorded ===
+  KERNEL32.DLL   -> null
+  USER32.DLL   -> null
+  GDI32.DLL   -> null
+  SHELL32.DLL   -> null
+  STEAM_API.DLL   -> null
+
+=== allocator symbols anywhere in the program ===
+  RVA is what our code needs: we add it to the live image base and
+  patch there, with no searching at all
+  FreeLibrary                  EXTERNAL:0000000f  RVA FFFFFFFFFF7B000F  Function     ns=KERNEL32.DLL     src=IMPORTED refs=33
+  GlobalFree                   EXTERNAL:00000017  RVA FFFFFFFFFF7B0017  Function     ns=KERNEL32.DLL     src=IMPORTED refs=2
+        <- 00bf10c4  DATA
+        <- 00877b06  COMPUTED_CALL
+  HeapFree                     EXTERNAL:0000001d  RVA FFFFFFFFFF7B001D  Function     ns=KERNEL32.DLL     src=IMPORTED refs=5
+        <- 00bf10dc  DATA
+        <- 008dffb8  COMPUTED_CALL
+        <- 00bdbf2b  COMPUTED_CALL
+        <- 00bb9768  COMPUTED_CALL
+        <- 0087c09f  COMPUTED_CALL
+  VirtualFree                  EXTERNAL:00000038  RVA FFFFFFFFFF7B0038  Function     ns=KERNEL32.DLL     src=IMPORTED refs=4
+        <- 00bf1148  DATA
+        <- 008fcdcf  COMPUTED_CALL
+        <- 008fcd86  COMPUTED_CALL
+        <- 00b26272  COMPUTED_CALL
+  LocalFree                    EXTERNAL:00000045  RVA FFFFFFFFFF7B0045  Function     ns=KERNEL32.DLL     src=IMPORTED refs=3
+        <- 00bf117c  DATA
+        <- 00b34893  COMPUTED_CALL
+        <- 00b347e3  COMPUTED_CALL
+  HeapReAlloc                  EXTERNAL:00000051  RVA FFFFFFFFFF7B0051  Function     ns=KERNEL32.DLL     src=IMPORTED refs=2
+        <- 00bf11ac  DATA
+        <- 00bbe781  COMPUTED_CALL
+  TlsFree                      EXTERNAL:0000005f  RVA FFFFFFFFFF7B005F  Function     ns=KERNEL32.DLL     src=IMPORTED refs=1
+        <- 00bf11e4  DATA
+  FreeEnvironmentStringsW      EXTERNAL:00000075  RVA FFFFFFFFFF7B0075  Function     ns=KERNEL32.DLL     src=IMPORTED refs=3
+        <- 00bf123c  DATA
+        <- 00bcc43f  COMPUTED_CALL
+        <- 00bcc44a  COMPUTED_CALL
+  GetFreeCount                 00b229b0  RVA 002D29B0  Function     ns=CBaseAllocator   src=ANALYSIS refs=2
+        <- 00c1f768  DATA
+        <- 00c1fbc4  DATA
+  ?GetFreeCount@CBaseAllocator@@UAGJPAJ@Z 00b229b0  RVA 002D29B0  Label        ns=Global           src=ANALYSIS refs=2
+        <- 00c1f768  DATA
+        <- 00c1fbc4  DATA
+  FID_conflict:_free           00bb9754  RVA 00369754  Function     ns=Global           src=ANALYSIS refs=365
+  __free_base                  00bb9754  RVA 00369754  Label        ns=Global           src=ANALYSIS refs=365
+  _free                        00bb9754  RVA 00369754  Label        ns=Global           src=ANALYSIS refs=365
+  FID_conflict:_free           00bba41a  RVA 0036A41A  Function     ns=Global           src=DEFAULT  refs=7
+        <- 00906412  UNCONDITIONAL_CALL
+        <- 00b1364f  UNCONDITIONAL_CALL
+        <- 00b13657  UNCONDITIONAL_CALL
+        <- 00b1365f  UNCONDITIONAL_CALL
+        <- 00b138c6  UNCONDITIONAL_CALL
+        <- 00b138ce  UNCONDITIONAL_CALL
+        <- 00b138d6  UNCONDITIONAL_CALL
+  FID_conflict:_free           00bba441  RVA 0036A441  Function     ns=Global           src=DEFAULT  refs=87
+  _malloc                      00bbe6b2  RVA 0036E6B2  Function     ns=Global           src=ANALYSIS refs=86
+  _realloc                     00bbe744  RVA 0036E744  Function     ns=Global           src=ANALYSIS refs=20
+  __freebuf                    00bc8582  RVA 00378582  Function     ns=Global           src=ANALYSIS refs=2
+        <- 00bbaec1  UNCONDITIONAL_CALL
+        <- 00bba391  UNCONDITIONAL_CALL
+  __calloc_impl                00bcebf7  RVA 0037EBF7  Function     ns=Global           src=ANALYSIS refs=2
+        <- 00bc29e4  UNCONDITIONAL_CALL
+        <- 00bbe685  UNCONDITIONAL_CALL
+  FID_conflict:___acrt_locale_free_monetary 00bd2d7a  RVA 00382D7A  Function     ns=Global           src=ANALYSIS refs=2
+        <- 00bc7aa6  UNCONDITIONAL_CALL
+        <- 00bd3114  UNCONDITIONAL_CALL
+  ___free_lconv_mon            00bd2d7a  RVA 00382D7A  Label        ns=Global           src=ANALYSIS refs=2
+        <- 00bc7aa6  UNCONDITIONAL_CALL
+        <- 00bd3114  UNCONDITIONAL_CALL
+  ___acrt_locale_free_monetary 00bd2d7a  RVA 00382D7A  Label        ns=Global           src=ANALYSIS refs=2
+        <- 00bc7aa6  UNCONDITIONAL_CALL
+        <- 00bd3114  UNCONDITIONAL_CALL
+  FID_conflict:___free_lconv_num 00bd3217  RVA 00383217  Function     ns=Global           src=ANALYSIS refs=2
+        <- 00bc7ac4  UNCONDITIONAL_CALL
+        <- 00bd33a4  UNCONDITIONAL_CALL
+  ___acrt_locale_free_numeric  00bd3217  RVA 00383217  Label        ns=Global           src=ANALYSIS refs=2
+        <- 00bc7ac4  UNCONDITIONAL_CALL
+        <- 00bd33a4  UNCONDITIONAL_CALL
+  ___free_lconv_num            00bd3217  RVA 00383217  Label        ns=Global           src=ANALYSIS refs=2
+        <- 00bc7ac4  UNCONDITIONAL_CALL
+        <- 00bd33a4  UNCONDITIONAL_CALL
+  ___free_lc_time              00bd3484  RVA 00383484  Function     ns=Global           src=ANALYSIS refs=2
+        <- 00bc7b44  UNCONDITIONAL_CALL
+        <- 00bd383e  UNCONDITIONAL_CALL
+  PTR_FreeLibrary_00bf10a4     00bf10a4  RVA 003A10A4  Label        ns=Global           src=DEFAULT  refs=25
+  PTR_GlobalFree_00bf10c4      00bf10c4  RVA 003A10C4  Label        ns=Global           src=DEFAULT  refs=1
+        <- 00877b06  READ
+  PTR_HeapFree_00bf10dc        00bf10dc  RVA 003A10DC  Label        ns=Global           src=DEFAULT  refs=4
+        <- 00bb9768  READ
+        <- 008dffb8  READ
+        <- 0087c09f  READ
+        <- 00bdbf2b  READ
+  PTR_VirtualFree_00bf1148     00bf1148  RVA 003A1148  Label        ns=Global           src=DEFAULT  refs=3
+        <- 008fcd86  READ
+        <- 008fcdcf  READ
+        <- 00b26272  READ
+  PTR_LocalFree_00bf117c       00bf117c  RVA 003A117C  Label        ns=Global           src=DEFAULT  refs=2
+        <- 00b347e3  READ
+        <- 00b34893  READ
+  PTR_HeapReAlloc_00bf11ac     00bf11ac  RVA 003A11AC  Label        ns=Global           src=DEFAULT  refs=1
+        <- 00bbe781  READ
+  PTR_FreeEnvironmentStringsW_00bf123c 00bf123c  RVA 003A123C  Label        ns=Global           src=DEFAULT  refs=2
+        <- 00bcc43f  READ
+        <- 00bcc44a  READ
+  u_mem_realloc_00bf558c       00bf558c  RVA 003A558C  Label        ns=Global           src=DEFAULT  refs=1
+        <- 008ae326  DATA
+  u_mem_free_00bf55a8          00bf55a8  RVA 003A55A8  Label        ns=Global           src=DEFAULT  refs=1
+        <- 008ae142  DATA
+  s_CoTaskMemAlloc_00bf6040    00bf6040  RVA 003A6040  Label        ns=Global           src=DEFAULT  refs=1
+        <- 008c0c9f  DATA
+  s_CoTaskMemFree_00bf6050     00bf6050  RVA 003A6050  Label        ns=Global           src=DEFAULT  refs=1
+        <- 008c0cb1  DATA
+  s_CoFreeUnusedLibraries_00bf6070 00bf6070  RVA 003A6070  Label        ns=Global           src=DEFAULT  refs=1
+        <- 008c0cd5  DATA
+  s_internal_error:_array_realloc_00c3e458 00c3e458  RVA 003EE458  Label        ns=Global           src=DEFAULT  refs=1
+        <- 00b55153  DATA
+  s_Freed_EMS_handle_%u_00c43018 00c43018  RVA 003F3018  Label        ns=Global           src=DEFAULT  refs=1
+        <- 00c437f4  DATA
+  s_Freed_XMS_handle_%u_00c4346c 00c4346c  RVA 003F346C  Label        ns=Global           src=DEFAULT  refs=1
+        <- 00c43868  DATA
+  s_FREEZE_00c7b708            00c7b708  RVA 0042B708  Label        ns=Global           src=DEFAULT  refs=1
+        <- 0094a961  DATA
+
+=== allocator names as strings, and who reads them ===
+  a hit here means the packer calls GetProcAddress by name, and the
+  code that reads the string is the code that stores the answer
+  none
+
+=== pointer-typed data in writable, non-executable memory ===
+  this is the shape of a hand-built import table; a long run of
+  pointers in one block is almost certainly it
+  .data      run of 431 pointers from 00c88734 (RVA 00438734)
+
+=== done ===
