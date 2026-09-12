@@ -1855,6 +1855,7 @@ void dsh_quiet(void);
 void dsh_mark_present(void);
 void dsh_survey(void);
 void ds_sw_report(void);
+void xa2_sw_report(void);
 void dsh_play(void);
 
 static int g_runaway_hits;
@@ -14953,6 +14954,7 @@ void savestate_object_report(void)
 
 	dsh_survey();
 	ds_sw_report(); /* silent unless the software DirectSound is the one answering */
+	xa2_sw_report(); /* likewise for the software XAudio2 */
 	if (g_ctl && !g_ctl->cap_n)
 		ss_log("objects: nothing saved yet, so there is no region list to "
 		       "check against - press F5 first or every object will read as "

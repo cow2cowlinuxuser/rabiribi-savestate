@@ -8,3 +8,4 @@ CreateDXGIFactory2
 ds_sw_create
 ds_sw_enum_a
 ds_sw_enum_w
+xa2_sw_create
