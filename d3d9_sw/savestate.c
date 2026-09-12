@@ -3714,6 +3714,7 @@ enum {
 	WIT_VTAB,
 	WIT_NOTOURS,
 	WIT_VETOED,
+	WIT_RECYCLED,
 	WIT_COPYFAIL
 };
 
@@ -4218,6 +4219,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_VTABVETO",	  "D3D9SW_CROSSWORLD",
 	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
+	"D3D9SW_RECYCLED",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN"
 };
 
@@ -6869,6 +6871,38 @@ static int blk_owner_filter(void)
 	if (n == 0 || n >= sizeof(v))
 		return 1;
 	return v[0] - '0';
+}
+
+/* Whether a block that was freed and handed out again since the save is still
+ * written back.
+ *
+ * Address and size identity is what the block map matches on, and a free in
+ * between breaks the only thing that identity was standing in for. The bytes in
+ * the snapshot describe an object that no longer exists; the allocator has since
+ * given that address to something else, and on the low fragmentation heap that
+ * something else is as likely to be the allocator's own subsegment bookkeeping
+ * as another game object.
+ *
+ * The free set already found these and the count was already logged - we were
+ * writing them anyway. Every session that reported "none of them an address we
+ * restored" survived its restores. The first session to report five of them
+ * died in RtlpLowFragHeapAllocFromContext reading through 28DC, zero frames
+ * later.
+ *
+ * There is no version of writing these that is defensible: at best the address
+ * now holds a different object of the same size, and we overwrite it with
+ * another object's fields. Set D3D9SW_RECYCLED=1 to go back to writing them. */
+static int recycled_write(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_RECYCLED", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '1') ? 1 : 0;
+	}
+	return cached;
 }
 
 /* Ownership by reachability, which is the thing the guess above approximates.
@@ -13039,6 +13073,12 @@ static int do_load(int slotno)
 							recycled_first = b;
 						recycled++;
 						recycled_bytes += n;
+						if (!recycled_write()) {
+							if (wit)
+								g_ctl->wit_why =
+									WIT_RECYCLED;
+							continue;
+						}
 					}
 					if (!win_copy(&wb, off, (void *)b, n, 0)) {
 						if (wit)
@@ -13141,11 +13181,18 @@ static int do_load(int slotno)
 				       wrote, vunck);
 			if (g_freed && recycled)
 				ss_log("  block identity: %d free(s) seen since the save; %d "
-				       "restored block(s) had been freed and handed out again "
-				       "at the same address and size (%.2f MB), first at %p%s\n",
+				       "matched block(s) had been freed and handed out again "
+				       "at the same address and size (%.2f MB), first at %p - "
+				       "%s%s\n",
 				       (int)g_freed->used, recycled,
 				       (double)recycled_bytes / (1024.0 * 1024.0),
 				       (void *)recycled_first,
+				       recycled_write()
+					       ? "WRITTEN ANYWAY, because "
+						 "D3D9SW_RECYCLED=1"
+					       : "left in the present, because the "
+						 "address holds a different object "
+						 "now",
 				       g_freed->overflow ? " - TABLE OVERFLOWED, a floor not a "
 							   "total"
 							 : "");
@@ -14469,6 +14516,9 @@ static const char *const g_wit_why[] = {
 		"so it counts as nobody's (D3D9SW_BLKOWNER)",
 	"the ownership closure reached her block and so did Windows, and deny "
 		"wins (D3D9SW_BLKOWNER)",
+	"her block was freed and handed out again between the save and now, so "
+		"the address holds a different object and the snapshot's bytes "
+		"are not its bytes (D3D9SW_RECYCLED=1 to write it anyway)",
 	"the copy out of the snapshot failed"
 };
 
