@@ -187,7 +187,7 @@ static void *lock_sink(void)
 static void **g_buf_vtbl;
 
 void savestate_log_line(const char *s); /* the engine's log, shared deliberately */
-int ds_sw_hooked(void); /* the software DirectSound has the create entry point */
+int ds_sw_armed(void); /* the software DirectSound actually served a device */
 
 /* wsprintfA rather than the CRT: no floats are printed here and it drags in
  * nothing. It does not understand %p, though, and the two messages that used one
@@ -1027,7 +1027,15 @@ void dsh_install(void)
 			lstrcpynA(path, "(no path)", MAX_PATH);
 		ss_log("dsound: the name resolved to %s\n", path);
 	}
-	if (dsh_stub_is_ours(ds) || ds_sw_hooked()) {
+	/* Standing down on the patch alone was wrong, and it cost a run. Taking
+	 * DirectSoundCreate8 is not the same as being asked for a device: DxLib
+	 * reaches DirectSound some other way - CLSID_DirectSound is in the
+	 * executable, and a CoCreateInstance never touches the export - so the
+	 * entry point sat patched and unused while these hooks, the only thing
+	 * actually holding that audio stack together across a restore, were
+	 * switched off. The test has to be that ds_sw served a device, not that it
+	 * is ready to. */
+	if (dsh_stub_is_ours(ds) || ds_sw_armed()) {
 		/* The software DirectSound in ds_sw.c answered the game instead of
 		 * Windows'. Everything below this point exists to make somebody else's
 		 * audio stack survive a rewind, and there is no longer somebody else:
