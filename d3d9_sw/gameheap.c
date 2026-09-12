@@ -349,6 +349,61 @@ static struct Slot g_slots[] = {
 static const char *const kCrt[] = { "ucrtbase.dll", "msvcrt.dll", "msvcr100.dll",
 				    "msvcr120.dll" };
 
+/* What to do when there is no import table worth the name.
+ *
+ * rabiribi.exe is packed - Steam's DRM, in a .bind section - and a packer does
+ * not leave a directory for the loader to fill. It resolves what it needs by
+ * hand and writes the answers into a table of its own, which is just bytes in
+ * the image. Those bytes are still pointers, and a pointer to malloc is a
+ * pointer to malloc however it got there, so we go and find it.
+ *
+ * Only sections that cannot execute. The same four bytes sitting in .text would
+ * be the immediate of a real instruction, and rewriting that is how you turn a
+ * working game into a puzzle. A data slot we can change; code we leave alone. */
+static int patch_scan(HMODULE mod, void *from, void *to)
+{
+	IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)mod;
+	IMAGE_NT_HEADERS *nt;
+	IMAGE_SECTION_HEADER *sec;
+	int hits = 0;
+	unsigned i;
+
+	if (!mod || dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return 0;
+	nt = (IMAGE_NT_HEADERS *)((char *)mod + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return 0;
+	sec = IMAGE_FIRST_SECTION(nt);
+	for (i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++) {
+		char *base = (char *)mod + sec->VirtualAddress;
+		size_t len = sec->Misc.VirtualSize;
+		MEMORY_BASIC_INFORMATION mbi;
+		size_t off;
+
+		if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)
+			continue;
+		if (len < sizeof(void *))
+			continue;
+		/* The header says how big the section is; the process says whether
+		 * it is actually there. A packer can leave a section reserved. */
+		if (!VirtualQuery(base, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT)
+			continue;
+		for (off = 0; off + sizeof(void *) <= len; off += sizeof(void *)) {
+			void **p = (void **)(base + off);
+			DWORD old;
+
+			if (*p != from)
+				continue;
+			if (!VirtualProtect(p, sizeof(void *), PAGE_READWRITE, &old))
+				continue;
+			*p = to;
+			VirtualProtect(p, sizeof(void *), old, &old);
+			hits++;
+		}
+	}
+	return hits;
+}
+
 static int on(void)
 {
 	char v[8];
@@ -362,7 +417,7 @@ int gameheap_install(void)
 	HMODULE exe = GetModuleHandleA(NULL);
 	HMODULE crt = NULL;
 	size_t i;
-	int patched = 0, missing = 0;
+	int patched = 0, missing = 0, scanned = 0;
 	const char *crtname = NULL;
 
 	g_slots[0].ours = (void *)gh_malloc;
@@ -408,9 +463,17 @@ int gameheap_install(void)
 	g_ready = 1;
 	for (i = 0; i < sizeof(g_slots) / sizeof(g_slots[0]); i++) {
 		int n = savestate_patch_iat(exe, *g_slots[i].real, g_slots[i].ours);
+		int m = 0;
 
-		patched += n;
-		ss_log("gameheap: %-10s %d slot(s)\n", g_slots[i].name, n);
+		/* Only where the front door was locked, so an ordinary import is
+		 * never patched twice. */
+		if (!n) {
+			m = patch_scan(exe, *g_slots[i].real, g_slots[i].ours);
+			scanned += m;
+		}
+		patched += n + m;
+		ss_log("gameheap: %-10s %d import slot(s), %d in the image\n",
+		       g_slots[i].name, n, m);
 	}
 	if (!patched) {
 		/* The executable reaches the runtime some other way - a delay load,
@@ -418,18 +481,21 @@ int gameheap_install(void)
 		 * nothing pointing at it is harmless; claiming we moved the game's
 		 * memory when we did not is not. */
 		g_ready = 0;
-		ss_log("gameheap: the executable's import table holds none of %s's "
-		       "allocator addresses, so the redirect found no site. The game's "
-		       "memory is where it was\n",
+		ss_log("gameheap: neither the import table nor the image itself holds "
+		       "any of %s's allocator addresses. The executable reaches the "
+		       "runtime by a route we cannot see from here, and its memory is "
+		       "where it was\n",
 		       crtname);
 		return 0;
 	}
 	savestate_game_heap(g_heap);
-	ss_log("gameheap: %d import slot(s) redirected from %s into a private heap at "
-	       "%p. Allocations under %lu KB the executable makes from here on have no "
+	ss_log("gameheap: %d slot(s) redirected from %s into a private heap at %p, %d "
+	       "of them found by scanning the image rather than the import table. "
+	       "Allocations under %lu KB the executable makes from here on have no "
 	       "other tenant, which is the arrangement DDPR gets from MSVCR100 for "
 	       "free\n",
-	       patched, crtname, (void *)g_heap, (unsigned long)(GH_BIG >> 10));
+	       patched, crtname, (void *)g_heap, scanned,
+	       (unsigned long)(GH_BIG >> 10));
 	return patched;
 }
 
