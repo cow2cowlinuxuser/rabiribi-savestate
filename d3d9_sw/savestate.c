@@ -1856,6 +1856,7 @@ void dsh_mark_present(void);
 void dsh_survey(void);
 void ds_sw_report(void);
 void xa2_sw_report(void);
+void xa2_sw_pump(void);
 void xa2_sw_park(void);
 void xa2_sw_resume(void);
 void dsh_play(void);
@@ -13868,6 +13869,13 @@ void savestate_guard(void)
 	if (++g_seal_tick == 120)
 		env_seal();
 	dsh_install();
+	/* A guaranteed drain on the game's own thread. The software XAudio2 queues
+	 * its callbacks rather than firing them from the mixer, and the methods it
+	 * drains on are all ones this game only calls while a sound is already
+	 * going - so a voice started into silence could otherwise sit waiting to be
+	 * asked for audio by a queue waiting to be drained. Once a frame breaks
+	 * that, and costs nothing when the queue is empty. */
+	xa2_sw_pump();
 	decoder_patch_once();
 	heap_watch_tick();
 

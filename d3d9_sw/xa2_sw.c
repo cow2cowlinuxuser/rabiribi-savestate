@@ -333,7 +333,11 @@ static void cb_flush(void)
 		g_pend_head = (g_pend_head + 1) % XA2_PEND;
 		g_pend_n--;
 		LeaveCriticalSection(&g_cs);
-		if (p.slot == CB_STREAM_END)
+		/* Two of these take no argument at all, and calling them as if they
+		 * did would unbalance a stdcall stack. OnVoiceProcessingPassStart
+		 * takes a UINT32 rather than a pointer, which is the same single
+		 * four-byte slot, so it rides the same path as the context ones. */
+		if (p.slot == CB_STREAM_END || p.slot == CB_PASS_END)
 			((PFN_CB_VOID)p.cb->vtbl[p.slot])(p.cb);
 		else
 			((PFN_CB_CTX)p.cb->vtbl[p.slot])(p.cb, p.ctx);
@@ -572,6 +576,49 @@ static void mix_voice(SwVoice *v, int *acc, unsigned frames)
 	}
 }
 
+/* The heartbeat DxLib is actually listening to.
+ *
+ * The first mixing build produced silence, and the census said why in one line:
+ * 703 source voices created, 29 started, and SubmitSourceBuffer never called
+ * once. GetState was never called either. DxLib does not poll this API at all -
+ * it streams from IXAudio2VoiceCallback, and it waits to be told how many bytes
+ * the next processing pass needs before it decodes anything. Real XAudio2 calls
+ * OnVoiceProcessingPassStart on every started voice every quantum whether or
+ * not there is audio queued; we called it never, so the game sat waiting to be
+ * asked and we sat waiting to be fed.
+ *
+ * BytesRequired is the shortfall rather than the whole quantum, which is what
+ * XAudio2 documents and what lets a well-fed voice be told zero. */
+static void pass_callbacks(unsigned frames)
+{
+	int i;
+
+	for (i = 0; i < g_vn; i++) {
+		SwVoice *v = g_vtab[i];
+		UINT32 need, have = 0;
+		int k;
+
+		if (!v || !v->alive || !v->started || v->kind != 0 || !v->cb)
+			continue;
+		need = (UINT32)((double)frames * v->rate_eff / (double)OUT_RATE + 1.0);
+		for (k = 0; k < v->n; k++) {
+			const XA2_BUFFER *b = &v->q[(v->head + k) % XA2_MAX_QUEUED];
+			UINT32 total = buf_samples(v, b);
+
+			if (b->LoopCount) {
+				have = need; /* a looping buffer never runs out */
+				break;
+			}
+			have += k == 0 && total > v->pos ? total - v->pos : total;
+			if (have >= need)
+				break;
+		}
+		cb_post(v->cb, CB_PASS_START,
+			(void *)(UINT_PTR)(have >= need ? 0 : (need - have) * v->block));
+		cb_post(v->cb, CB_PASS_END, NULL);
+	}
+}
+
 static void mix_block(short *out, int *acc, unsigned frames)
 {
 	unsigned i;
@@ -579,6 +626,7 @@ static void mix_block(short *out, int *acc, unsigned frames)
 
 	ZeroMemory(acc, frames * OUT_CH * sizeof(int));
 	EnterCriticalSection(&g_cs);
+	pass_callbacks(frames);
 	for (i = 0; i < (unsigned)g_vn; i++) {
 		v = g_vtab[i];
 		if (v && voice_playing(v))
@@ -844,6 +892,7 @@ static HRESULT WINAPI V_SetChannelVolumes(SwVoice *v, UINT32 n, const float *vol
 	(void)vols;
 	(void)op;
 	g_calls[M_CHANVOL]++;
+	cb_flush();
 	return S_OK;
 }
 
@@ -926,6 +975,7 @@ static HRESULT WINAPI S_Stop(SwVoice *v, UINT32 flags, UINT32 op)
 	advance(v);
 	v->started = 0;
 	LeaveCriticalSection(&g_cs);
+	cb_flush();
 	return S_OK;
 }
 
@@ -964,6 +1014,7 @@ static HRESULT WINAPI S_FlushSourceBuffers(SwVoice *v)
 	v->pos = 0;
 	v->anchor = now_qpc();
 	LeaveCriticalSection(&g_cs);
+	cb_flush();
 	return S_OK;
 }
 
@@ -1017,6 +1068,7 @@ static HRESULT WINAPI S_SetFrequencyRatio(SwVoice *v, float ratio, UINT32 op)
 	v->freq_ratio = ratio > 0.0f ? ratio : 1.0f;
 	v->rate_eff = (double)v->rate * (double)v->freq_ratio;
 	LeaveCriticalSection(&g_cs);
+	cb_flush();
 	return S_OK;
 }
 
@@ -1285,6 +1337,13 @@ static void vt_init(void)
 int xa2_sw_armed(void)
 {
 	return g_ready;
+}
+
+/* Once a frame, from the game's thread. */
+void xa2_sw_pump(void)
+{
+	if (g_ready)
+		cb_flush();
 }
 
 /* Printed at every save, next to the restore it explains. The call census is
