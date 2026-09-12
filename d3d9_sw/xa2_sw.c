@@ -158,6 +158,44 @@ static const char *const g_mname[M_MAX] = {
 };
 static unsigned long g_calls[M_MAX];
 
+/* The last few calls, in memory, written out only if something faults.
+ *
+ * The savestate log is no help here: the engine that owns it had not booted
+ * when the game died at one second in, so every ss_log from this file went
+ * nowhere. A file write per call would answer that but costs a syscall on a
+ * path taken thousands of times a second. A ring costs a memcpy and is only
+ * read when there is a fault to explain, which is the right trade for a hook
+ * that is supposed to be invisible when it works. */
+#define XA2_RING 24
+static char g_ring[XA2_RING][112];
+static unsigned g_ring_n;
+
+static void tr(const char *fmt, ...)
+{
+	va_list ap;
+	unsigned slot = g_ring_n++ % XA2_RING;
+
+	va_start(ap, fmt);
+	wvsprintfA(g_ring[slot], fmt, ap);
+	va_end(ap);
+}
+
+void xa2_sw_trace_dump(void (*emit)(const char *))
+{
+	unsigned i, first;
+
+	if (!emit || !g_ring_n)
+		return;
+	emit("xa2_sw: the calls leading up to this, oldest first:");
+	first = g_ring_n > XA2_RING ? g_ring_n - XA2_RING : 0;
+	for (i = first; i < g_ring_n; i++) {
+		char line[160];
+
+		wsprintfA(line, "  %4u %s", i, g_ring[i % XA2_RING]);
+		emit(line);
+	}
+}
+
 static CRITICAL_SECTION g_cs;
 static int g_ready;
 static LONGLONG g_qpf;
@@ -323,6 +361,7 @@ static const void *g_sub_vt[19];
 static void WINAPI V_GetVoiceDetails(SwVoice *v, XA2_VOICE_DETAILS *d)
 {
 	g_calls[M_DETAILS]++;
+	tr("GetVoiceDetails v=%08lX kind=%d", (unsigned long)(UINT_PTR)v, v->kind);
 	if (!d)
 		return;
 	d->CreationFlags = 0;
@@ -464,6 +503,7 @@ static HRESULT WINAPI V_SetOutputMatrix(SwVoice *v, void *dst, UINT32 src_ch, UI
 	/* Panning arrives here rather than as a pan value. Stored nowhere while we
 	 * are silent, but counted, because it is the second half of the question
 	 * about how this game positions its sounds. */
+	tr("SetOutputMatrix src=%u dst=%u", src_ch, dst_ch);
 	g_calls[M_OUTMATRIX]++;
 	return S_OK;
 }
@@ -481,6 +521,7 @@ static void WINAPI V_GetOutputMatrix(SwVoice *v, void *dst, UINT32 src_ch, UINT3
 static void WINAPI V_DestroyVoice(SwVoice *v)
 {
 	g_calls[M_DESTROY]++;
+	tr("DestroyVoice v=%08lX", (unsigned long)(UINT_PTR)v);
 	EnterCriticalSection(&g_cs);
 	/* Marked dead, never reused. An address that meant one sound at save time
 	 * and a different one at restore time is the entity-pool problem in
@@ -499,6 +540,7 @@ static HRESULT WINAPI S_Start(SwVoice *v, UINT32 flags, UINT32 op)
 	(void)flags;
 	(void)op;
 	g_calls[M_START]++;
+	tr("Start v=%08lX", (unsigned long)(UINT_PTR)v);
 	EnterCriticalSection(&g_cs);
 	if (!v->started) {
 		v->anchor = now_qpc();
@@ -513,6 +555,7 @@ static HRESULT WINAPI S_Stop(SwVoice *v, UINT32 flags, UINT32 op)
 	(void)flags;
 	(void)op;
 	g_calls[M_STOP]++;
+	tr("Stop v=%08lX", (unsigned long)(UINT_PTR)v);
 	EnterCriticalSection(&g_cs);
 	advance(v);
 	v->started = 0;
@@ -524,6 +567,8 @@ static HRESULT WINAPI S_SubmitSourceBuffer(SwVoice *v, const XA2_BUFFER *b, cons
 {
 	(void)wmadata;
 	g_calls[M_SUBMIT]++;
+	tr("SubmitSourceBuffer v=%08lX bytes=%u loop=%u", (unsigned long)(UINT_PTR)v,
+	   b ? b->AudioBytes : 0, b ? b->LoopCount : 0);
 	if (!b)
 		return E_INVALIDARG;
 	EnterCriticalSection(&g_cs);
@@ -684,6 +729,19 @@ static HRESULT WINAPI E_RegisterForCallbacks(SwEngine *e, void *cb)
 	return S_OK;
 }
 
+/* Leaving this out cost a run. It sits between RegisterForCallbacks and
+ * CreateSourceVoice, so omitting it shifted every entry after it up by one and
+ * DxLib's CreateMasteringVoice landed on StartEngine - which returns S_OK
+ * without ever writing the out-pointer, so the game read through the NULL it
+ * was left holding and died at rabiribi.exe+0x4d6d4 before the first present.
+ * A vtable is a contract counted in slots, and a missing void method is as
+ * damaging as a wrong one. */
+static void WINAPI E_UnregisterForCallbacks(SwEngine *e, void *cb)
+{
+	(void)e;
+	(void)cb;
+}
+
 static HRESULT WINAPI E_CreateSourceVoice(SwEngine *e, void **out, const WAVEFORMATEX *fmt,
 					  UINT32 flags, float max_ratio, XA2Callback *cb,
 					  const void *sends, const void *chain)
@@ -696,6 +754,9 @@ static HRESULT WINAPI E_CreateSourceVoice(SwEngine *e, void **out, const WAVEFOR
 	(void)sends;
 	(void)chain;
 	g_calls[M_CREATE_SOURCE]++;
+	tr("CreateSourceVoice ch=%u rate=%u bits=%u cb=%08lX",
+	   fmt ? fmt->nChannels : 0, fmt ? fmt->nSamplesPerSec : 0,
+	   fmt ? fmt->wBitsPerSample : 0, (unsigned long)(UINT_PTR)cb);
 	if (!out)
 		return E_INVALIDARG;
 	EnterCriticalSection(&g_cs);
@@ -720,6 +781,7 @@ static HRESULT WINAPI E_CreateSubmixVoice(SwEngine *e, void **out, UINT32 channe
 	(void)sends;
 	(void)chain;
 	g_calls[M_CREATE_SUBMIX]++;
+	tr("CreateSubmixVoice ch=%u rate=%u", channels, rate);
 	if (!out)
 		return E_INVALIDARG;
 	EnterCriticalSection(&g_cs);
@@ -746,6 +808,7 @@ static HRESULT WINAPI E_CreateMasteringVoice(SwEngine *e, void **out, UINT32 cha
 	(void)chain;
 	(void)category;
 	g_calls[M_CREATE_MASTER]++;
+	tr("CreateMasteringVoice ch=%u rate=%u", channels, rate);
 	if (!out)
 		return E_INVALIDARG;
 	EnterCriticalSection(&g_cs);
@@ -792,7 +855,7 @@ static HRESULT WINAPI E_SetDebugConfiguration(SwEngine *e, const void *cfg, void
 	return S_OK;
 }
 
-static const void *g_eng_vt[12];
+static const void *g_eng_vt[13];
 
 static void vt_init(void)
 {
@@ -800,14 +863,15 @@ static void vt_init(void)
 	g_eng_vt[1] = (const void *)E_AddRef;
 	g_eng_vt[2] = (const void *)E_Release;
 	g_eng_vt[3] = (const void *)E_RegisterForCallbacks;
-	g_eng_vt[4] = (const void *)E_CreateSourceVoice;
-	g_eng_vt[5] = (const void *)E_CreateSubmixVoice;
-	g_eng_vt[6] = (const void *)E_CreateMasteringVoice;
-	g_eng_vt[7] = (const void *)E_StartEngine;
-	g_eng_vt[8] = (const void *)E_StopEngine;
-	g_eng_vt[9] = (const void *)E_CommitChanges;
-	g_eng_vt[10] = (const void *)E_GetPerformanceData;
-	g_eng_vt[11] = (const void *)E_SetDebugConfiguration;
+	g_eng_vt[4] = (const void *)E_UnregisterForCallbacks;
+	g_eng_vt[5] = (const void *)E_CreateSourceVoice;
+	g_eng_vt[6] = (const void *)E_CreateSubmixVoice;
+	g_eng_vt[7] = (const void *)E_CreateMasteringVoice;
+	g_eng_vt[8] = (const void *)E_StartEngine;
+	g_eng_vt[9] = (const void *)E_StopEngine;
+	g_eng_vt[10] = (const void *)E_CommitChanges;
+	g_eng_vt[11] = (const void *)E_GetPerformanceData;
+	g_eng_vt[12] = (const void *)E_SetDebugConfiguration;
 
 	/* IXAudio2Voice, shared prefix of all three voice kinds. */
 	g_sub_vt[0] = (const void *)V_GetVoiceDetails;
@@ -885,6 +949,7 @@ __declspec(dllexport) HRESULT WINAPI xa2_sw_create(void **out, UINT32 flags, UIN
 	if (!out)
 		return E_INVALIDARG;
 	*out = NULL;
+	tr("XAudio2Create flags=%u", flags);
 	if (!g_ready) {
 		InitializeCriticalSection(&g_cs);
 		QueryPerformanceFrequency(&f);

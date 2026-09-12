@@ -918,6 +918,15 @@ static int heal_cap(void);
 static LONG CALLBACK d11_veh(EXCEPTION_POINTERS *ep);
 static PVOID g_veh_tok;
 
+void xa2_sw_trace_dump(void (*emit)(const char *));
+
+/* d11_log takes a format string; the trace dump hands over finished lines, and
+ * a line with a stray percent in it must not be reinterpreted. */
+static void d11_log_line(const char *s)
+{
+	d11_log("%s", s);
+}
+
 static void ledger_register(void)
 {
 	struct ledger *l = ledger_get();
@@ -1938,6 +1947,11 @@ static LONG CALLBACK d11_veh(EXCEPTION_POINTERS *ep)
 			rw == 1 ? "write" : rw == 8 ? "execute" : "read", (void *)at, pc,
 			(unsigned long long)((char *)pc - (char *)mod),
 			name[0] ? name : "?", g_present_n);
+		/* If the software XAudio2 is serving, the calls before the fault are
+		 * the most useful thing anyone can read here - and the savestate log
+		 * cannot carry them, because a death this early happens before that
+		 * engine has booted. Silent when nothing has called into it. */
+		xa2_sw_trace_dump(d11_log_line);
 		/* A write that lands exactly on a page boundary is the signature
 		 * of a walk off the end of a buffer rather than a stray pointer,
 		 * so describe the neighbourhood: the committed block below the
@@ -2586,6 +2600,22 @@ static void dsound_claim(void)
 	slash = wcsrchr(path, L'\\');
 	if (!slash)
 		return;
+	/* Off unless asked for. With the XAudio2 stand-in under test, claiming the
+	 * DirectSound name as well puts two of our audio implementations in one
+	 * process and makes a crash ambiguous about which one caused it - which is
+	 * exactly what happened on the run that found the vtable slot error. The
+	 * DirectSound side has never been shown to serve a device anyway. */
+	{
+		char v[8];
+		DWORD got = GetEnvironmentVariableA("D3D9SW_DSCLAIM", v, sizeof(v));
+
+		if (!(got > 0 && got < sizeof(v) && v[0] == '1')) {
+			d11_log("dsound: the name is free, but not claiming it - "
+				"D3D9SW_DSCLAIM is not set, and one audio stand-in at a "
+				"time is the only way a crash names its own cause");
+			return;
+		}
+	}
 	wcscpy(slash + 1, L"dsound.dll");
 	h = LoadLibraryW(path);
 	if (!h) {
