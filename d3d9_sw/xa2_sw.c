@@ -44,8 +44,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mmreg.h>
+#include <mmsystem.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include "savestate.h"
 
 void savestate_log_line(const char *s);
 
@@ -124,7 +126,12 @@ struct SwVoice {
 	LONGLONG anchor; /* rewound QPC at which `played` and `pos` were current */
 	UINT64 played;	 /* samples, the number the game asks for */
 	UINT32 pos;	 /* samples into the buffer at the head of the queue */
+	UINT32 frac;	 /* 16.16 remainder of pos, for rate conversion */
 	int head, n;
+	/* Panning arrives as an output matrix rather than a pan value, so it is
+	 * kept in the shape it was given and folded in at mix time. */
+	int mtx_src, mtx_dst;
+	float mtx[8];
 	XA2_BUFFER q[XA2_MAX_QUEUED];
 };
 
@@ -200,6 +207,18 @@ void xa2_sw_trace_dump(void (*emit)(const char *))
 	}
 }
 
+/* A roster the mixer can walk. Static, so it lives in this DLL's data and is
+ * held in the present - which is right: who exists is present tense, while what
+ * each voice contains is state and stays captured in the arena. A voice created
+ * after a save rewinds to zeroed arena memory, so `alive` reads false and the
+ * mixer steps over it rather than playing something that no longer happened. */
+static SwVoice *g_vtab[XA2_MAX_VOICES];
+static int g_vn;
+
+/* Set once waveOut is running. Declared here because `advance` has to know to
+ * stand aside well before the mixer that sets it is defined. */
+static int g_out_live;
+
 static CRITICAL_SECTION g_cs;
 static int g_ready;
 static LONGLONG g_qpf;
@@ -250,18 +269,85 @@ static LONGLONG now_qpc(void)
 
 /* ------------------------------------------------------------- callbacks */
 
-static void cb_ctx(XA2Callback *c, int slot, void *ctx)
+/* Deferred, and that is the point.
+ *
+ * Once there is a mixer thread, it is the thread that discovers a buffer has
+ * finished - and calling OnBufferEnd from there would put a foreign thread
+ * inside DxLib's code, allocating and submitting, possibly in the middle of a
+ * save. That is the exact hazard this project exists to remove, rebuilt by our
+ * own hand.
+ *
+ * So the mixer only records what happened. The game's next call into us drains
+ * the queue on the game's own thread, which is a frame of latency at worst and
+ * keeps the invariant that nothing but the game ever calls the game. The queue
+ * is static, so it lives in this DLL's data, which is held in the present -
+ * correct, because a pending notification is about the present and not part of
+ * the state being rewound. */
+#define XA2_PEND 256
+
+typedef struct {
+	XA2Callback *cb;
+	int slot;
+	void *ctx;
+} Pending;
+
+static Pending g_pend[XA2_PEND];
+static int g_pend_head, g_pend_n;
+static unsigned long g_pend_lost;
+
+static void cb_post(XA2Callback *c, int slot, void *ctx)
 {
 	if (!c || !c->vtbl)
 		return;
-	((PFN_CB_CTX)c->vtbl[slot])(c, ctx);
+	if (g_pend_n >= XA2_PEND) {
+		g_pend_lost++;
+		return;
+	}
+	g_pend[(g_pend_head + g_pend_n) % XA2_PEND].cb = c;
+	g_pend[(g_pend_head + g_pend_n) % XA2_PEND].slot = slot;
+	g_pend[(g_pend_head + g_pend_n) % XA2_PEND].ctx = ctx;
+	g_pend_n++;
+}
+
+/* Called on the game's thread, never holding the lock: DxLib submits more audio
+ * from inside OnBufferEnd, and that path comes straight back in here. */
+static void cb_flush(void)
+{
+	static LONG busy;
+
+	/* DxLib submits more audio from inside OnBufferEnd, and that path comes
+	 * straight back here. Draining only at the outermost level keeps the
+	 * recursion from nesting once per notification. */
+	if (InterlockedCompareExchange(&busy, 1, 0))
+		return;
+	for (;;) {
+		Pending p;
+
+		EnterCriticalSection(&g_cs);
+		if (!g_pend_n) {
+			LeaveCriticalSection(&g_cs);
+			InterlockedExchange(&busy, 0);
+			return;
+		}
+		p = g_pend[g_pend_head];
+		g_pend_head = (g_pend_head + 1) % XA2_PEND;
+		g_pend_n--;
+		LeaveCriticalSection(&g_cs);
+		if (p.slot == CB_STREAM_END)
+			((PFN_CB_VOID)p.cb->vtbl[p.slot])(p.cb);
+		else
+			((PFN_CB_CTX)p.cb->vtbl[p.slot])(p.cb, p.ctx);
+	}
+}
+
+static void cb_ctx(XA2Callback *c, int slot, void *ctx)
+{
+	cb_post(c, slot, ctx);
 }
 
 static void cb_void(XA2Callback *c, int slot)
 {
-	if (!c || !c->vtbl)
-		return;
-	((PFN_CB_VOID)c->vtbl[slot])(c);
+	cb_post(c, slot, NULL);
 }
 
 /* ---------------------------------------------------------------- clock */
@@ -284,6 +370,8 @@ static void advance(SwVoice *v)
 
 	if (!v->started || v->kind != 0 || v->rate_eff <= 0.0)
 		return;
+	if (g_out_live)
+		return; /* the mixer moves it, by audio actually produced */
 	now = now_qpc();
 	d = now - v->anchor;
 	if (d <= 0)
@@ -352,6 +440,279 @@ static void advance(SwVoice *v)
 		v->n--;
 		v->pos = 0;
 	}
+}
+
+/* ---------------------------------------------------------------- mixer */
+
+/* Speakers, at last, and on our terms.
+ *
+ * The rule that made the silent build safe still holds: nothing outside the
+ * game may touch the game's memory at a moment of our choosing. A mixer thread
+ * plainly does touch it - it reads the PCM DxLib submitted, which lives in the
+ * game's heap and rewinds with the game. The difference from every audio stack
+ * we have fought is that this thread is ours, so stopping it is real. XAudio2's
+ * own mixer could be asked to stop and would keep reading; this one is parked
+ * before the first byte of a snapshot is copied and does not run again until
+ * the restore is finished.
+ *
+ * Sample position is driven by audio actually produced rather than by the
+ * clock. That is strictly better than the QPC scheme it replaces: the count
+ * only moves when we do work, so parking the mixer freezes it exactly, and
+ * there is no wall-clock term left to disagree with a rewind.
+ *
+ * Output is fixed at 44100/16/stereo because every format in the survey
+ * resamples into it cleanly and a fixed sink is one less thing that can change
+ * underneath a restore. waveOut rather than anything newer: winmm is already in
+ * the process, it needs no COM, no device enumeration and no session
+ * management, and it brings none of AUDIOSES or MMDevApi with it. */
+#define OUT_RATE 44100
+#define OUT_CH 2
+#define OUT_FRAMES 1024 /* about 23 ms; four of these is a comfortable buffer */
+#define OUT_BLOCKS 4
+
+typedef struct {
+	WAVEHDR hdr[OUT_BLOCKS];
+	short pcm[OUT_BLOCKS][OUT_FRAMES * OUT_CH];
+	int acc[OUT_FRAMES * OUT_CH];
+} MixOut;
+
+static HWAVEOUT g_wo;
+static MixOut *g_out;
+static HANDLE g_mix_thr, g_mix_wake;
+static volatile LONG g_mix_quit, g_mix_park, g_mix_idle;
+static unsigned long g_blocks_out;
+
+static int voice_playing(const SwVoice *v)
+{
+	return v->alive && v->started && v->kind == 0 && v->n;
+}
+
+/* One voice into the accumulator. Returns having advanced that voice's position
+ * by exactly the audio it contributed, which is what makes SamplesPlayed a
+ * report of work done rather than of time passed. */
+static void mix_voice(SwVoice *v, int *acc, unsigned frames)
+{
+	unsigned step, f;
+	float gl, gr;
+
+	if (v->rate_eff <= 0.0)
+		return;
+	step = (unsigned)((v->rate_eff * 65536.0) / (double)OUT_RATE + 0.5);
+	if (!step)
+		step = 1;
+
+	gl = gr = v->volume;
+	if (v->mtx_dst == 2 && v->mtx_src == 1) {
+		gl *= v->mtx[0];
+		gr *= v->mtx[1];
+	}
+
+	for (f = 0; f < frames; f++) {
+		XA2_BUFFER *b;
+		UINT32 total, end;
+		const short *s16;
+		int l, r;
+		UINT32 idx;
+
+		if (!v->n) {
+			g_starved++;
+			return;
+		}
+		b = &v->q[v->head];
+		total = buf_samples(v, b);
+		end = total;
+		if (b->LoopCount && b->LoopLength)
+			end = b->LoopBegin + b->LoopLength;
+		if (end > total)
+			end = total;
+
+		if (!total || v->pos >= end) {
+			/* Retire or loop, then take this output frame again from
+			 * whatever is next. */
+			if (total && b->LoopCount) {
+				if (b->LoopCount != XA2_LOOP_INFINITE)
+					b->LoopCount--;
+				cb_ctx(v->cb, CB_LOOP_END, b->pContext);
+				v->pos = b->LoopBegin;
+			} else {
+				cb_ctx(v->cb, CB_BUFFER_END, b->pContext);
+				if (b->Flags & XA2_END_OF_STREAM)
+					cb_void(v->cb, CB_STREAM_END);
+				v->head = (v->head + 1) % XA2_MAX_QUEUED;
+				v->n--;
+				v->pos = 0;
+				v->frac = 0;
+			}
+			f--;
+			continue;
+		}
+		if (v->pos == 0 && v->frac == 0)
+			cb_ctx(v->cb, CB_BUFFER_START, b->pContext);
+
+		idx = b->PlayBegin + v->pos;
+		s16 = (const short *)b->pAudioData;
+		if (!s16 || v->bits != 16 || (idx + 1) * v->block > b->AudioBytes) {
+			/* Anything we cannot read confidently contributes silence. The
+			 * buffer still advances, so a format we do not handle costs the
+			 * sound and not the timing. */
+			l = r = 0;
+		} else if (v->channels >= 2) {
+			l = s16[idx * v->channels];
+			r = s16[idx * v->channels + 1];
+		} else {
+			l = r = s16[idx];
+		}
+		acc[f * OUT_CH] += (int)(l * gl);
+		acc[f * OUT_CH + 1] += (int)(r * gr);
+
+		v->frac += step;
+		v->pos += v->frac >> 16;
+		v->played += v->frac >> 16;
+		v->frac &= 0xFFFF;
+	}
+}
+
+static void mix_block(short *out, int *acc, unsigned frames)
+{
+	unsigned i;
+	SwVoice *v;
+
+	ZeroMemory(acc, frames * OUT_CH * sizeof(int));
+	EnterCriticalSection(&g_cs);
+	for (i = 0; i < (unsigned)g_vn; i++) {
+		v = g_vtab[i];
+		if (v && voice_playing(v))
+			mix_voice(v, acc, frames);
+	}
+	LeaveCriticalSection(&g_cs);
+	for (i = 0; i < frames * OUT_CH; i++) {
+		int s = acc[i];
+
+		/* Clamp rather than wrap. With hundreds of voices a sum can exceed
+		 * the range, and wrapping turns a loud moment into a bang. */
+		if (s > 32767)
+			s = 32767;
+		else if (s < -32768)
+			s = -32768;
+		out[i] = (short)s;
+	}
+}
+
+static DWORD WINAPI mix_main(LPVOID p)
+{
+	(void)p;
+	for (;;) {
+		int i, sent = 0;
+
+		if (g_mix_quit)
+			break;
+		if (g_mix_park) {
+			InterlockedExchange(&g_mix_idle, 1);
+			WaitForSingleObject(g_mix_wake, 10);
+			continue;
+		}
+		InterlockedExchange(&g_mix_idle, 0);
+		for (i = 0; i < OUT_BLOCKS; i++) {
+			WAVEHDR *h = &g_out->hdr[i];
+
+			if (!(h->dwFlags & WHDR_DONE))
+				continue;
+			h->dwFlags &= ~WHDR_DONE;
+			mix_block(g_out->pcm[i], g_out->acc, OUT_FRAMES);
+			h->dwBufferLength = OUT_FRAMES * OUT_CH * sizeof(short);
+			if (waveOutWrite(g_wo, h, sizeof(*h)) == MMSYSERR_NOERROR) {
+				g_blocks_out++;
+				sent = 1;
+			} else
+				h->dwFlags |= WHDR_DONE;
+		}
+		if (!sent)
+			WaitForSingleObject(g_mix_wake, 5);
+	}
+	return 0;
+}
+
+/* Excluded from the snapshot on purpose. These are the present tense: sixteen
+ * kilobytes of samples on their way to the speakers, and a waveOut header the
+ * driver owns a pointer into. Rewinding either would hand the driver a block it
+ * has already returned, which is the very mistake the rest of this file is
+ * built to avoid. The voices, which are state, stay captured. */
+static void out_start(void)
+{
+	WAVEFORMATEX wf;
+	int i;
+
+	if (g_out_live)
+		return;
+	g_out = (MixOut *)VirtualAlloc(NULL, sizeof(MixOut), MEM_COMMIT | MEM_RESERVE,
+				       PAGE_READWRITE);
+	if (!g_out)
+		return;
+	savestate_exclude(g_out, sizeof(MixOut));
+
+	wf.wFormatTag = WAVE_FORMAT_PCM;
+	wf.nChannels = OUT_CH;
+	wf.nSamplesPerSec = OUT_RATE;
+	wf.wBitsPerSample = 16;
+	wf.nBlockAlign = OUT_CH * 2;
+	wf.nAvgBytesPerSec = OUT_RATE * wf.nBlockAlign;
+	wf.cbSize = 0;
+
+	g_mix_wake = CreateEventA(NULL, FALSE, FALSE, NULL);
+	if (waveOutOpen(&g_wo, WAVE_MAPPER, &wf, (DWORD_PTR)g_mix_wake, 0, CALLBACK_EVENT) !=
+	    MMSYSERR_NOERROR) {
+		g_wo = NULL;
+		ss_log("xa2_sw: waveOut would not open, so the engine stays silent - "
+		       "everything else about the restore is unaffected\n");
+		return;
+	}
+	for (i = 0; i < OUT_BLOCKS; i++) {
+		WAVEHDR *h = &g_out->hdr[i];
+
+		ZeroMemory(h, sizeof(*h));
+		h->lpData = (LPSTR)g_out->pcm[i];
+		h->dwBufferLength = OUT_FRAMES * OUT_CH * sizeof(short);
+		waveOutPrepareHeader(g_wo, h, sizeof(*h));
+		h->dwFlags |= WHDR_DONE;
+	}
+	g_out_live = 1;
+	g_mix_thr = CreateThread(NULL, 0, mix_main, NULL, 0, NULL);
+	if (g_mix_thr)
+		SetThreadPriority(g_mix_thr, THREAD_PRIORITY_ABOVE_NORMAL);
+	ss_log("xa2_sw: mixing to waveOut at %d Hz, %d channel(s), %d x %d frame(s). "
+	       "The mixer is ours, so it stops for a save - which is the one thing "
+	       "no sound card has ever agreed to do\n",
+	       OUT_RATE, OUT_CH, OUT_BLOCKS, OUT_FRAMES);
+}
+
+/* Called before a snapshot is copied and before a restore writes anything. The
+ * wait is bounded because a mixer that will not stop must not be allowed to
+ * hold up a save; if it ever times out the log says so rather than continuing
+ * on an assumption. */
+void xa2_sw_park(void)
+{
+	int spins;
+
+	if (!g_out_live)
+		return;
+	InterlockedExchange(&g_mix_park, 1);
+	SetEvent(g_mix_wake);
+	for (spins = 0; spins < 200 && !g_mix_idle; spins++)
+		Sleep(1);
+	if (!g_mix_idle)
+		ss_log("xa2_sw: the mixer did not park within 200 ms - the copy is "
+		       "going ahead anyway, so treat any audio corruption in this "
+		       "restore as explained\n");
+	waveOutPause(g_wo);
+}
+
+void xa2_sw_resume(void)
+{
+	if (!g_out_live)
+		return;
+	waveOutRestart(g_wo);
+	InterlockedExchange(&g_mix_park, 0);
+	SetEvent(g_mix_wake);
 }
 
 /* ---------------------------------------------------------------- voice */
@@ -551,6 +912,7 @@ static HRESULT WINAPI S_Start(SwVoice *v, UINT32 flags, UINT32 op)
 		v->started = 1;
 	}
 	LeaveCriticalSection(&g_cs);
+	cb_flush();
 	return S_OK;
 }
 
@@ -590,6 +952,7 @@ static HRESULT WINAPI S_SubmitSourceBuffer(SwVoice *v, const XA2_BUFFER *b, cons
 	v->n++;
 	g_submits++;
 	LeaveCriticalSection(&g_cs);
+	cb_flush();
 	return S_OK;
 }
 
@@ -639,6 +1002,7 @@ static void WINAPI S_GetState(SwVoice *v, XA2_VOICE_STATE *st, UINT32 flags)
 	st->BuffersQueued = (UINT32)v->n;
 	st->SamplesPlayed = v->played;
 	LeaveCriticalSection(&g_cs);
+	cb_flush();
 }
 
 static HRESULT WINAPI S_SetFrequencyRatio(SwVoice *v, float ratio, UINT32 op)
@@ -700,6 +1064,8 @@ static SwVoice *voice_new(int kind, UINT32 channels, UINT32 rate, UINT32 bits, X
 	v->freq_ratio = 1.0f;
 	v->volume = 1.0f;
 	v->rate_eff = (double)v->rate;
+	if (g_vn < XA2_MAX_VOICES)
+		g_vtab[g_vn++] = v;
 	g_voices++;
 	return v;
 }
@@ -973,5 +1339,6 @@ __declspec(dllexport) HRESULT WINAPI xa2_sw_create(void **out, UINT32 flags, UIN
 	e->vtbl = g_eng_vt;
 	e->ref = 1;
 	*out = e;
+	out_start();
 	return S_OK;
 }

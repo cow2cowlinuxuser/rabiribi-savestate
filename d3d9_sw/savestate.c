@@ -1856,6 +1856,8 @@ void dsh_mark_present(void);
 void dsh_survey(void);
 void ds_sw_report(void);
 void xa2_sw_report(void);
+void xa2_sw_park(void);
+void xa2_sw_resume(void);
 void dsh_play(void);
 
 static int g_runaway_hits;
@@ -10487,6 +10489,7 @@ int savestate_park(int ms)
 	ss_log("park: holding the whole process still for %d ms, touching no memory\n", ms);
 	dsh_save();
 	dsh_quiet();
+	xa2_sw_park();
 	QueryPerformanceCounter(&t0);
 	if (alloc_settle())
 		alloc_ranges_init();
@@ -10524,6 +10527,7 @@ int savestate_park(int ms)
 	Sleep((DWORD)ms);
 	resume_all(0);
 	dsh_play();
+	xa2_sw_resume();
 	QueryPerformanceCounter(&t2);
 	ss_log("park: %d thread(s) were held for %.0f ms (%.1f ms to freeze them, %.1f ms "
 	       "total). No memory was read or written. If the game is still playing, the "
@@ -10812,6 +10816,7 @@ static int do_save(int slotno)
 	/* Before suspend_all, because the point is to have nothing playing for the
 	 * whole window rather than merely for the copy. */
 	dsh_quiet();
+	xa2_sw_park();
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t0);
 	g_blk_save_n = 0;
@@ -11271,6 +11276,7 @@ static int do_save(int slotno)
 done:
 	resume_all(0);
 	dsh_play();
+	xa2_sw_resume();
 	/* After the first save rather than at install, because half of what it
 	 * reports - the heap partition, the module tenancy, the exclusion count -
 	 * does not exist until a snapshot has been built. */
@@ -12253,6 +12259,7 @@ static int do_load(int slotno)
 		 * nothing left to observe about what the present sounded like. */
 		dsh_mark_present();
 		dsh_quiet();
+		xa2_sw_park();
 		if (want)
 			blk_lock_all();
 		collect_threads();
@@ -13320,6 +13327,7 @@ static int do_load(int slotno)
 	 * cursor where the game expects it, so a thread that reads one before this
 	 * line gets the right answer from a stopped buffer. */
 	dsh_play();
+	xa2_sw_resume();
 	ss_log("  resume: done, all threads runnable\n");
 	/* After the threads are running again, because the comparison is a read of
 	 * a few hundred megabytes and holding every thread suspended through it
