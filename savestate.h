@@ -86,6 +86,57 @@ int savestate_host_is(const char *exe_name);
  * is safe from a handler that may be holding the heap lock already. */
 int savestate_rewinds(const void *p, char *name, unsigned cap);
 
+/* Thread-set mismatch after the most recent restore.
+ *
+ * The restore already compares the live thread set against the saved one and
+ * logs the difference, but until now the counts lived only in the log. This
+ * exports them cheaply so the harness can assert on them.
+ *
+ * Returns: count of threads present at save time that have exited.
+ * Optionally fills *fresh (live now, not at save), *recycled (same entry point
+ * under a new TID), *gone (same as the return value). */
+int savestate_thread_set(int *fresh, int *recycled, int *gone);
+
+/* Soak driver. F6 arms it; it then runs save/restore trials on its own with a
+ * doubling dwell, so one manual session yields a survival curve instead of a
+ * single number. savestate_soak_action is called once per frame and says what
+ * it wants done - the wrapper still performs the save or load itself, because
+ * the ledger work around both must not get a second call site. */
+#define SS_SOAK_NOTHING 0
+#define SS_SOAK_SAVE 1
+#define SS_SOAK_LOAD 2
+/* The eight-byte savestate: F11 marks the player position, shift-F11 writes it
+ * back. Rabi-Ribi v1.65 only, checked by image size before anything is read. */
+void savestate_pos_mark(void);
+void savestate_pos_restore(void);
+/* Called every frame. Notices when the game crosses a load boundary of its own
+ * accord and censuses the heaps across it, which is the only view we have of
+ * what the game itself treats as per-load state versus permanent state. */
+void savestate_pos_watch(void);
+void savestate_object_watch(void);
+void savestate_object_report(void);
+/* F7. Takes a census right now, so two presses with only play between them
+ * measure what play alone changes, uncontaminated by a load. */
+void savestate_probe_census(void);
+/* Reliable hotkey edges. GetAsyncKeyState's low bit is consumed by whoever
+ * reads it first, and the game polls the keyboard as well, so presses were
+ * being lost. These track the physical key bit instead. */
+int savestate_key_edge(int vk);
+int savestate_key_held(int vk);
+void savestate_chain_probe(void);
+
+/* Hold every thread still for a while and then let them go, copying nothing.
+ * The control experiment for every restore failure: a restore freezes, copies
+ * and writes back, and only the last two have ever been varied. */
+int savestate_park(int ms);
+
+/* Write the main module out as it exists in memory, for a disassembler. The
+ * game's .text is encrypted on disk behind a Steam stub; in here it is not. */
+int savestate_dump_image(void);
+
+void savestate_soak_arm(void);
+int savestate_soak_action(void);
+
 /* One slot. Each costs a full copy of the game's committed memory, which for
  * this title is well over a gigabyte of physical RAM. */
 #define SAVESTATE_SLOTS 1

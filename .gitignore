@@ -27,3 +27,10 @@ symbols-cache/
 # Generated
 gl_stubs.c
 opengl32.def
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Unrelated sibling project that lives in the same source tree
+x_reader/

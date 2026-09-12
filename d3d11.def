@@ -5,3 +5,7 @@ D3D11CreateDeviceAndSwapChain
 CreateDXGIFactory
 CreateDXGIFactory1
 CreateDXGIFactory2
+ds_sw_create
+ds_sw_enum_a
+ds_sw_enum_w
+xa2_sw_create

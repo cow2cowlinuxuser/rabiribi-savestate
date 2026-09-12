@@ -918,6 +918,15 @@ static int heal_cap(void);
 static LONG CALLBACK d11_veh(EXCEPTION_POINTERS *ep);
 static PVOID g_veh_tok;
 
+void xa2_sw_trace_dump(void (*emit)(const char *));
+
+/* d11_log takes a format string; the trace dump hands over finished lines, and
+ * a line with a stray percent in it must not be reinterpreted. */
+static void d11_log_line(const char *s)
+{
+	d11_log("%s", s);
+}
+
 static void ledger_register(void)
 {
 	struct ledger *l = ledger_get();
@@ -1938,6 +1947,11 @@ static LONG CALLBACK d11_veh(EXCEPTION_POINTERS *ep)
 			rw == 1 ? "write" : rw == 8 ? "execute" : "read", (void *)at, pc,
 			(unsigned long long)((char *)pc - (char *)mod),
 			name[0] ? name : "?", g_present_n);
+		/* If the software XAudio2 is serving, the calls before the fault are
+		 * the most useful thing anyone can read here - and the savestate log
+		 * cannot carry them, because a death this early happens before that
+		 * engine has booted. Silent when nothing has called into it. */
+		xa2_sw_trace_dump(d11_log_line);
 		/* A write that lands exactly on a page boundary is the signature
 		 * of a walk off the end of a buffer rather than a stray pointer,
 		 * so describe the neighbourhood: the committed block below the
@@ -2534,6 +2548,90 @@ static void hook_getprocaddress(void)
 		"if it resolves names it does so some other way");
 }
 
+/* Claim the name dsound.dll before anything else does.
+ *
+ * The same-folder stub is the right mechanism and it demonstrably works: a probe
+ * executable placed in the game directory gets our copy from
+ * LoadLibraryA("DSound.DLL"), loads it, and resolves DirectSoundCreate8 out of
+ * it. Inside the real process it lost anyway, which leaves only one explanation
+ * - by the time DxLib asked for the name, a dsound.dll was already in the
+ * loader's list, and a plain name matches a loaded module before any directory
+ * is searched. Steam puts six of its own DLLs in here before the game runs.
+ *
+ * So ask first. If the name is unclaimed we take it, and DxLib's later request
+ * resolves to the module we already loaded regardless of where it sits on disk.
+ * If somebody beat us to it there is nothing to be done from here, and the log
+ * says so plainly rather than leaving another silent no-op to be discovered by
+ * its absence.
+ *
+ * Loading from DllMain is normally worth avoiding. This particular DLL imports
+ * nothing but kernel32, its attach handler only calls
+ * DisableThreadLibraryCalls, and it starts no threads, so there is no second
+ * lock for it to want. */
+int ds_sw_take_over(void);
+int gameheap_install(void);
+
+static void dsound_claim(void)
+{
+	wchar_t path[MAX_PATH], *slash;
+	char shown[MAX_PATH];
+	HMODULE self = NULL, h;
+
+	h = GetModuleHandleA("dsound.dll");
+	if (h) {
+		int took;
+
+		if (!GetModuleFileNameA(h, shown, MAX_PATH))
+			lstrcpynA(shown, "(no path)", MAX_PATH);
+		/* Second to the name, so take the entry point instead. Which file won
+		 * stops mattering once DirectSoundCreate8 lands in our code. */
+		took = ds_sw_take_over();
+		d11_log("dsound: already loaded before we attached, from %s - %s", shown,
+			took ? "so we took its create entry point(s) instead; the game "
+			       "will get a software device"
+			     : "and its create entry point could not be taken either, so "
+			       "the game gets Windows' DirectSound");
+		return;
+	}
+	GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+				   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			   (LPCWSTR)dsound_claim, &self);
+	if (!self || !GetModuleFileNameW(self, path, MAX_PATH))
+		return;
+	slash = wcsrchr(path, L'\\');
+	if (!slash)
+		return;
+	/* Off unless asked for. With the XAudio2 stand-in under test, claiming the
+	 * DirectSound name as well puts two of our audio implementations in one
+	 * process and makes a crash ambiguous about which one caused it - which is
+	 * exactly what happened on the run that found the vtable slot error. The
+	 * DirectSound side has never been shown to serve a device anyway. */
+	{
+		char v[8];
+		DWORD got = GetEnvironmentVariableA("D3D9SW_DSCLAIM", v, sizeof(v));
+
+		if (!(got > 0 && got < sizeof(v) && v[0] == '1')) {
+			d11_log("dsound: the name is free, but not claiming it - "
+				"D3D9SW_DSCLAIM is not set, and one audio stand-in at a "
+				"time is the only way a crash names its own cause");
+			return;
+		}
+	}
+	wcscpy(slash + 1, L"dsound.dll");
+	h = LoadLibraryW(path);
+	if (!h) {
+		d11_log("dsound: the stub next to us would not load (error %lu), so the "
+			"game will get Windows' DirectSound",
+			GetLastError());
+		return;
+	}
+	if (!GetModuleFileNameA(h, shown, MAX_PATH))
+		lstrcpynA(shown, "(no path)", MAX_PATH);
+	d11_log("dsound: claimed the name first, from %s - DxLib's LoadLibrary will "
+		"resolve to this one",
+		shown);
+}
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
 	/* Announce the attach so that a missing detach line is evidence of
@@ -2550,6 +2648,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 		arena_init();
 		profile_seed_env();
 		hook_getprocaddress();
+		dsound_claim();
 	} else if (reason == DLL_PROCESS_DETACH)
 		d11_log("process detach (%s) after %ld presents",
 			reserved ? "process exiting" : "FreeLibrary", g_present_n);
@@ -3305,7 +3404,7 @@ static int osd_on(void)
 		DWORD pid = 0;
 
 		GetWindowThreadProcessId(GetForegroundWindow(), &pid);
-		if (pid == GetCurrentProcessId() && (GetAsyncKeyState(VK_F8) & 1))
+		if (pid == GetCurrentProcessId() && savestate_key_edge(VK_F8))
 			v = !v;
 	}
 	return v;
@@ -6230,11 +6329,78 @@ static void present_wait(HWND hwnd, UINT sync)
 	}
 }
 
+/* What the game asks of the swap chain, and what it actually gets.
+ *
+ * Two unmeasured numbers decide whether our pacing has anything to do with the
+ * game running fast: the sync interval the game passes, because present_wait is
+ * skipped outright when it is zero and the game is then limiting itself, and
+ * the frame rate we really deliver.
+ *
+ * Sampled against a QueryPerformanceCounter resolved straight out of kernel32
+ * rather than whatever the imports point at. The savestate engine offsets every
+ * clock the game can read, and a pacing measurement taken on a rewound clock
+ * would be describing the rewind rather than the pacing.
+ *
+ * Window state is reported next to it because the compositor throttles frames
+ * for windows nobody can see. A fixed-timestep game slowed down that way is
+ * advancing its world at a rate its own logic has no idea about, which is the
+ * off-screen case worth having evidence for rather than a theory. */
+static void pace_probe(HWND hwnd, UINT sync, UINT flags)
+{
+	static BOOL(WINAPI * qpc)(LARGE_INTEGER *);
+	static LARGE_INTEGER freq, mark;
+	static unsigned long frames;
+	static int last_state = -1;
+	static UINT last_sync = 0xFFFFFFFFu;
+	LARGE_INTEGER now;
+	double el;
+	int state;
+
+	if (!qpc) {
+		HMODULE k = GetModuleHandleA("kernel32.dll");
+
+		if (k)
+			qpc = (BOOL(WINAPI *)(LARGE_INTEGER *))(void *)GetProcAddress(
+				k, "QueryPerformanceCounter");
+		if (!qpc)
+			return;
+		QueryPerformanceFrequency(&freq);
+		qpc(&mark);
+	}
+	frames++;
+	/* Once per distinct value rather than once per frame: the event worth
+	 * seeing is the game changing its mind, which it does at mode changes. */
+	if (sync != last_sync) {
+		last_sync = sync;
+		d11_log("present: the game asked for SyncInterval=%u flags=%x - %s", sync,
+			flags,
+			sync ? "our pacing applies"
+			     : "our pacing is SKIPPED, so the game is limiting itself");
+	}
+	state = IsIconic(hwnd) ? 2 : (GetForegroundWindow() == hwnd ? 0 : 1);
+	if (state != last_state) {
+		last_state = state;
+		d11_log("present: window is now %s", state == 2	  ? "MINIMISED"
+						     : state == 1 ? "in the background"
+								  : "in the foreground");
+	}
+	if (!qpc(&now) || !freq.QuadPart)
+		return;
+	el = (double)(now.QuadPart - mark.QuadPart) / (double)freq.QuadPart;
+	if (el >= 2.0) {
+		d11_log("present: %.1f fps over %.1f s (%s, SyncInterval=%u)", frames / el, el,
+			state == 2 ? "minimised" : state == 1 ? "background" : "foreground",
+			sync);
+		mark = now;
+		frames = 0;
+	}
+}
+
 static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 {
 	Sw11Swap *s = (Sw11Swap *)this;
 	SwRast r;
-	int k;
+	int k, soak_act;
 	(void)flags;
 	d11_trace("Present #%d %ux%u hwnd=%p bbwrites=%u nrt=%d cbmaps=%ld bufmaps=%ld",
 		s->bb ? s->bb->id : -1, s->bb ? s->bb->width : 0, s->bb ? s->bb->height : 0,
@@ -6274,12 +6440,44 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 					d11_log("VS opcode %d unimplemented", w * 32 + bit);
 		}
 	}
+	/* Not at DLL_PROCESS_ATTACH, which is where this went first and where it
+	 * was invisible: the savestate log does not exist that early, so every
+	 * line the installer wrote went nowhere, and the config read as unset
+	 * while the session header printed it as 1. Here both are up, and the
+	 * result lands in the log the reader is already looking at. */
+	{
+		static int gh_tried;
+
+		if (!gh_tried) {
+			gh_tried = 1;
+			d11_log("gameheap: %d import slot(s) redirected",
+				gameheap_install());
+		}
+	}
 	savestate_guard();
+	savestate_pos_watch();
+	savestate_object_watch();
+	/* F6 arms the soak driver, which then drives save and restore by itself.
+	 * Read once per frame outside the slot loop so the keystroke is consumed
+	 * exactly once however many slots there are. */
+	if (savestate_key_edge(VK_F6))
+		savestate_soak_arm();
+	soak_act = savestate_soak_action();
 	for (k = 0; k < SAVESTATE_SLOTS; k++) {
-		if (!(GetAsyncKeyState(VK_F5 + k) & 1))
+		int want_load;
+
+		/* Hotkey or soak, but one body below either way. A separate soak
+		 * call site would have to repeat ledger_register, the generation
+		 * bump, ledger_mark and the retain flush, and any one of those
+		 * missed is the retain-and-reap double free. */
+		if (savestate_key_edge(VK_F5 + k))
+			want_load = savestate_key_held(VK_SHIFT);
+		else if (k == 0 && soak_act != SS_SOAK_NOTHING)
+			want_load = (soak_act == SS_SOAK_LOAD) ? 1 : 0;
+		else
 			continue;
 		ledger_register();
-		if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+		if (want_load) {
 			if (savestate_load(k)) {
 				ledger_reap();
 				d11_log("savestate restored slot %d in %.1f ms", k,
@@ -6329,19 +6527,79 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	/* F7 takes a heap census. Separate key because its whole value is being
 	 * usable without saving anything: press it before a scene transition and
 	 * again after, and the log says what the transition did to the heap. */
-	if (GetAsyncKeyState(VK_F7) & 1) {
-		savestate_census();
-		/* Reported next to the census because retiring objects trades memory
-		 * for the absence of a dangling pointer, and the trade is only
-		 * defensible while the number stays small. */
-		d11_log("heap census taken | retired objects: %ld holding %.2f MB", (long)g_retired_n,
-			(double)g_retired_bytes / (1024.0 * 1024.0));
-		res_census();
+	/* F11 marks the player position, shift-F11 puts it back. Deliberately not
+	 * wired through the slot loop above: this writes eight bytes and needs
+	 * none of the ledger work a real savestate does. */
+	if (savestate_key_edge(VK_F11)) {
+		if (savestate_key_held(VK_SHIFT))
+			savestate_pos_restore();
+		else
+			savestate_pos_mark();
 	}
-	/* Arm here, act at the top of the next frame, so the census covers a
-	 * whole frame from its first draw rather than joining one midway. */
-	if (GetAsyncKeyState(VK_F9) & 1)
-		InterlockedExchange(&g_census_arm, 1);
+	/* Shift+F7 writes the game's decrypted image out for Ghidra. On the
+	 * diagnostics key because that is what it is, and behind shift because the
+	 * census is the thing you want ninety-nine times out of a hundred. */
+	if (savestate_key_edge(VK_F7)) {
+		if (savestate_key_held(VK_SHIFT)) {
+			d11_log("dump: writing the game's image out as it exists in "
+				"memory");
+			if (!savestate_dump_image())
+				d11_log("dump: FAILED - see the savestate log for why");
+		} else {
+			savestate_chain_probe();
+			savestate_object_report();
+			savestate_probe_census();
+			savestate_census();
+			/* Reported next to the census because retiring objects trades
+			 * memory for the absence of a dangling pointer, and the trade
+			 * is only defensible while the number stays small. */
+			d11_log("heap census taken | retired objects: %ld holding %.2f MB",
+				(long)g_retired_n,
+				(double)g_retired_bytes / (1024.0 * 1024.0));
+			res_census();
+		}
+	}
+	/* Shift+F9 parks the process: every thread held still for a while with no
+	 * memory read or written, then let go. It is the control for every restore
+	 * failure we have, because a restore freezes, copies and writes back, and
+	 * only the last two have ever been varied. Length comes from
+	 * D3D9SW_PARK_MS so the same key can ask a harder question.
+	 *
+	 * This was F10 first and never once fired. F10 is a Windows system key:
+	 * DefWindowProc takes WM_SYSKEYDOWN as menu activation and the window stops
+	 * pumping frames until the key comes back up. Every hotkey here is read
+	 * inside Present, so a key that suspends presenting can never be seen -
+	 * the poll next runs after the release and the edge has already gone.
+	 *
+	 * Sharing F9 with the census, on the same shift convention F5 already uses
+	 * for load, rather than picking another bare function key the game might
+	 * want for itself. */
+	if (savestate_key_edge(VK_F9)) {
+		if (savestate_key_held(VK_SHIFT)) {
+			char v[16];
+			unsigned n = savestate_getenv("D3D9SW_PARK_MS", v, sizeof(v));
+			int ms = 0;
+			unsigned i;
+
+			for (i = 0; i < n && v[i] >= '0' && v[i] <= '9'; i++)
+				ms = ms * 10 + (v[i] - '0');
+			/* Announced from both logs. The savestate log is written
+			 * through a handle that does not exist until the first save,
+			 * so a park taken before one would otherwise leave no trace
+			 * anywhere and read as a key that never fired. */
+			d11_log("park: requested, %d ms", ms ? ms : 1000);
+			if (savestate_park(ms ? ms : 1000))
+				d11_log("park: returned, the game is running again");
+			else
+				d11_log("park: REFUSED - the savestate engine could not "
+					"bring up its control block, so nothing was held");
+		} else {
+			/* Arm here, act at the top of the next frame, so the census
+			 * covers a whole frame from its first draw rather than
+			 * joining one midway. */
+			InterlockedExchange(&g_census_arm, 1);
+		}
+	}
 	if (g_census_on) {
 		d11_log("==== end of frame census: %u draw(s) ====", g_census_seq);
 		g_census_on = 0;
@@ -6383,6 +6641,7 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	 * how fast the rasteriser can actually go. */
 	if (sync && vsync_on())
 		present_wait(s->hwnd, sync);
+	pace_probe(s->hwnd, sync, flags);
 	perf_tick();
 	return S_OK;
 }
@@ -7906,10 +8165,32 @@ static HRESULT WINAPI Ctx_Map(ID3D11DeviceContext1 *this, ID3D11Resource *res, U
 	mapped->RowPitch = r->kind ? r->row_pitch : r->byte_width;
 	mapped->DepthPitch = r->cpu_size;
 	map_track(r->cpu, r->cpu_size, r->id, (int)r->bind, r->kind);
-	if (r->kind == 1)
+	if (r->kind == 1) {
+		/* The readback question, answered permanently rather than under a
+		 * trace flag that costs more than the rasterising it describes.
+		 *
+		 * A staging texture with CPU read access, mapped, is the game
+		 * reading back what was drawn - and that is the one thing that
+		 * would stop the GPU from ever being a disposable cache. It is also
+		 * broken today: rasterising writes the render target's pixels
+		 * plane, every copy and Map path reads the cpu plane, and nothing
+		 * encodes one into the other, so a readback of rendered output
+		 * returns a plane that was never written. Black is what that looks
+		 * like on screen. */
+		if (r->usage == D3D11_USAGE_STAGING &&
+		    (r->cpu_access & D3D11_CPU_ACCESS_READ)) {
+			static long seen;
+
+			if (InterlockedIncrement(&seen) <= 8)
+				d11_log("READBACK: the game mapped staging texture #%d "
+					"%ux%u for READ (type=%u). This is a real "
+					"readback of rendered output, and the cpu plane "
+					"it reads was never written by the rasteriser",
+					r->id, r->width, r->height, type);
+		}
 		d11_trace("Map tex #%d %ux%u fmt=%d type=%u flags=%x", r->id, r->width, r->height,
 			(int)r->format, type, flags);
-	else if (r->bind & D3D11_BIND_CONSTANT_BUFFER) {
+	} else if (r->bind & D3D11_BIND_CONSTANT_BUFFER) {
 		if (InterlockedIncrement(&g_cb_maps) <= 20)
 			d11_trace("Map cb bytes=%u type=%u", r->byte_width, type);
 	} else if (InterlockedIncrement(&g_buf_maps) <= 20)
@@ -8071,6 +8352,21 @@ static void WINAPI Ctx_CopyResource(ID3D11DeviceContext1 *this, ID3D11Resource *
 	swrast_flush_if_pending(s->pixels);
 	if (d->is_bb)
 		g_bb_writes += d->width * d->height;
+	/* The other half of the readback question: copying INTO a staging
+	 * surface is how the data gets there before it is mapped. Naming the
+	 * source says whether it is the backbuffer or a render target, which is
+	 * what decides whether the GPU could ever be non-authoritative here. */
+	if (d->usage == D3D11_USAGE_STAGING && (d->cpu_access & D3D11_CPU_ACCESS_READ)) {
+		static long seen;
+
+		if (InterlockedIncrement(&seen) <= 8)
+			d11_log("READBACK: CopyResource into staging #%d %ux%u from #%d "
+				"%ux%u (backbuffer=%d, render target=%d). The source's "
+				"rendered pixels live in its pixels plane and this copies "
+				"its cpu plane, which nothing writes",
+				d->id, d->width, d->height, s->id, s->width, s->height,
+				s->is_bb, (s->bind & D3D11_BIND_RENDER_TARGET) ? 1 : 0);
+	}
 	if (d->kind == 1 && s->kind == 1) {
 		d11_trace("CopyResource #%d %ux%u fmt=%d bb=%d <- #%d %ux%u fmt=%d", d->id, d->width,
 			d->height, (int)d->format, d->is_bb, s->id, s->width, s->height,

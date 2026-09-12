@@ -98,6 +98,74 @@ typedef struct Node {
 	unsigned payload[10];
 } Node;
 
+/* ---------------------------------------------------------------- heap zoo
+ *
+ * One heap was never going to answer the question. The harness built a single
+ * growable heap, the engine enumerated it as one 0.06 MB segment when it holds
+ * 64 MB, by-block never engaged, and there was no way to tell whether that was
+ * the engine failing to see heaps or this particular heap being unusual. A
+ * single sample cannot distinguish a broken instrument from a strange specimen.
+ *
+ * So: a spread of shapes, each differing from the others in one axis the
+ * allocator is known to care about - whether the heap can grow, how much is
+ * committed at create time, whether the request is small enough for the front
+ * end or large enough to bypass the segment machinery entirely, and whether the
+ * free lists are holed. Most of these will behave identically. The ones that do
+ * not are the measurement.
+ *
+ * None of them have to work. Several are expected to be unrecoverable, and the
+ * cross heap exists specifically to manufacture the ambiguity that the veto
+ * cannot resolve. Breaking on purpose is cheaper than waiting for the game to
+ * break by accident, and it comes with a known answer. */
+#define ZOO_N 9
+
+typedef struct {
+	const char *name;
+	const char *why;
+	DWORD opts;
+	SIZE_T initial, maximum;
+	SIZE_T item;
+	int count;
+	int free_every; /* 0 keeps everything, N frees every Nth after filling */
+	int cross;	/* plant a pointer into the heap built before this one */
+} HeapSpec;
+
+static const HeapSpec g_spec[ZOO_N] = {
+	{ "growable", "default heap, 16 KB items - the shape already under test",
+	  0, 0, 0, 16384, 4096, 0, 0 },
+	{ "fixed", "non-growable, whole 32 MB reserved at create time",
+	  0, 32u << 20, 32u << 20, 16384, 1800, 0, 0 },
+	{ "precommit", "growable, but 16 MB committed before the first request",
+	  0, 16u << 20, 0, 16384, 4096, 0, 0 },
+	{ "tiny", "48-byte items, the size that drives the front end",
+	  0, 0, 0, 48, 65536, 0, 0 },
+	{ "huge", "1 MB items, over the threshold that bypasses segments",
+	  0, 0, 0, 1u << 20, 32, 0, 0 },
+	{ "noserial", "HEAP_NO_SERIALIZE, so there is no lock to contend with",
+	  HEAP_NO_SERIALIZE, 0, 0, 4096, 4096, 0, 0 },
+	{ "exec", "executable pages, a protection the region filter must classify",
+	  HEAP_CREATE_ENABLE_EXECUTE, 0, 0, 4096, 2048, 0, 0 },
+	{ "frag", "every third item freed, so the free lists are holes",
+	  0, 0, 0, 512, 32768, 3, 0 },
+	{ "cross", "items point into the heap before it - the aliasing case",
+	  0, 0, 0, 256, 8192, 0, 1 },
+};
+
+/* What the harness could measure about one of them. */
+typedef struct {
+	HANDLE h;
+	int made;
+	int live;	  /* items still allocated after free_every */
+	int regions;	  /* distinct allocation bases the live items sit in */
+	int seg_signed;	  /* ... carrying the signature the engine looks for */
+	int seg_owned;	  /* ... and naming this heap as the owner */
+	int seg_foreign;  /* ... signed, but naming some other heap */
+	double res_mb;	  /* reserved across those bases */
+	double com_mb;	  /* committed across those bases */
+	int walk_regions; /* PROCESS_HEAP_REGION entries HeapWalk admits to */
+	double walk_mb;
+} Zoo;
+
 /* ------------------------------------------------------- held bookkeeping
  *
  * Excluded from the snapshot, because a counter that rewinds cannot count
@@ -144,6 +212,10 @@ typedef struct {
 	/* heap identity, inherited from ss_harness scenario 3 */
 	int heap_bad;
 
+	/* the zoo, held rather than rewound so a shape measured before the first
+	 * save can be compared against the same shape after the last one */
+	Zoo zoo[ZOO_N];
+
 	/* fingerprints of the immutable half of every node, taken before the save.
 	 * Only magic/serial/self/fn are covered: the payload is written by worker
 	 * threads continuously, so including it would report tearing rather than
@@ -158,6 +230,40 @@ static Held *g_held;
  * the game's side of every split under test. */
 static Node **g_nodes;	   /* on the process heap, shared with Windows */
 static void **g_bulk;	   /* on a private heap, standing in for the game's own */
+static void **g_zoo[ZOO_N]; /* the zoo's item tables, rewound like the rest */
+
+/* What the zoo puts in its blocks, from RR_ZOO_FILL.
+ *
+ * The first run filled every block with one repeated byte and the engine handed
+ * nine harness-owned heaps to win32u.dll. That is either the filler doing it or
+ * a coincidence, and one fill pattern cannot tell the two apart. Zero fill is
+ * the clean falsifier: 00000000 is not inside any module, so if content is what
+ * drives the vote the votes must go to zero. Random fill is the other side -
+ * words scattered over the whole range will still land in modules sometimes,
+ * so it should vote diffusely rather than not at all. */
+enum { FILL_CONST, FILL_ZERO, FILL_RAND };
+static int g_fill = FILL_CONST;
+static const char *g_fill_name = "const";
+
+static void fill_block(unsigned char *p, SIZE_T bytes, unsigned char seed)
+{
+	static unsigned st = 0x1234567u;
+
+	if (g_fill == FILL_ZERO) {
+		memset(p, 0, bytes);
+	} else if (g_fill == FILL_RAND) {
+		SIZE_T i;
+
+		for (i = 0; i < bytes; i++) {
+			st ^= st << 13;
+			st ^= st >> 17;
+			st ^= st << 5;
+			p[i] = (unsigned char)st;
+		}
+	} else {
+		memset(p, seed, bytes);
+	}
+}
 static DWORD g_write;	   /* the ring write cursor the hardware cursor outruns */
 static double g_phase;
 static unsigned g_serial_next;
@@ -453,7 +559,7 @@ static int oracle_heaps(void)
 	HANDLE list[256];
 	HANDLE ph = GetProcessHeap();
 	DWORD n, i;
-	int bad = 0, seen_ph = 0, seen_bulk = 0;
+	int bad = 0, seen_ph = 0, seen_bulk = 0, k;
 	void *p;
 
 	n = GetProcessHeaps(256, list);
@@ -475,6 +581,33 @@ static int oracle_heaps(void)
 		       "list - Windows has forgotten it\n",
 		       (void *)g_held->bulk_heap);
 		bad++;
+	}
+	/* Every zoo heap, same two questions: does Windows still list it, and does
+	 * it still believe its own bookkeeping. Nine shapes disagreeing is a far
+	 * more useful signal than one shape failing, because the shapes differ on
+	 * exactly the axes the allocator cares about. HeapValidate is skipped for
+	 * the unserialised heap - it would take a lock that heap does not have. */
+	for (k = 0; k < ZOO_N; k++) {
+		HANDLE zh = g_held->zoo[k].h;
+		int listed = 0;
+
+		if (!zh)
+			continue;
+		for (i = 0; i < n; i++)
+			if (list[i] == zh)
+				listed = 1;
+		if (!listed) {
+			printf("  ORACLE heaps: zoo heap %s (%p) is NOT in the process "
+			       "heap list - Windows has forgotten it\n",
+			       g_spec[k].name, (void *)zh);
+			bad++;
+			continue;
+		}
+		if (!(g_spec[k].opts & HEAP_NO_SERIALIZE) && !HeapValidate(zh, 0, NULL)) {
+			printf("  ORACLE heaps: zoo heap %s (%p) fails HeapValidate\n",
+			       g_spec[k].name, (void *)zh);
+			bad++;
+		}
 	}
 	if (seen_ph && !HeapValidate(ph, 0, NULL)) {
 		printf("  ORACLE heaps: HeapValidate says the process heap is "
@@ -710,6 +843,256 @@ static void report_shape(const char *tag)
 	}
 }
 
+/* --------------------------------------------------------------- zoo build */
+
+/* segment_owner from savestate.c, copied rather than called.
+ *
+ * Copied because the point is to check the engine's test from outside it. If
+ * this called the engine's own function, a wrong test would agree with itself
+ * and the report would read clean. The two are expected to drift; when they do,
+ * the disagreement is the finding, so keep the offsets literal and obvious. */
+static void *seg_probe(uintptr_t base, DWORD protect)
+{
+	if (protect & (PAGE_NOACCESS | PAGE_GUARD))
+		return NULL;
+	if (*(const unsigned *)(base + 0x08) != 0xFFEEFFEEu)
+		return NULL;
+	return *(void *const *)(base + 0x18);
+}
+
+/* Distinct allocation bases under a set of pointers.
+ *
+ * The engine walks the address space and tests every region whose base is its
+ * own allocation base. Going the other way - from our allocations out to the
+ * regions holding them - answers a question the engine's walk cannot: not how
+ * many segments exist, but how many of the ones our memory actually lives in
+ * the engine would recognise. Those are different numbers, and the gap between
+ * them is the whole problem. */
+static int distinct_bases(void **items, int n, uintptr_t *out, int cap)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	int found = 0, i, j;
+
+	for (i = 0; i < n; i++) {
+		uintptr_t b;
+
+		if (!items[i] || VirtualQuery(items[i], &mbi, sizeof(mbi)) != sizeof(mbi))
+			continue;
+		b = (uintptr_t)mbi.AllocationBase;
+		for (j = 0; j < found; j++)
+			if (out[j] == b)
+				break;
+		if (j == found && found < cap)
+			out[found++] = b;
+	}
+	return found;
+}
+
+static void zoo_measure(int k)
+{
+	static uintptr_t bases[8192];
+	Zoo *z = &g_held->zoo[k];
+	MEMORY_BASIC_INFORMATION mbi;
+	PROCESS_HEAP_ENTRY e;
+	int nb, i;
+
+	z->regions = z->seg_signed = z->seg_owned = z->seg_foreign = 0;
+	z->res_mb = z->com_mb = 0.0;
+	z->walk_regions = 0;
+	z->walk_mb = 0.0;
+	if (!z->h || !g_zoo[k])
+		return;
+
+	nb = distinct_bases(g_zoo[k], g_spec[k].count, bases,
+			    (int)(sizeof(bases) / sizeof(bases[0])));
+	z->regions = nb;
+	for (i = 0; i < nb; i++) {
+		void *owner;
+
+		if (VirtualQuery((LPCVOID)bases[i], &mbi, sizeof(mbi)) != sizeof(mbi))
+			continue;
+		z->res_mb += (double)mbi.RegionSize / (1024.0 * 1024.0);
+		if (mbi.State != MEM_COMMIT || mbi.Type != MEM_PRIVATE)
+			continue;
+		z->com_mb += (double)mbi.RegionSize / (1024.0 * 1024.0);
+		owner = seg_probe(bases[i], mbi.Protect);
+		if (!owner)
+			continue;
+		z->seg_signed++;
+		if (owner == (void *)z->h)
+			z->seg_owned++;
+		else
+			z->seg_foreign++;
+	}
+
+	/* Ground truth, from the allocator rather than from pattern matching.
+	 * savestate.c cannot do this - HeapWalk takes the heap lock and the engine
+	 * runs with every thread suspended, one of which may be holding it. The
+	 * harness is not suspended here, so it can ask directly and hand the engine
+	 * a number to be wrong against. */
+	memset(&e, 0, sizeof(e));
+	while (HeapWalk(z->h, &e)) {
+		if (e.wFlags & PROCESS_HEAP_REGION) {
+			z->walk_regions++;
+			z->walk_mb += (double)(e.Region.dwCommittedSize) /
+				      (1024.0 * 1024.0);
+		}
+	}
+}
+
+static int zoo_build(void)
+{
+	HANDLE ph = GetProcessHeap();
+	int k, i;
+
+	for (k = 0; k < ZOO_N; k++) {
+		const HeapSpec *s = &g_spec[k];
+		Zoo *z = &g_held->zoo[k];
+
+		z->h = HeapCreate(s->opts, s->initial, s->maximum);
+		if (!z->h) {
+			printf("  zoo: %s did not create (%lu) - carrying on, a shape "
+			       "the system refuses is also a result\n",
+			       s->name, (unsigned long)GetLastError());
+			continue;
+		}
+		z->made = 1;
+		g_zoo[k] = (void **)HeapAlloc(ph, 0, s->count * sizeof(void *));
+		if (!g_zoo[k])
+			return 0;
+		memset(g_zoo[k], 0, s->count * sizeof(void *));
+
+		for (i = 0; i < s->count; i++) {
+			/* HEAP_NO_SERIALIZE on the flags too, or the allocation
+			 * re-takes the lock the heap was created without. */
+			g_zoo[k][i] = HeapAlloc(z->h, s->opts & HEAP_NO_SERIALIZE,
+						s->item);
+			if (!g_zoo[k][i])
+				break;
+			fill_block((unsigned char *)g_zoo[k][i], s->item,
+				   (unsigned char)(i + k));
+		}
+		z->live = i;
+
+		/* Hole the free lists after filling, not during, so the holes land
+		 * between live blocks instead of being coalesced back into the tail. */
+		if (s->free_every > 1) {
+			for (i = 0; i < z->live; i += s->free_every) {
+				HeapFree(z->h, s->opts & HEAP_NO_SERIALIZE, g_zoo[k][i]);
+				g_zoo[k][i] = NULL;
+			}
+		}
+
+		/* The aliasing generator. Items here hold interior pointers into the
+		 * heap built before this one, which is exactly the input that makes
+		 * the reachability closure unable to say who owns what: one shared
+		 * hub and everything downstream of it is contested. */
+		if (s->cross && k > 0 && g_zoo[k - 1]) {
+			int prev = g_spec[k - 1].count;
+
+			for (i = 0; i < z->live; i++) {
+				void *t = g_zoo[k - 1][(i * 7) % prev];
+
+				if (g_zoo[k][i] && t)
+					*(void **)g_zoo[k][i] = (char *)t + 16;
+			}
+		}
+	}
+	return 1;
+}
+
+/* The engine's own walk, run from outside it.
+ *
+ * Counts every region in the process the engine would call a heap segment, and
+ * how much those add up to. Printed next to the per-heap table so the two can
+ * be compared: if the zoo holds nine heaps and this finds three segments, the
+ * shortfall is not a property of any one shape. */
+static void space_report(void)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	uintptr_t addr = 0;
+	int regions = 0, segs = 0;
+	double priv_mb = 0.0, seg_mb = 0.0, mapped_mb = 0.0;
+
+	while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+		uintptr_t base = (uintptr_t)mbi.BaseAddress;
+		uintptr_t next = base + mbi.RegionSize;
+		double mb = (double)mbi.RegionSize / (1024.0 * 1024.0);
+
+		if (next <= addr)
+			break;
+		addr = next;
+		if (mbi.State != MEM_COMMIT)
+			continue;
+		if (mbi.Type == MEM_MAPPED) {
+			mapped_mb += mb;
+			continue;
+		}
+		if (mbi.Type != MEM_PRIVATE)
+			continue;
+		regions++;
+		priv_mb += mb;
+		if ((uintptr_t)mbi.AllocationBase != base)
+			continue;
+		if (seg_probe(base, mbi.Protect)) {
+			segs++;
+			seg_mb += mb;
+		}
+	}
+	printf("  zoo space: %d committed private region(s), %.2f MB; %d of them "
+	       "carry the heap signature, %.2f MB\n",
+	       regions, priv_mb, segs, seg_mb);
+	printf("             %.2f MB committed MEM_MAPPED, which region_wanted "
+	       "drops on the floor whatever the signature says\n",
+	       mapped_mb);
+}
+
+static void zoo_report(const char *tag)
+{
+	int k;
+	int t_live = 0, t_reg = 0, t_sig = 0, t_own = 0, t_for = 0, t_walk = 0;
+	double t_com = 0.0, t_walk_mb = 0.0;
+
+	printf("  zoo (%s, %s fill): does the engine's segment test find these "
+	       "heaps?\n",
+	       tag, g_fill_name);
+	printf("    %-10s %7s %6s %6s %6s %8s %6s %9s\n", "heap", "live",
+	       "region", "signed", "owned", "commit", "walk", "walk MB");
+	for (k = 0; k < ZOO_N; k++) {
+		Zoo *z = &g_held->zoo[k];
+
+		if (!z->made) {
+			printf("    %-10s   not created\n", g_spec[k].name);
+			continue;
+		}
+		zoo_measure(k);
+		printf("    %-10s %7d %6d %6d %6d %7.2fM %6d %8.2fM%s\n",
+		       g_spec[k].name, z->live, z->regions, z->seg_signed,
+		       z->seg_owned, z->com_mb, z->walk_regions, z->walk_mb,
+		       z->seg_owned == 0 ? "  <<< invisible" : "");
+		t_live += z->live;
+		t_reg += z->regions;
+		t_sig += z->seg_signed;
+		t_own += z->seg_owned;
+		t_for += z->seg_foreign;
+		t_com += z->com_mb;
+		t_walk += z->walk_regions;
+		t_walk_mb += z->walk_mb;
+	}
+	printf("    %-10s %7d %6d %6d %6d %7.2fM %6d %8.2fM\n", "total", t_live,
+	       t_reg, t_sig, t_own, t_com, t_walk, t_walk_mb);
+	if (t_for)
+		printf("    %d signed region(s) named a heap other than the one "
+		       "holding the memory\n",
+		       t_for);
+	printf("    HeapWalk admits %d region(s) across the zoo; the engine's "
+	       "signature test finds %d of them\n",
+	       t_walk, t_own);
+	for (k = 0; k < ZOO_N; k++)
+		printf("      %-10s %s\n", g_spec[k].name, g_spec[k].why);
+	space_report();
+}
+
 /* ------------------------------------------------------------------- setup */
 
 static int build_world(void)
@@ -748,6 +1131,9 @@ static int build_world(void)
 			return 0;
 		memset(g_bulk[i], (unsigned char)i, BULK_SZ);
 	}
+
+	if (!zoo_build())
+		return 0;
 
 	g_held->map = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
 					VIEW_BYTES, NULL);
@@ -841,11 +1227,27 @@ int main(int argc, char **argv)
 	savestate_exclude(g_held, sizeof(Held));
 	g_held->call_anyway = call_anyway;
 
+	{
+		char fv[16];
+
+		if (GetEnvironmentVariableA("RR_ZOO_FILL", fv, sizeof(fv))) {
+			if (!lstrcmpiA(fv, "zero")) {
+				g_fill = FILL_ZERO;
+				g_fill_name = "zero";
+			} else if (!lstrcmpiA(fv, "rand")) {
+				g_fill = FILL_RAND;
+				g_fill_name = "rand";
+			}
+		}
+		printf("zoo fill: %s\n", g_fill_name);
+	}
+
 	if (!build_world()) {
 		printf("could not build the world - out of memory?\n");
 		return 1;
 	}
 	report_shape("after build_world");
+	zoo_report("after build_world");
 
 	/* Load dsound BEFORE the warmup, then warm up, then create anything.
 	 *
@@ -958,6 +1360,10 @@ int main(int argc, char **argv)
 
 	g_held->stop = 1;
 	Sleep(300);
+
+	/* Measured again at the end, because the interesting failure is a heap that
+	 * enumerated before the first save and does not after the last restore. */
+	zoo_report("after the last restore");
 
 	printf("\n================ result ================\n");
 	printf("  restores               %d\n", g_held->restores_done);
