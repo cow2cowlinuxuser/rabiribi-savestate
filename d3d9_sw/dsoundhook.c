@@ -1185,9 +1185,34 @@ void dsh_play(void)
 void dsh_seek(void)
 {
 	int i, moved = 0;
+	char v[8];
+	unsigned got;
 
 	if (!g_ready)
 		return;
+	/* Only coherent while DirectSound is going back with us, and it no longer
+	 * is.
+	 *
+	 * The restore now leaves DirectSound's own objects in the present - close
+	 * to eight thousand of them, identified by the dsound.dll vtables at their
+	 * heads - because rewinding them was killing the process outright. That was
+	 * the right call and it makes this one wrong: winding a cursor back to a
+	 * saved position, on an object whose every other field is present-time,
+	 * points the mixer at a place in the ring that does not hold what the
+	 * position implies. Which is white noise, and is what appeared in the same
+	 * session the object veto did.
+	 *
+	 * Either DirectSound goes back entirely or it stays entirely, and it cannot
+	 * go back, because its threads never stopped. So it stays, cursors
+	 * included. D3D9SW_DSSEEK=1 restores the old behaviour for comparison. */
+	got = savestate_getenv("D3D9SW_DSSEEK", v, sizeof(v));
+	if (!(got > 0 && got < sizeof(v) && v[0] == '1')) {
+		ss_log("dsound: cursors left where they are - DirectSound's objects "
+		       "stay in the present now, so winding only their play positions "
+		       "back would put the mixer somewhere the ring does not agree "
+		       "with\n");
+		return;
+	}
 	EnterCriticalSection(&g_cs);
 	for (i = 0; i < g_nbuf; i++) {
 		void **v;
