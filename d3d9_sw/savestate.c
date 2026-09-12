@@ -3703,6 +3703,20 @@ enum { REQ_NONE = 0, REQ_SAVE, REQ_LOAD };
 /* One allocation, excluded from the snapshot, holding every mutable thing this
  * file needs during an operation. Fixed-size arrays rather than heap so that
  * nothing allocates while the process is suspended. */
+/* Reasons a saved block goes unwritten, in the order the restore tests them.
+ * WIT_UNSEEN is the absence of a verdict: the allocation never reached the loop
+ * at all, which means the block map did not match it. */
+enum {
+	WIT_UNSEEN,
+	WIT_WRITTEN,
+	WIT_HOMELESS,
+	WIT_HELD,
+	WIT_VTAB,
+	WIT_NOTOURS,
+	WIT_VETOED,
+	WIT_COPYFAIL
+};
+
 typedef struct Control {
 	volatile LONG request;
 	volatile LONG busy;
@@ -3782,6 +3796,14 @@ typedef struct Control {
 	int wit_valid;
 	int wit_reg;
 	uintptr_t wit_blk;
+	/* See g_wit_why for what each of these reads as.
+	 *
+	 * Which rule decided her block, rather than only whether one did. "Not in
+	 * the block map" covered five different outcomes with one sentence, and
+	 * they call for opposite fixes: a block nobody enumerated is an
+	 * enumeration problem, a block the ownership closure declined is a filter
+	 * problem, and a block a running thread was pointing at is neither. */
+	int wit_why;
 	/* Carried across the restore by hand, for state the snapshot does not
 	 * cover. Kept apart from pos_buf so that F11 and F5 cannot overwrite
 	 * each other's mark. */
@@ -12886,9 +12908,16 @@ static int do_load(int slotno)
 				uintptr_t b = g_blk_save[bi].base;
 				unsigned long n = g_blk_save[bi].size;
 				int r = blk_region_of(s, b, n);
+				/* The one allocation whose contents we can check
+				 * against the game's own screen. Every verdict below
+				 * is recorded for it. */
+				int wit = g_ctl->wit_valid && g_ctl->wit_ent >= b &&
+					  g_ctl->wit_ent < b + n;
 
 				if (r < 0) {
 					homeless++;
+					if (wit)
+						g_ctl->wit_why = WIT_HOMELESS;
 					continue;
 				}
 				/* Ahead of the ownership tests, because this one is not
@@ -12908,6 +12937,8 @@ static int do_load(int slotno)
 					}
 					heldveto++;
 					heldbytes += n;
+					if (wit)
+						g_ctl->wit_why = WIT_HELD;
 					continue;
 				}
 				/* An object whose vtable belongs to somebody else is
@@ -12943,6 +12974,8 @@ static int do_load(int slotno)
 						g_vtab_bymod[vtabmod]++;
 					vtabveto++;
 					vtabbytes += n;
+					if (wit)
+						g_ctl->wit_why = WIT_VTAB;
 					continue;
 				}
 				/* Only the shared heap needs vetting; the game's own
@@ -12954,6 +12987,9 @@ static int do_load(int slotno)
 						 * moved. */
 						if (!g_blk_own || !g_blk_own[bi]) {
 							not_ours++;
+							if (wit)
+								g_ctl->wit_why =
+									WIT_NOTOURS;
 							continue;
 						}
 						/* Deny wins. Reaching the game does not
@@ -12962,6 +12998,9 @@ static int do_load(int slotno)
 						 * in a dead stack frame reaches plenty. */
 						if (g_blk_sys && g_blk_sys[bi]) {
 							vetoed++;
+							if (wit)
+								g_ctl->wit_why =
+									WIT_VETOED;
 							continue;
 						}
 					} else {
@@ -12969,6 +13008,9 @@ static int do_load(int slotno)
 
 						if (own < 0 || (filter >= 2 && own == 0)) {
 							not_ours++;
+							if (wit)
+								g_ctl->wit_why =
+									WIT_NOTOURS;
 							continue;
 						}
 					}
@@ -12998,8 +13040,11 @@ static int do_load(int slotno)
 						recycled++;
 						recycled_bytes += n;
 					}
-					if (!win_copy(&wb, off, (void *)b, n, 0))
+					if (!win_copy(&wb, off, (void *)b, n, 0)) {
+						if (wit)
+							g_ctl->wit_why = WIT_COPYFAIL;
 						continue;
+					}
 					wrote++;
 					done += n;
 					/* Did the one allocation we can check by hand
@@ -13007,9 +13052,10 @@ static int do_load(int slotno)
 					 * address, so noting when its block is written
 					 * turns "she did not come back" from a symptom
 					 * into a yes-or-no about the block map. */
-					if (g_ctl->wit_valid && g_ctl->wit_ent &&
-					    g_ctl->wit_ent >= b && g_ctl->wit_ent < b + n)
+					if (wit && g_ctl->wit_ent) {
 						g_ctl->wit_blk = b;
+						g_ctl->wit_why = WIT_WRITTEN;
+					}
 					if (g_blk_wrote)
 						g_blk_wrote[bi] = 1;
 					if (vmode_b) {
@@ -14407,6 +14453,25 @@ static void boundary_census(const char *when)
  * and that separation is the whole question: state the game rebuilds at a load
  * is state we can decline to carry, state that only play changes is state a
  * savestate has to carry. */
+static const char *const g_wit_why[] = {
+	"her allocation never matched the block map at all - same address and "
+		"size was not found at restore time, so no rule ever got to vote "
+		"on it",
+	"written",
+	"her block lands in no captured region, so there was nothing to write "
+		"from",
+	"a thread that keeps running was holding a pointer into her block, so it "
+		"was left in the present on purpose (D3D9SW_HELDVETO=0 to stop "
+		"that)",
+	"her block's first word points into a module we hold in the present, so "
+		"it was read as somebody else's object (D3D9SW_VTABVETO)",
+	"the ownership closure never reached her block from anything we capture, "
+		"so it counts as nobody's (D3D9SW_BLKOWNER)",
+	"the ownership closure reached her block and so did Windows, and deny "
+		"wins (D3D9SW_BLKOWNER)",
+	"the copy out of the snapshot failed"
+};
+
 static void witness_save(Slot *s)
 {
 	uintptr_t ent;
@@ -14424,6 +14489,7 @@ static void witness_save(Slot *s)
 			break;
 		}
 	g_ctl->wit_blk = 0;
+	g_ctl->wit_why = WIT_UNSEEN;
 	g_ctl->wit_ent = ent;
 	g_ctl->wit_x = *(const float *)(ent + RR_X_OFF);
 	g_ctl->wit_y = *(const float *)(ent + RR_Y_OFF);
@@ -14729,12 +14795,21 @@ static void witness_load(void)
 	x = *(const float *)(ent + RR_X_OFF);
 	y = *(const float *)(ent + RR_Y_OFF);
 	/* Only meaningful on the block path; wholesale writes everything. */
-	if (g_blk_ready)
-		ss_log("  witness: her block was %s\n",
-		       g_ctl->wit_blk
-			       ? "MATCHED and written by the block map"
-			       : "NOT in the block map, so nothing wrote her - this "
-				 "is the gap, not the copy");
+	if (g_blk_ready) {
+		int why = g_ctl->wit_why;
+
+		if (why < 0 || why >= (int)(sizeof(g_wit_why) / sizeof(g_wit_why[0])))
+			why = WIT_UNSEEN;
+		if (why == WIT_WRITTEN)
+			ss_log("  witness: her block was MATCHED and written by the "
+			       "block map\n");
+		else
+			ss_log("  witness: her block went unwritten - %s. Everything "
+			       "else in the entity pool turned away by the same rule "
+			       "went with it, which is why counters and projectiles "
+			       "do not travel while the carried span does\n",
+			       g_wit_why[why]);
+	}
 	if (ent == g_ctl->wit_ent && x == g_ctl->wit_x && y == g_ctl->wit_y) {
 		ss_log("  witness: player IS back at x=%d y=%d, world %u - the "
 		       "restore reached her\n",
