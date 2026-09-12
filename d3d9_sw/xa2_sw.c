@@ -36,7 +36,11 @@
  * PCM the game submits is never even read. The question this answers is
  * whether the game survives a restore with its audio entirely inside memory we
  * own, and putting a mixer thread in before that is answered would reintroduce
- * the writer we are trying to prove is gone. */
+ * the writer we are trying to prove is gone.
+ *
+ * Execute-at-0 after CreateMasteringVoice is not a missing vtable slot here.
+ * DxLib delay-loads X3DAudioInitialize from the same xaudio2_9.dll that
+ * answered XAudio2Create; those extra names are exported from xa2_fwd.c. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mmreg.h>

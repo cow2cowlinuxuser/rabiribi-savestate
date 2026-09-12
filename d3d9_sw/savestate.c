@@ -10803,6 +10803,12 @@ static int do_save(int slotno)
 	       : g_decpatch < 0	 ? "given up on"
 				 : "still trying");
 	dsh_save();
+	/* Beside dsh_save, because these answer the same question for whichever
+	 * audio stand-in is serving. They were in savestate_object_report, which
+	 * this config gates off, so a whole working session produced no census at
+	 * all - and the census is the one piece of evidence the run was for. */
+	ds_sw_report();
+	xa2_sw_report();
 	/* Before suspend_all, because the point is to have nothing playing for the
 	 * whole window rather than merely for the copy. */
 	dsh_quiet();
@@ -14953,8 +14959,6 @@ void savestate_object_report(void)
 	int obj_heap = 0, obj_out = 0;
 
 	dsh_survey();
-	ds_sw_report(); /* silent unless the software DirectSound is the one answering */
-	xa2_sw_report(); /* likewise for the software XAudio2 */
 	if (g_ctl && !g_ctl->cap_n)
 		ss_log("objects: nothing saved yet, so there is no region list to "
 		       "check against - press F5 first or every object will read as "

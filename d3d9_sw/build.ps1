@@ -115,8 +115,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   & $zig cc @warn -target x86-windows-gnu -shared -o x86\dsound.dll dsound_fwd.c dsound.def
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  # Load-only probe. The -xaudio2 log names xaudio2_9.DLL (not _7). This DLL
-  # answers that name, writes xaudio2_probe.txt, and refuses XAudio2Create.
+  # Same-folder trampoline. The -xaudio2 log names xaudio2_9.DLL (not _7).
+  # Steam does not preload it, so the game folder wins. Forwards XAudio2Create
+  # into d3d11.dll and exports the rest of the real DLL's names so DxLib's
+  # delay-load of X3DAudioInitialize is not a jump to NULL.
   & $zig cc @warn -target x86-windows-gnu -shared -o x86\xaudio2_9.dll xa2_fwd.c xaudio2_9.def -luser32
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

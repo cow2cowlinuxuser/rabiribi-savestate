@@ -1,5 +1,12 @@
 LIBRARY xaudio2_9
 EXPORTS
-	XAudio2Create
-	CreateAudioReverb
-	CreateAudioVolumeMeter
+	XAudio2Create @1
+	CreateAudioReverb @2
+	CreateAudioVolumeMeter @3
+	CreateFX @4
+	X3DAudioCalculate @5
+	X3DAudioInitialize @6
+	CreateAudioReverbV2_8 @7
+	XAudio2CreateV2_9 @8
+	XAudio2CreateWithVersionInfo @9
+	XAudio2CreateWithSharedContexts @10
