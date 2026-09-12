@@ -6423,17 +6423,28 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 		else
 			savestate_pos_mark();
 	}
+	/* Shift+F7 writes the game's decrypted image out for Ghidra. On the
+	 * diagnostics key because that is what it is, and behind shift because the
+	 * census is the thing you want ninety-nine times out of a hundred. */
 	if (savestate_key_edge(VK_F7)) {
-		savestate_chain_probe();
-		savestate_object_report();
-		savestate_probe_census();
-		savestate_census();
-		/* Reported next to the census because retiring objects trades memory
-		 * for the absence of a dangling pointer, and the trade is only
-		 * defensible while the number stays small. */
-		d11_log("heap census taken | retired objects: %ld holding %.2f MB", (long)g_retired_n,
-			(double)g_retired_bytes / (1024.0 * 1024.0));
-		res_census();
+		if (savestate_key_held(VK_SHIFT)) {
+			d11_log("dump: writing the game's image out as it exists in "
+				"memory");
+			if (!savestate_dump_image())
+				d11_log("dump: FAILED - see the savestate log for why");
+		} else {
+			savestate_chain_probe();
+			savestate_object_report();
+			savestate_probe_census();
+			savestate_census();
+			/* Reported next to the census because retiring objects trades
+			 * memory for the absence of a dangling pointer, and the trade
+			 * is only defensible while the number stays small. */
+			d11_log("heap census taken | retired objects: %ld holding %.2f MB",
+				(long)g_retired_n,
+				(double)g_retired_bytes / (1024.0 * 1024.0));
+			res_census();
+		}
 	}
 	/* Shift+F9 parks the process: every thread held still for a while with no
 	 * memory read or written, then let go. It is the control for every restore

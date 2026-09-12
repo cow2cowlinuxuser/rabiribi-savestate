@@ -130,6 +130,10 @@ void savestate_chain_probe(void);
  * and writes back, and only the last two have ever been varied. */
 int savestate_park(int ms);
 
+/* Write the main module out as it exists in memory, for a disassembler. The
+ * game's .text is encrypted on disk behind a Steam stub; in here it is not. */
+int savestate_dump_image(void);
+
 void savestate_soak_arm(void);
 int savestate_soak_action(void);
 

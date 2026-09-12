@@ -10382,6 +10382,219 @@ int savestate_park(int ms)
 	return 1;
 }
 
+/* Write the game's own image out as it exists in memory, for a disassembler.
+ *
+ * rabiribi.exe ships with its .text encrypted behind a Steam .bind stub. The
+ * measurement is unambiguous: 3.7 MB of supposed x86 code at 8.00 bits of
+ * entropy per byte and not one `push ebp; mov ebp,esp` in the whole section,
+ * where a real image that size would have thousands. .rdata and .data are
+ * plaintext, which is why the string that named DxSound.cpp could be read off
+ * disk, but every function body a static tool shows is decryption noise.
+ *
+ * We are on the other side of that. The stub decrypts into memory and we are in
+ * the memory, so the only thing standing between us and a readable disassembly
+ * is writing the bytes down.
+ *
+ * Three fixups make the result loadable rather than merely present. The section
+ * headers get PointerToRawData set to VirtualAddress, because on disk a section
+ * is packed to FileAlignment and in memory it is spread to SectionAlignment, and
+ * a loader told otherwise reads every section from the wrong place. FileAlignment
+ * is raised to match SectionAlignment so that remains self-consistent. And
+ * ImageBase is rewritten to wherever ASLR actually put us, so that the absolute
+ * addresses baked into the code - which is all of them, this being a 32-bit image
+ * whose relocations were already applied - agree with where the disassembler
+ * thinks it is looking.
+ *
+ * The sidecar exists because a dumped IAT holds resolved addresses rather than
+ * names, so every call through it disassembles as an indirect jump to a bare
+ * number. The import table usually survives and is walked when it does; the
+ * module list is written unconditionally, because it is what lets any raw
+ * pointer anywhere in the dump be attributed even when the table does not. */
+int savestate_dump_image(void)
+{
+	const unsigned char *base = (const unsigned char *)GetModuleHandleA(NULL);
+	const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)base;
+	const IMAGE_NT_HEADERS *nt;
+	unsigned char *buf;
+	IMAGE_NT_HEADERS *out;
+	IMAGE_SECTION_HEADER *sec;
+	DWORD size, align, off, wrote = 0;
+	int i, holes = 0;
+	char exe[MAX_PATH], path[MAX_PATH + 64], *leaf;
+	HANDLE h;
+
+	if (!base || !ss_readable((uintptr_t)base, sizeof(*dos)) ||
+	    dos->e_magic != IMAGE_DOS_SIGNATURE) {
+		ss_log("dump: the main module does not start with a DOS header, so "
+		       "there is nothing here to write out\n");
+		return 0;
+	}
+	nt = (const IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+	if (!ss_readable((uintptr_t)nt, sizeof(*nt)) || nt->Signature != IMAGE_NT_SIGNATURE) {
+		ss_log("dump: no PE header at e_lfanew, refusing to guess\n");
+		return 0;
+	}
+	size = nt->OptionalHeader.SizeOfImage;
+	align = nt->OptionalHeader.SectionAlignment;
+	buf = (unsigned char *)VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE,
+					    PAGE_READWRITE);
+	if (!buf) {
+		ss_log("dump: could not reserve %lu bytes to copy the image into\n",
+		       (unsigned long)size);
+		return 0;
+	}
+	/* Page at a time, because a hole is expected rather than exceptional: an
+	 * image has reserved-but-uncommitted tails and guard pages, and one
+	 * unreadable page must cost that page rather than the whole dump. */
+	for (off = 0; off < size; off += 0x1000) {
+		DWORD n = size - off < 0x1000 ? size - off : 0x1000;
+
+		if (ss_readable((uintptr_t)base + off, n))
+			memcpy(buf + off, base + off, n);
+		else
+			holes++;
+	}
+	out = (IMAGE_NT_HEADERS *)(buf + dos->e_lfanew);
+	out->OptionalHeader.ImageBase = (ULONG_PTR)base;
+	out->OptionalHeader.FileAlignment = align;
+	sec = IMAGE_FIRST_SECTION(out);
+	for (i = 0; i < out->FileHeader.NumberOfSections; i++) {
+		DWORD vsz = sec[i].Misc.VirtualSize;
+
+		sec[i].PointerToRawData = sec[i].VirtualAddress;
+		sec[i].SizeOfRawData = (vsz + align - 1) & ~(align - 1);
+	}
+	if (!GetModuleFileNameA(NULL, exe, sizeof(exe)))
+		lstrcpynA(exe, "image", sizeof(exe));
+	leaf = exe;
+	for (i = 0; exe[i]; i++)
+		if (exe[i] == '\\' || exe[i] == '/')
+			leaf = exe + i + 1;
+	wsprintfA(path, "%s.dump_%08lX.exe", leaf, (unsigned long)(ULONG_PTR)base);
+	h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) {
+		ss_log("dump: could not create %s (error %lu)\n", path,
+		       (unsigned long)GetLastError());
+		VirtualFree(buf, 0, MEM_RELEASE);
+		return 0;
+	}
+	WriteFile(h, buf, size, &wrote, NULL);
+	CloseHandle(h);
+	ss_log("dump: wrote %s - %lu bytes from base %08lX, %d page(s) unreadable and "
+	       "left as zero. Load it in Ghidra as a PE; it is already based at "
+	       "%08lX so the addresses in this log line up with it directly\n",
+	       path, (unsigned long)wrote, (unsigned long)(ULONG_PTR)base, holes,
+	       (unsigned long)(ULONG_PTR)base);
+
+	wsprintfA(path, "%s.dump_%08lX.txt", leaf, (unsigned long)(ULONG_PTR)base);
+	h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h != INVALID_HANDLE_VALUE) {
+		char line[512];
+		HANDLE snap;
+		const IMAGE_DATA_DIRECTORY *dd;
+
+#define DUMP_PUT(s) WriteFile(h, (s), lstrlenA(s), &wrote, NULL)
+		wsprintfA(line, "image %s based at %08lX, %lu bytes\r\n\r\n", leaf,
+			  (unsigned long)(ULONG_PTR)base, (unsigned long)size);
+		DUMP_PUT(line);
+		DUMP_PUT("loaded modules - any raw pointer in the dump falls in one of "
+			 "these\r\n");
+		snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+		if (snap != INVALID_HANDLE_VALUE) {
+			MODULEENTRY32 me;
+
+			me.dwSize = sizeof(me);
+			if (Module32First(snap, &me)) {
+				do {
+					wsprintfA(line, "  %08lX..%08lX  %s\r\n",
+						  (unsigned long)(ULONG_PTR)me.modBaseAddr,
+						  (unsigned long)((ULONG_PTR)me.modBaseAddr +
+								  me.modBaseSize),
+						  me.szModule);
+					DUMP_PUT(line);
+				} while (Module32Next(snap, &me));
+			}
+			CloseHandle(snap);
+		}
+		dd = &nt->OptionalHeader
+			     .DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+		DUMP_PUT("\r\nimport table - IAT slot, what it resolved to, and the "
+			 "name if the descriptors survived\r\n");
+		if (dd->VirtualAddress && dd->Size) {
+			const IMAGE_IMPORT_DESCRIPTOR *imp =
+				(const IMAGE_IMPORT_DESCRIPTOR *)(base + dd->VirtualAddress);
+
+			while (ss_readable((uintptr_t)imp, sizeof(*imp)) && imp->Name) {
+				const char *dll = (const char *)(base + imp->Name);
+				const ULONG_PTR *iat =
+					(const ULONG_PTR *)(base + imp->FirstThunk);
+				const ULONG_PTR *int_ =
+					imp->OriginalFirstThunk
+						? (const ULONG_PTR *)(base +
+								      imp->OriginalFirstThunk)
+						: NULL;
+				int k;
+
+				if (!ss_readable((uintptr_t)dll, 1))
+					break;
+				wsprintfA(line, "\r\n  from %s\r\n", dll);
+				DUMP_PUT(line);
+				for (k = 0; k < 4096; k++) {
+					unsigned moff = 0;
+					const char *in;
+					char nm[128];
+
+					if (!ss_readable((uintptr_t)(iat + k),
+							 sizeof(*iat)) ||
+					    !iat[k])
+						break;
+					nm[0] = 0;
+					if (int_ &&
+					    ss_readable((uintptr_t)(int_ + k),
+							sizeof(*int_)) &&
+					    int_[k]) {
+						if (int_[k] & IMAGE_ORDINAL_FLAG)
+							wsprintfA(nm, "ordinal %lu",
+								  (unsigned long)(int_[k] &
+										  0xFFFF));
+						else if (ss_readable((uintptr_t)base +
+									     int_[k] + 2,
+								     1))
+							lstrcpynA(nm,
+								  (const char *)(base +
+										 int_[k] +
+										 2),
+								  sizeof(nm));
+					}
+					in = ss_module((uintptr_t)iat[k], &moff);
+					wsprintfA(line,
+						  "    +%08lX  ->  %08lX  %s+%X  %s\r\n",
+						  (unsigned long)((const unsigned char *)(iat +
+											  k) -
+								  base),
+						  (unsigned long)iat[k],
+						  in ? in : "unknown", moff, nm);
+					DUMP_PUT(line);
+				}
+				imp++;
+			}
+		} else {
+			DUMP_PUT("  the import directory is empty - the stub tore it down "
+				 "after loading, so use the module list above to "
+				 "attribute call targets by hand\r\n");
+		}
+#undef DUMP_PUT
+		CloseHandle(h);
+		ss_log("dump: wrote %s alongside it, naming the imports and every "
+		       "loaded module\n",
+		       path);
+	}
+	VirtualFree(buf, 0, MEM_RELEASE);
+	return 1;
+}
+
 /* How many times to let go and look again before saving anyway.
  *
  * Saving anyway rather than refusing, because a save that silently does not
