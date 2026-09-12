@@ -12974,7 +12974,7 @@ static int do_load(int slotno)
 		Window wv;
 		unsigned long long vwords = 0;
 		int vdiffer = 0, vunchecked = 0, vnamed = 0, vmode = verify_mode();
-	int pstraddle = 0, pdelta = 0, pnamed = 0;
+		int pstraddle = 0, pdelta = 0, pnamed = 0;
 		LARGE_INTEGER v0, v1, vf;
 
 		QueryPerformanceFrequency(&vf);
@@ -12995,6 +12995,37 @@ static int do_load(int slotno)
 			DWORD old;
 			int writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
+
+			/* Here, and not beside the writeback at the end of the loop,
+			 * because by then the only protection this region has is the
+			 * one we just gave it. Asked there, the probe answered with
+			 * its own footprints: every PAGE_READWRITE region read back as
+			 * PAGE_EXECUTE_READWRITE and every PAGE_WRITECOPY one as
+			 * PAGE_EXECUTE_WRITECOPY, which is this call, not a change the
+			 * process made. `old` is the value that was really there. */
+			if (writable) {
+				int hm = held_mod_at((uintptr_t)base,
+						     (uintptr_t)base + (uintptr_t)size);
+
+				if (hm >= 0) {
+					pstraddle++;
+					if (pnamed++ < 8)
+						ss_log("  STRADDLE: region %d at %p (%llu "
+						       "byte(s)) lies inside %s, which the "
+						       "module roster says is held\n",
+						       i, base, (unsigned long long)size,
+						       g_ctl->mod_name[hm]);
+				}
+				if (old != s->regs[i].prot) {
+					pdelta++;
+					if (pnamed++ < 8)
+						ss_log("  PROTECT: region %d at %p is %08lX "
+						       "now and was %08lX at the save; "
+						       "handing back the saved value\n",
+						       i, base, (unsigned long)old,
+						       (unsigned long)s->regs[i].prot);
+				}
+			}
 			/* A heap region is not copied wholesale any more. Its blocks
 			 * are put back one at a time below, and the bytes between
 			 * them - which is what the allocator keeps its lists in -
@@ -13102,34 +13133,8 @@ static int do_load(int slotno)
 			 * now - a copy-on-write page promoted to read-write after we wrote
 			 * the value down is handed back read-only, and its next writer
 			 * dies without either list being wrong. */
-			if (writable) {
-				MEMORY_BASIC_INFORMATION pmbi;
-				int hm = held_mod_at((uintptr_t)base,
-						     (uintptr_t)base + (uintptr_t)size);
-
-				if (hm >= 0) {
-					pstraddle++;
-					if (pnamed++ < 8)
-						ss_log("  STRADDLE: region %d at %p (%llu "
-						       "byte(s)) lies inside %s, which the "
-						       "module roster says is held. We are "
-						       "about to set its protection from a "
-						       "value we recorded\n",
-						       i, base, (unsigned long long)size,
-						       g_ctl->mod_name[hm]);
-				}
-				if (VirtualQuery(base, &pmbi, sizeof(pmbi)) == sizeof(pmbi) &&
-				    pmbi.Protect != s->regs[i].prot) {
-					pdelta++;
-					if (pnamed++ < 8)
-						ss_log("  PROTECT: region %d at %p is %08lX "
-						       "now and was %08lX at the save; "
-						       "handing back the saved value\n",
-						       i, base, (unsigned long)pmbi.Protect,
-						       (unsigned long)s->regs[i].prot);
-				}
+			if (writable)
 				VirtualProtect(base, size, s->regs[i].prot, &old);
-			}
 			pos += size;
 		}
 		win_close(&wv);
