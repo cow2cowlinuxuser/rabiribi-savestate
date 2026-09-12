@@ -1016,6 +1016,16 @@ void dsh_install(void)
 	ds = GetModuleHandleA("dsound.dll");
 	if (!ds)
 		return; /* not loaded yet; called again next frame */
+	{
+		/* Which file won the name, in the log the restores are in. The attach
+		 * message that decides this is written before the savestate log exists,
+		 * so without this the answer only lives in the other log. */
+		char path[MAX_PATH];
+
+		if (!GetModuleFileNameA(ds, path, MAX_PATH))
+			lstrcpynA(path, "(no path)", MAX_PATH);
+		ss_log("dsound: the name resolved to %s\n", path);
+	}
 	if (dsh_stub_is_ours(ds)) {
 		/* The software DirectSound in ds_sw.c answered the game instead of
 		 * Windows'. Everything below this point exists to make somebody else's

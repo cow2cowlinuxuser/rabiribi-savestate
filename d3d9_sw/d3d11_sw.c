@@ -2534,6 +2534,64 @@ static void hook_getprocaddress(void)
 		"if it resolves names it does so some other way");
 }
 
+/* Claim the name dsound.dll before anything else does.
+ *
+ * The same-folder stub is the right mechanism and it demonstrably works: a probe
+ * executable placed in the game directory gets our copy from
+ * LoadLibraryA("DSound.DLL"), loads it, and resolves DirectSoundCreate8 out of
+ * it. Inside the real process it lost anyway, which leaves only one explanation
+ * - by the time DxLib asked for the name, a dsound.dll was already in the
+ * loader's list, and a plain name matches a loaded module before any directory
+ * is searched. Steam puts six of its own DLLs in here before the game runs.
+ *
+ * So ask first. If the name is unclaimed we take it, and DxLib's later request
+ * resolves to the module we already loaded regardless of where it sits on disk.
+ * If somebody beat us to it there is nothing to be done from here, and the log
+ * says so plainly rather than leaving another silent no-op to be discovered by
+ * its absence.
+ *
+ * Loading from DllMain is normally worth avoiding. This particular DLL imports
+ * nothing but kernel32, its attach handler only calls
+ * DisableThreadLibraryCalls, and it starts no threads, so there is no second
+ * lock for it to want. */
+static void dsound_claim(void)
+{
+	wchar_t path[MAX_PATH], *slash;
+	char shown[MAX_PATH];
+	HMODULE self = NULL, h;
+
+	h = GetModuleHandleA("dsound.dll");
+	if (h) {
+		if (!GetModuleFileNameA(h, shown, MAX_PATH))
+			lstrcpynA(shown, "(no path)", MAX_PATH);
+		d11_log("dsound: already loaded before we attached, from %s - the stub "
+			"cannot win a name that is already taken",
+			shown);
+		return;
+	}
+	GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+				   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			   (LPCWSTR)dsound_claim, &self);
+	if (!self || !GetModuleFileNameW(self, path, MAX_PATH))
+		return;
+	slash = wcsrchr(path, L'\\');
+	if (!slash)
+		return;
+	wcscpy(slash + 1, L"dsound.dll");
+	h = LoadLibraryW(path);
+	if (!h) {
+		d11_log("dsound: the stub next to us would not load (error %lu), so the "
+			"game will get Windows' DirectSound",
+			GetLastError());
+		return;
+	}
+	if (!GetModuleFileNameA(h, shown, MAX_PATH))
+		lstrcpynA(shown, "(no path)", MAX_PATH);
+	d11_log("dsound: claimed the name first, from %s - DxLib's LoadLibrary will "
+		"resolve to this one",
+		shown);
+}
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
 	/* Announce the attach so that a missing detach line is evidence of
@@ -2550,6 +2608,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 		arena_init();
 		profile_seed_env();
 		hook_getprocaddress();
+		dsound_claim();
 	} else if (reason == DLL_PROCESS_DETACH)
 		d11_log("process detach (%s) after %ld presents",
 			reserved ? "process exiting" : "FreeLibrary", g_present_n);
