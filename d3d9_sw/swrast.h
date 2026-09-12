@@ -103,6 +103,10 @@ void swrast_prof_mix(double *out, int n);
  * away: ok, no-avx2, untextured, non-flat colour, depth, mask, blend mode,
  * non-power-of-two texture, addressing mode, other. */
 void swrast_prof_simd(double *out, int n);
+
+/* Names the blend states that fell off the vector path, worst area first.
+ * Returns how many were filled in. */
+int swrast_prof_blend_other(int *op, int *src, int *dst, double *area, int n);
 int swrast_cpu_features(void);
 
 /* Set to 0 to force the scalar reference rasteriser. */

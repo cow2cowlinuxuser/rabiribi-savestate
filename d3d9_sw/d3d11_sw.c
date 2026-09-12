@@ -333,6 +333,55 @@ typedef struct PerfTex {
 static PerfTex g_perf_tex[PERF_TEX_MAX];
 static int g_perf_ntex;
 
+/* D3DBLENDOP/D3DBLEND spelled out. The per-texture report prints these as hex
+ * pairs, which is fine when you already know which pair you are looking for and
+ * useless when the question is which one you have never handled. */
+static const char *blend_op_name(int op)
+{
+	switch (op) {
+	case D3DBLENDOP_ADD:
+		return "ADD";
+	case D3DBLENDOP_SUBTRACT:
+		return "SUB";
+	case D3DBLENDOP_REVSUBTRACT:
+		return "REVSUB";
+	case D3DBLENDOP_MIN:
+		return "MIN";
+	case D3DBLENDOP_MAX:
+		return "MAX";
+	default:
+		return "?";
+	}
+}
+
+static const char *blend_factor_name(int f)
+{
+	switch (f) {
+	case D3DBLEND_ZERO:
+		return "ZERO";
+	case D3DBLEND_ONE:
+		return "ONE";
+	case D3DBLEND_SRCCOLOR:
+		return "SRCCOL";
+	case D3DBLEND_INVSRCCOLOR:
+		return "INVSRCCOL";
+	case D3DBLEND_SRCALPHA:
+		return "SRCA";
+	case D3DBLEND_INVSRCALPHA:
+		return "INVSRCA";
+	case D3DBLEND_DESTALPHA:
+		return "DSTA";
+	case D3DBLEND_INVDESTALPHA:
+		return "INVDSTA";
+	case D3DBLEND_DESTCOLOR:
+		return "DSTCOL";
+	case D3DBLEND_INVDESTCOLOR:
+		return "INVDSTCOL";
+	default:
+		return "?";
+	}
+}
+
 static void perf_note_tex(int id, int tw, int th, int blend, double px)
 {
 	int i;
@@ -3086,6 +3135,10 @@ static LONGLONG g_zone[ZONE_N];
  * lock. */
 static LONGLONG g_tsc_draw, g_tsc_batch;
 static unsigned g_n_draws, g_n_verts, g_n_tris_in, g_n_tris_out;
+/* Draws whose wrap addressing was reinterpreted as clamp because their
+ * coordinates never leave the texture. Counted because it is a deliberate
+ * substitution, not an identity, and the number is how visible it could be. */
+static unsigned g_n_npot_clamped;
 
 /* Flush time that happened inside the draw and present zones, so the rest can
  * be named as flushes triggered from elsewhere rather than being lumped in with
@@ -6111,6 +6164,22 @@ static void perf_tick(void)
 					100 * sr[3] / tot, 100 * sr[4] / tot, 100 * sr[5] / tot,
 					100 * sr[6] / tot, 100 * sr[7] / tot, 100 * sr[8] / tot,
 					100 * sr[9] / tot);
+			/* The percentage above is the bill; this is the itemisation.
+			 * Scalar pixels cost about six times what vector ones do, so
+			 * whatever tops this list is the frame time. */
+			if (sr[6] > 0.0) {
+				int bop[4], bsrc[4], bdst[4], nb, k;
+				double barea[4];
+
+				nb = swrast_prof_blend_other(bop, bsrc, bdst, barea, 4);
+				for (k = 0; k < nb; k++)
+					d11_log("perf blend-scalar #%d op=%s src=%s dst=%s "
+						"%.2f Mpx/frame",
+						k, blend_op_name(bop[k]),
+						blend_factor_name(bsrc[k]),
+						blend_factor_name(bdst[k]),
+						barea[k] / f / 1e6);
+			}
 		}
 		{
 			double ms = 1000.0 / (double)freq.QuadPart;
@@ -6139,7 +6208,8 @@ static void perf_tick(void)
 			 * and vertices per draw says whether shared indices are
 			 * being re-shaded. */
 			d11_log("perf geom: %u draws/frame, %u verts/frame (%.1f/draw), "
-				"tris %u in -> %u out (%.0f%% kept), batch %.0f%% of draw",
+				"tris %u in -> %u out (%.0f%% kept), batch %.0f%% of draw, "
+				"%u wrap->clamp/frame",
 				(unsigned)(g_n_draws / (unsigned)(f < 1 ? 1 : f)),
 				(unsigned)(g_n_verts / (unsigned)(f < 1 ? 1 : f)),
 				(double)g_n_verts / (double)g_n_draws,
@@ -6148,10 +6218,12 @@ static void perf_tick(void)
 				g_n_tris_in ? 100.0 * (double)g_n_tris_out / (double)g_n_tris_in
 					    : 0.0,
 				g_tsc_draw ? 100.0 * (double)g_tsc_batch / (double)g_tsc_draw
-					   : 0.0);
+					   : 0.0,
+				(unsigned)(g_n_npot_clamped / (unsigned)(f < 1 ? 1 : f)));
 		}
 		g_tsc_draw = g_tsc_batch = 0;
 		g_n_draws = g_n_verts = g_n_tris_in = g_n_tris_out = 0;
+		g_n_npot_clamped = 0;
 		for (i = 0; i < g_perf_nrt; i++) {
 			int best = i, j;
 			for (j = i + 1; j < g_perf_nrt; j++)
@@ -9612,6 +9684,20 @@ static void ctx_draw_inner(Sw11Context *c, UINT count, UINT start, INT base, int
 				st.uv_in_bounds = 1;
 				st.addr_u = D3DTADDRESS_WRAP;
 				st.addr_v = D3DTADDRESS_WRAP;
+			} else if (umin >= 0.0f && umax <= 1.0f && vmin >= 0.0f &&
+				   vmax <= 1.0f) {
+				/* Inside the texture but touching an edge, so the margin
+				 * above cannot prove the bilinear tap stays in range. A
+				 * draw that never leaves [0,1] is not tiling, though, and
+				 * wrap only differs from clamp on that one tap: wrap
+				 * fetches the opposite edge, clamp repeats the near one.
+				 * Calling it clamp costs a texel of border and buys the
+				 * vector path, which indexes any dimensions when it does
+				 * not have to wrap. Both samplers are told, so they still
+				 * agree with each other. */
+				st.addr_u = D3DTADDRESS_CLAMP;
+				st.addr_v = D3DTADDRESS_CLAMP;
+				g_n_npot_clamped++;
 			}
 		}
 		/* A magnifying draw fetches four texels and weights them to
