@@ -130,6 +130,10 @@ void savestate_chain_probe(void);
  * and writes back, and only the last two have ever been varied. */
 int savestate_park(int ms);
 
+/* Stands a hardware backend down around a save, restore or park, the way
+ * dsh_quiet already does for audio. Null unless a front end registers one. */
+void savestate_set_gpu_park(void (*fn)(int on));
+
 /* Write the main module out as it exists in memory, for a disassembler. The
  * game's .text is encrypted on disk behind a Steam stub; in here it is not. */
 int savestate_dump_image(void);

@@ -5004,6 +5004,37 @@ static void ss_where_reg(const char *name, uintptr_t v)
  * silently miss them. Mapped views are skipped: they are usually shared with
  * another process, where a rewind has no meaning, and our own snapshot window
  * is one of them. */
+/* Stands the adapter down around the snapshot. Registered by whichever front
+ * end owns a device; null everywhere else, which is how the targets with no
+ * hardware backend avoid linking one. */
+static void (*g_gpu_park_fn)(int on);
+
+void savestate_set_gpu_park(void (*fn)(int on))
+{
+	g_gpu_park_fn = fn;
+}
+
+/* Device mappings passed over, counted so the decision is visible rather than
+ * silent. Reset each save: the question is what this snapshot skipped. */
+static unsigned g_dev_regions;
+static unsigned long long g_dev_bytes;
+
+/* Memory a device owns rather than memory this process owns. Write-combining and
+ * non-cached exist for mappings whose reads must not be cached, which describes
+ * an adapter's aperture and nothing an allocator hands out.
+ *
+ * Shared by everything that walks the address space, because the two callers
+ * want it for different reasons and both are right. The snapshot skips these
+ * because reading one mid-freeze is a fault no handler can service. The
+ * coverage audit skips them because they are unreadably slow - uncached, no
+ * prefetch, across the bus - and because fingerprinting them is meaningless
+ * anyway: the adapter rewrites them on its own schedule, so they would report
+ * "changed" every time and mean nothing by it. */
+static int region_is_device(DWORD prot)
+{
+	return (prot & (PAGE_WRITECOMBINE | PAGE_NOCACHE)) != 0;
+}
+
 static int region_wanted(const MEMORY_BASIC_INFORMATION *mbi)
 {
 	DWORD p = mbi->Protect;
@@ -5035,6 +5066,27 @@ static int region_wanted(const MEMORY_BASIC_INFORMATION *mbi)
 	    (p & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
 		  PAGE_EXECUTE_WRITECOPY)))
 		return 0;
+	/* Device memory, not process memory.
+	 *
+	 * A display driver maps video memory into the process write-combined, and
+	 * the kernel's video memory manager can repoint those mappings at any
+	 * moment - suspending threads holds ours, not the GPU. Reading one during
+	 * the copy is a fault no handler can service, which is how a save with a
+	 * live device died inside win_copy having logged nothing at all: the
+	 * driver's heaps were already left in the present and its threads already
+	 * excluded, so the region walk was the only way in left.
+	 *
+	 * Nothing the game owns is ever mapped like this. Write-combining and
+	 * non-cached exist for memory whose reads must not be cached, which
+	 * describes an aperture and nothing an allocator hands out. Leaving them
+	 * out costs the snapshot nothing it should have had: the contents belong
+	 * to the adapter, and the adapter does not rewind - the same bargain the
+	 * texture arena already runs under. */
+	if (region_is_device(p)) {
+		g_dev_regions++;
+		g_dev_bytes += mbi->RegionSize;
+		return 0;
+	}
 	return !region_excluded((uintptr_t)mbi->BaseAddress, mbi->RegionSize);
 }
 
@@ -7340,6 +7392,15 @@ static void blk_reach_mark(void)
 		      (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
 		       PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
 			continue;
+		/* Nor is the adapter's memory, for both of the reasons that keep it
+		 * out of the snapshot and the coverage pass. It cannot hold a game
+		 * pointer - it holds texels, written by us and rearranged by the
+		 * driver - and reading it is uncached and across the bus, which is
+		 * ruinous for a scan that touches every word. Sixty-six such regions
+		 * appearing alongside the hardware backend took this pass from
+		 * 181.7 ms to 4928.0 ms; nothing about the algorithm changed. */
+		if (region_is_device(mbi.Protect))
+			continue;
 		/* Heaps are not roots, and neither is anything we leave in the
 		 * present - system images and our own memory. What is left is the
 		 * game: its image, its arenas, its stacks. */
@@ -8846,7 +8907,16 @@ static void coverage_take(void)
 	while (VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) == sizeof(mbi)) {
 		uintptr_t base = (uintptr_t)mbi.BaseAddress;
 
-		if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) {
+		/* The adapter's mappings are left out here for the same reason the
+		 * snapshot leaves them out, and the cost of not doing so was
+		 * startling: this pass ran 1185.8 MB in 212.7 ms before a hardware
+		 * backend existed and 1020.0 MB in 4962.8 ms after - less memory,
+		 * twenty-three times slower. The difference was 124 MB of
+		 * write-combined aperture being hashed at about 26 MB/s, which is
+		 * simply what an uncached read across the bus costs. It was ninety
+		 * percent of every save. */
+		if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+		    !region_is_device(mbi.Protect)) {
 			if (g_cov->n >= SS_COV_MAX) {
 				g_cov->truncated = 1;
 				break;
@@ -10746,6 +10816,10 @@ int savestate_park(int ms)
 	dsh_save();
 	dsh_quiet();
 	xa2_sw_park();
+	/* Same reasoning as the two above, and the adapter has the stronger
+	 * claim: suspending threads stops ours, and the GPU is not one of ours. */
+	if (g_gpu_park_fn)
+		g_gpu_park_fn(1);
 	QueryPerformanceCounter(&t0);
 	if (alloc_settle())
 		alloc_ranges_init();
@@ -11039,6 +11113,13 @@ static int do_save(int slotno)
 	 * turned out not to exist - see request(), where a restored thread reports
 	 * save-to-restore wall time as if it were a save duration. */
 	LARGE_INTEGER pf, t0, t_susp, t_excl, t_rel, t_walk, t_copy;
+	/* The phases above start at suspend and stop at the copy, which left most of
+	 * this function unmeasured - and that is where a five-second save turned out
+	 * to be hiding while every phase read faster than it ever had. */
+	LARGE_INTEGER t_begin;
+
+	QueryPerformanceFrequency(&pf);
+	QueryPerformanceCounter(&t_begin);
 
 	/* Here rather than at hooks install, where the arena cannot be taken yet:
 	 * blk_arena registers an exclusion, and there is no control block to
@@ -11074,6 +11155,10 @@ static int do_save(int slotno)
 	 * whole window rather than merely for the copy. */
 	dsh_quiet();
 	xa2_sw_park();
+	/* Same reasoning as the two above, and the adapter has the stronger
+	 * claim: suspending threads stops ours, and the GPU is not one of ours. */
+	if (g_gpu_park_fn)
+		g_gpu_park_fn(1);
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t0);
 	g_blk_save_n = 0;
@@ -11185,6 +11270,8 @@ static int do_save(int slotno)
 	slot_release(s);
 	QueryPerformanceCounter(&t_rel);
 
+	g_dev_regions = 0;
+	g_dev_bytes = 0;
 	while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
 		uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
 		if (next <= addr)
@@ -11219,12 +11306,37 @@ static int do_save(int slotno)
 
 	/* Ceiling above 2 GB means the large-address-aware flag took effect. The
 	 * largest free block is what any future allocation arena has to fit in. */
+	if (g_dev_regions)
+		ss_log("  device memory: %u region(s), %.1f MB, passed over - write-combined "
+		       "or non-cached, so they are the adapter's and not ours to snapshot\n",
+		       g_dev_regions, (double)g_dev_bytes / (1024.0 * 1024.0));
 	ss_log("  address space: top %p, %.0f MB used, %.0f MB free, largest free block "
 	       "%.0f MB\n",
 	       (void *)top, (double)used_total / (1024.0 * 1024.0),
 	       (double)free_total / (1024.0 * 1024.0),
 	       (double)free_largest / (1024.0 * 1024.0));
 
+	/* D3D9SW_SAVE_NOCOPY: everything a save does except the one thing that
+	 * touches the game's pages. Threads are collected and suspended, the
+	 * exclusions are built, the walk runs and the regions are chosen - and
+	 * then it resumes without reading any of them. If the process survives
+	 * this and dies with the knob off, the copy is the killer and nothing
+	 * before it is; if it dies either way, the copy is innocent. One run
+	 * answers a question that would otherwise take several. */
+		{
+		char nc[8];
+		DWORD ncn = ss_getenv("D3D9SW_SAVE_NOCOPY", nc, sizeof(nc));
+
+		if (ncn && nc[0] == '1') {
+		ss_log("  save: NOCOPY - %d region(s), %.1f MB chosen and deliberately "
+		       "NOT read. This proves only whether the copy is what kills the "
+		       "process; no snapshot is kept.\n",
+		       s->nregs, (double)total / (1024.0 * 1024.0));
+			slot_release(s);
+			rc = 0;
+			goto done;
+		}
+	}
 	QueryPerformanceCounter(&t_walk);
 	s->sect = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
 				     (DWORD)(total >> 32), (DWORD)total, NULL);
@@ -11360,8 +11472,9 @@ static int do_save(int slotno)
 	{
 		double q = (double)pf.QuadPart / 1000.0;
 
-		ss_log("  save cost ms: suspend %.1f, exclusions %.1f, release %.1f, "
-		       "walk %.1f, section+copy %.1f\n",
+		ss_log("  save cost ms: prologue %.1f, suspend %.1f, exclusions %.1f, "
+		       "release %.1f, walk %.1f, section+copy %.1f\n",
+		       (double)(t0.QuadPart - t_begin.QuadPart) / q,
 		       (double)(t_susp.QuadPart - t0.QuadPart) / q,
 		       (double)(t_excl.QuadPart - t_susp.QuadPart) / q,
 		       (double)(t_rel.QuadPart - t_excl.QuadPart) / q,
@@ -11531,20 +11644,42 @@ static int do_save(int slotno)
 	rc = 1;
 
 done:
-	resume_all(0);
-	dsh_play();
-	xa2_sw_resume();
-	/* After the first save rather than at install, because half of what it
-	 * reports - the heap partition, the module tenancy, the exclusion count -
-	 * does not exist until a snapshot has been built. */
-	ss_inventory(s);
-	/* Last thing before the save returns, so the fingerprints describe the
-	 * process as the snapshot leaves it rather than as it was mid-copy. */
-	coverage_take();
-	/* Armed as the save finishes, so the window it records is exactly the
-	 * window between this snapshot and whatever restores it. */
-	freed_arm();
-	heap_check("before the save");
+	/* Timed individually, because between them these account for whatever the
+	 * phases above do not, and three of them walk the whole process. Reporting
+	 * a lump sum here would only move the mystery rather than answer it. */
+	{
+		LARGE_INTEGER e0, e1, e2, e3, e4, e5;
+		double q = (double)pf.QuadPart / 1000.0;
+
+		QueryPerformanceCounter(&e0);
+		resume_all(0);
+		dsh_play();
+		xa2_sw_resume();
+		QueryPerformanceCounter(&e1);
+		/* After the first save rather than at install, because half of what it
+		 * reports - the heap partition, the module tenancy, the exclusion
+		 * count - does not exist until a snapshot has been built. */
+		ss_inventory(s);
+		QueryPerformanceCounter(&e2);
+		/* Last thing before the save returns, so the fingerprints describe the
+		 * process as the snapshot leaves it rather than as it was mid-copy. */
+		coverage_take();
+		QueryPerformanceCounter(&e3);
+		/* Armed as the save finishes, so the window it records is exactly the
+		 * window between this snapshot and whatever restores it. */
+		freed_arm();
+		QueryPerformanceCounter(&e4);
+		heap_check("before the save");
+		QueryPerformanceCounter(&e5);
+		ss_log("  save cost ms: resume %.1f, inventory %.1f, coverage %.1f, "
+		       "freed_arm %.1f, heap_check %.1f | whole save %.1f\n",
+		       (double)(e1.QuadPart - e0.QuadPart) / q,
+		       (double)(e2.QuadPart - e1.QuadPart) / q,
+		       (double)(e3.QuadPart - e2.QuadPart) / q,
+		       (double)(e4.QuadPart - e3.QuadPart) / q,
+		       (double)(e5.QuadPart - e4.QuadPart) / q,
+		       (double)(e5.QuadPart - t_begin.QuadPart) / q);
+	}
 	return rc;
 }
 
@@ -13756,6 +13891,8 @@ static void do_reclaim(Slot *s, int tier)
 	/* Collected in full before anything is freed: the walk would otherwise be
 	 * enumerating a map that is changing underneath it. */
 	g_ctl->nscratch = 0;
+	g_dev_regions = 0;
+	g_dev_bytes = 0;
 	while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
 		uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
 		uintptr_t base = (uintptr_t)mbi.BaseAddress;
