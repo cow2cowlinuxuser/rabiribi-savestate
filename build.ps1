@@ -89,7 +89,7 @@ New-Item -ItemType Directory -Force -Path "x86-lowspec" | Out-Null
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Copy-Item -Force x86-lowspec\d3d9.dll x86-lowspec\d3d9_sw.dll
 
-$d3d11src = @("d3d11_sw.c", "dxbc.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "gameheap.c", "d3d11.def")
+$d3d11src = @("d3d11_sw.c", "dxbc.c", "savestate.c", "swrast.c", "trace.c", "dsoundhook.c", "ds_sw.c", "xa2_sw.c", "gameheap.c", "gpuprobe.c", "gpu.c", "d3d11.def")
 # This backend rasterises far more per frame than the D3D9 title, so the pool
 # scales past that build's four threads; but it shares the CPU with the game's
 # own logic thread, and measurement put the crossover at one thread per physical

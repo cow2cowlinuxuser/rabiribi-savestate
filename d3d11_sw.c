@@ -106,6 +106,16 @@ struct Sw11Res {
 	/* pixels points at cpu rather than at its own allocation, because keeping
 	 * the same image twice is what exhausts a 32-bit process. Not owned, so
 	 * it must not be freed. */
+	/* The adapter's copy of this texture, and the content generation it was
+	 * uploaded at. Opaque here on purpose: the backend owns the handle and
+	 * this file only has to remember where it lives and when it went stale. */
+	void *gtex;
+	unsigned gpu_gen;
+	/* Its bytes live on the adapter now and the CPU planes were let go. Not the
+	 * same as a texture that never had any: a map for write rebuilds them. */
+	int gpu_released;
+	/* Written by the game after we moved it once, so it stays here. */
+	int gpu_no_release;
 	int pixels_alias;
 	/* An aliased plane whose format needed a channel swap, so the shared
 	 * bytes were converted in place and are no longer in the format the game
@@ -1483,8 +1493,13 @@ static int trace_on(void)
 static void d11_vlog(const char *fmt, va_list ap)
 {
 	static volatile LONG n;
+	/* Opened once and kept. Every line used to open, append, flush and close,
+	 * which is several syscalls plus a real-time antivirus inspection each
+	 * time, against a path under Program Files. Flushing without closing is
+	 * just as safe against the process dying - the bytes are with the OS
+	 * either way - so the close was buying nothing but the cost. */
+	static FILE *g_logf;
 	char line[640];
-	FILE *f;
 	LONG seq = InterlockedIncrement(&n);
 	/* The cap exists so an unattended session cannot fill a disk, but going
 	 * quiet without saying so makes the end of the log ambiguous: a log that
@@ -1492,26 +1507,32 @@ static void d11_vlog(const char *fmt, va_list ap)
 	 * the wrong way once already. One line, at the boundary, says which it is. */
 	if (seq > 20000) {
 		if (seq == 20001) {
-			FILE *g = fopen("d3d11_sw.log", "a");
-			if (g) {
-				fprintf(g, "log capped at 20000 lines; nothing after this "
-					   "is recorded, and the process is still running\n");
-				fflush(g);
-				fclose(g);
+			if (!g_logf)
+				g_logf = fopen("d3d11_sw.log", "a");
+			if (g_logf) {
+				fprintf(g_logf,
+					"log capped at 20000 lines; nothing after this "
+					"is recorded, and the process is still running\n");
+				fflush(g_logf);
 			}
 		}
 		return;
 	}
 	_vsnprintf(line, sizeof(line), fmt, ap);
 	line[sizeof(line) - 1] = 0;
-	OutputDebugStringA("[d3d11_sw] ");
-	OutputDebugStringA(line);
-	OutputDebugStringA("\n");
-	f = fopen("d3d11_sw.log", "a");
-	if (f) {
-		fprintf(f, "%s\n", line);
-		fflush(f);
-		fclose(f);
+	/* Three kernel round-trips through a system-wide mutex, for a listener
+	 * that is almost never attached. Reading the PEB to find that out costs
+	 * nothing by comparison. */
+	if (IsDebuggerPresent()) {
+		OutputDebugStringA("[d3d11_sw] ");
+		OutputDebugStringA(line);
+		OutputDebugStringA("\n");
+	}
+	if (!g_logf)
+		g_logf = fopen("d3d11_sw.log", "a");
+	if (g_logf) {
+		fprintf(g_logf, "%s\n", line);
+		fflush(g_logf);
 	}
 }
 
@@ -3144,6 +3165,226 @@ static unsigned g_n_npot_clamped;
  * per-frame: they run at transitions, so they accumulate for the session. */
 static unsigned g_n_readback, g_n_readback_served;
 
+int gpuprobe_run(void (*sink)(const char *));
+int gpuprobe_wants_real_factory(void);
+void *gpuprobe_real_factory_fn(void);
+
+/* The probe formats its own lines and knows nothing about this file's logger. */
+static void gpuprobe_sink(const char *s)
+{
+	d11_log("%s", s);
+}
+
+/* 0 software throughout, 1 the adapter presents the software frame, 2 the
+ * adapter also draws it. Read once: the setting cannot change mid-session and
+ * this is on the draw path. */
+static int gpu_mode(void)
+{
+	static int cached = -1;
+	char b[8];
+
+	if (cached < 0)
+		cached = (savestate_getenv("D3D11SW_GPU", b, sizeof(b)) && b[0] >= '0' &&
+			  b[0] <= '9')
+				 ? b[0] - '0'
+				 : 0;
+	return cached;
+}
+
+/* Open while the adapter has a frame in progress. Cleared at present, so a
+ * frame that never drew anything does not try to show itself. */
+static int g_gpu_open;
+static uint32_t g_gpu_clear_argb = 0xff000000u;
+/* Draws the backend would not honour exactly. Zero is the bar for handing the
+ * frame over; anything else names a state still missing from it. */
+static unsigned g_gpu_declined, g_gpu_mirrored;
+
+/* Lets go of the CPU copy of a texture the adapter now holds.
+ *
+ * This is the entire point of the exercise. The arena carries up to 641 MB of
+ * texture payload inside a 2 GB process, and once those bytes exist in video
+ * memory the copy here is dead weight that a save has to work around.
+ *
+ * Only for textures the game cannot read back. A texture it can map for READ
+ * has to keep its bytes, because the adapter's copy is reachable only through a
+ * staging copy and a stall, and a game that reads its own textures would be
+ * paying that price at a rate nobody has measured. Render targets and the
+ * backbuffer are excluded for a different reason: they are outputs, and their
+ * contents are produced rather than uploaded.
+ *
+ * A later map for WRITE is still fine - see Ctx_Map, which rebuilds the plane
+ * rather than refusing. A write replaces the contents wholesale, so there is
+ * nothing in the old bytes worth having kept.
+ */
+static unsigned g_gpu_rebuilt;
+static unsigned g_gpu_uploads_total;
+
+/* Takes a released texture back into this process, because something is about
+ * to write to it.
+ *
+ * Every path that writes a texture's bytes has to come through here first. The
+ * one that did not cost a whole run: UpdateSubresource does its work inside an
+ * "if (r->cpu)", so a released texture swallowed every update it was given
+ * without a word. This game fills its text atlases that way, which is why the
+ * text disappeared while the map counter sat at zero.
+ *
+ * Rebuilt empty rather than read back from the adapter. The only textures
+ * eligible for release are ones the game cannot map for READ, so this is always
+ * a write, and a write replaces what was there; a staging copy would stall the
+ * pipeline to recover bytes that are about to be overwritten anyway.
+ */
+static void res_reclaim_cpu(Sw11Res *r)
+{
+	size_t want;
+
+	if (!r || r->kind != 1 || !r->gpu_released || r->cpu)
+		return;
+	want = fmt_size(r->format, r->width, r->height);
+	r->cpu = (unsigned char *)payload_alloc(want);
+	if (!r->cpu)
+		return;
+	r->cpu_size = (UINT)want;
+	r->gpu_released = 0;
+	/* And never again. A texture the game writes after we have moved it is
+	 * one it intends to keep writing, and moving it back out would start a
+	 * release-and-reclaim cycle that runs every frame - which is what 4964
+	 * releases against 225 live resources was, and what the audio was
+	 * hearing. One texture kept in memory is cheaper than that. */
+	r->gpu_no_release = 1;
+	res_account((long long)res_payload_bytes(r), 0);
+	g_gpu_rebuilt++;
+}
+static unsigned g_gpu_freed_n;
+static size_t g_gpu_freed_bytes;
+
+static void gpu_release_cpu_copy(Sw11Res *r)
+{
+	size_t bytes;
+
+	if (!r || r->kind != 1 || r->gpu_released || r->gpu_no_release || !r->gtex)
+		return;
+	if (r->is_bb || (r->bind & D3D11_BIND_RENDER_TARGET))
+		return;
+	if (r->cpu_access & D3D11_CPU_ACCESS_READ)
+		return;
+	if (!r->cpu && !r->pixels)
+		return;
+	bytes = res_payload_bytes(r);
+	res_account(-(long long)bytes, 0);
+	payload_free(r->cpu, r->cpu_size);
+	if (!r->pixels_alias)
+		payload_free(r->pixels, (size_t)r->width * r->height * 4);
+	r->cpu = NULL;
+	r->pixels = NULL;
+	r->pixels_alias = 0;
+	r->pixels_swizzled = 0;
+	r->cpu_size = 0;
+	/* Distinct from a texture that never had pixels: this one has them, they
+	 * are just somewhere else. Ctx_Map reads this to know a rebuild is the
+	 * right answer rather than a refusal. */
+	r->gpu_released = 1;
+	g_gpu_freed_n++;
+	g_gpu_freed_bytes += bytes;
+}
+
+static int res_ensure_pixels(Sw11Res *r);
+static void res_decode_pixels_written(Sw11Res *r);
+
+/* Moves every eligible texture to the adapter, whether or not it is on screen.
+ *
+ * Releasing on the draw path alone only reaches what the current scene happens
+ * to be showing: the first run of this freed 51 textures of 225 and left 636 MB
+ * of payload behind, because the other 174 were loaded and simply not visible
+ * at that moment. They are exactly as movable, and in a 2 GB process the ones
+ * nobody is looking at are the best possible thing to be rid of.
+ *
+ * Cheap to call repeatedly. Everything already moved fails the first test, so a
+ * steady state costs one pointer chase per resource per frame.
+ */
+static unsigned g_gpu_swept;
+
+static void gpu_sweep_release(void)
+{
+	Sw11Res *r;
+
+	if (!gpu_is_up())
+		return;
+	for (r = g_res_head; r; r = r->live_next) {
+		if (r->kind != 1 || r->gpu_released || r->gpu_no_release || r->retired)
+			continue;
+		if (r->is_bb || (r->bind & D3D11_BIND_RENDER_TARGET))
+			continue;
+		if (r->cpu_access & D3D11_CPU_ACCESS_READ)
+			continue;
+		if (!r->width || !r->height)
+			continue;
+		/* Decoded at least once, and not merely present.
+		 *
+		 * gpu_gen is bumped by the decode and by nothing else, so it is the
+		 * question "are these bytes in the rasteriser's channel order yet"
+		 * asked in the only place that knows the answer. Some of this
+		 * game's textures arrive as R8G8B8A8 and have red and blue swapped
+		 * in place on first use; handing one to the adapter before that
+		 * happens gives it the channels backwards, which is the wrong hue.
+		 *
+		 * It also happens to be the cure for the churn. The game creates
+		 * and destroys about three and a half textures a frame - 69116 born
+		 * against 225 live - and almost none of them are ever decoded or
+		 * drawn, so previously each one bought a driver allocation and an
+		 * upload on its way to being thrown away. That was 7164 uploads,
+		 * and it is what the audio was hitching against. */
+		if (!r->gpu_gen || !r->pixels)
+			continue;
+		if (!gpu_tex_sync(&r->gtex, r->pixels, (int)r->width, (int)r->height,
+				  r->gpu_gen))
+			continue;
+		gpu_release_cpu_copy(r);
+		g_gpu_swept++;
+	}
+}
+
+static int gpu_shadow_draw(Sw11Res *rt, const SwTri *batch, int ntri, Sw11Res *src,
+			   const SwTex *tex, const SwState *st)
+{
+	if (!g_gpu_open) {
+		g_gpu_open = gpu_frame_begin((int)rt->width, (int)rt->height, 1,
+					     g_gpu_clear_argb);
+		if (!g_gpu_open)
+			return 0;
+	}
+	/* A released texture has no CPU bytes to offer and does not need to: the
+	 * adapter's copy is the only one, and it is already current. */
+	/* Counted as a decline, not waved through. At mode 3 the rasteriser's
+	 * output is never presented, so a draw that lands there is an invisible
+	 * sprite rather than a safe fallback - and a number that does not say so
+	 * is worse than no number. */
+	if (!src->gpu_gen) {
+		g_gpu_declined++;
+		return 0;
+	}
+	if (!src->gpu_released &&
+	    !gpu_tex_sync(&src->gtex, tex->pixels, tex->width, tex->height, src->gpu_gen)) {
+		g_gpu_declined++;
+		return 0;
+	}
+	if (!src->gtex) {
+		g_gpu_declined++;
+		return 0;
+	}
+	g_gpu_mirrored++;
+	if (!gpu_draw(batch, ntri, src->gtex, st)) {
+		g_gpu_declined++;
+		return 0;
+	}
+	/* Only once the draw has actually gone through. A texture whose draw was
+	 * declined may still be needed by the rasteriser, and letting go of its
+	 * bytes on the strength of an upload alone would throw away the fallback
+	 * at the exact moment it is wanted. */
+	if (gpu_mode() >= 3)
+		gpu_release_cpu_copy(src);
+	return 1;
+}
+
 /* Flush time that happened inside the draw and present zones, so the rest can
  * be named as flushes triggered from elsewhere rather than being lumped in with
  * the game's own time. Without this the residual read as 30-odd ms of Unity,
@@ -3233,9 +3474,11 @@ static void res_decode_pixels_inner(Sw11Res *r)
 			       ((v & 0x000000ffu) << 16);
 		}
 		r->cpu_dirty = 0;
+		r->gpu_gen++;
 		return;
 	}
 	r->cpu_dirty = 0;
+	r->gpu_gen++;
 	w = r->width;
 	h = r->height;
 	bs = fmt_bc_block(r->format);
@@ -3864,6 +4107,7 @@ static LONG64 res_payload_bytes(const Sw11Res *r)
  * allocated with, and so an aliased plane is never freed twice. */
 static void res_free_payload(Sw11Res *r, int drop_live)
 {
+	gpu_tex_drop(&r->gtex);
 	if (!r)
 		return;
 	res_list_remove(r);
@@ -4838,6 +5082,20 @@ HRESULT WINAPI CreateDXGIFactory2(UINT flags, REFIID riid, void **pp)
 {
 	Sw11Factory *f;
 	(void)flags;
+	/* Windows' own d3d11.dll imports exactly one thing from dxgi.dll, and
+	 * this is it. When it is the caller, our software factory is not an
+	 * answer - it will be used as a real IDXGIFactory2 and the call will walk
+	 * off a vtable that does not match. The probe raises a flag around its
+	 * device creation so the real factory can be handed over for the length
+	 * of that one call, and the game's own calls are untouched. */
+	if (gpuprobe_wants_real_factory()) {
+		HRESULT (WINAPI *real)(UINT, REFIID, void **) =
+			(HRESULT(WINAPI *)(UINT, REFIID, void **))gpuprobe_real_factory_fn();
+
+		if (real)
+			return real(flags, riid, pp);
+		return E_FAIL;
+	}
 	savestate_hooks_install();
 	ensure_vtbls();
 	if (!pp)
@@ -6224,6 +6482,37 @@ static void perf_tick(void)
 			/* The percentage above is the bill; this is the itemisation.
 			 * Scalar pixels cost about six times what vector ones do, so
 			 * whatever tops this list is the frame time. */
+			if (gpu_mode() >= 2) {
+				unsigned gu, gd, gv;
+
+				gpu_prof_take(&gu, &gd, &gv);
+				g_gpu_uploads_total += gu;
+				/* Declines are the number that matters. The adapter
+				 * cannot take the frame over until it is zero, because
+				 * a declined draw is a sprite the hardware path would
+				 * simply be missing. */
+				d11_log("perf gpu: %u draw(s)/frame, %u vert(s)/frame, "
+					"%u upload(s)/frame | %u declined/frame%s",
+					(unsigned)(gd / (unsigned)(f < 1 ? 1 : f)),
+					(unsigned)(gv / (unsigned)(f < 1 ? 1 : f)),
+					(unsigned)(gu / (unsigned)(f < 1 ? 1 : f)),
+					(unsigned)(g_gpu_declined / (unsigned)(f < 1 ? 1 : f)),
+					g_gpu_declined ? " <<< states the backend does "
+							 "not yet honour exactly"
+						       : " - the frame is fully covered");
+				/* Cumulative on purpose. Uploads and releases are
+				 * one-off events per texture, and dividing them by
+				 * the frame count buries them at zero - which is
+				 * exactly what happened the first time this ran. */
+				d11_log("perf gpu mem: %u texture(s) released to the "
+					"adapter, %.1f MB no longer in this process | "
+					"%u reclaimed by a write | %u upload(s) all told",
+					g_gpu_freed_n,
+					(double)g_gpu_freed_bytes / (1024.0 * 1024.0),
+					g_gpu_rebuilt, g_gpu_uploads_total);
+				g_gpu_declined = 0;
+				g_gpu_mirrored = 0;
+			}
 			if (sr[6] > 0.0) {
 				int bop[4], bsrc[4], bdst[4], nb, k;
 				double barea[4];
@@ -6581,6 +6870,34 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 			gh_tried = 1;
 			d11_log("gameheap: %d import slot(s) redirected",
 				gameheap_install());
+			/* Here rather than at attach for the same reason: the log
+			 * does not exist yet at attach, and a probe whose findings
+			 * go into a closed file has not found anything. */
+			gpuprobe_run(gpuprobe_sink);
+			/* The backend brings itself up on the first present, which is
+			 * the first moment the window is reachable. This only tells
+			 * it where to say so. */
+			gpu_set_log(gpuprobe_sink);
+			/* Registered only when wanted, so the blackout can be taken
+			 * out of the experiment entirely rather than merely turned
+			 * down. D3D11SW_GPU_PARK=0 leaves the adapter running across
+			 * a park, which is the other half of the question: does the
+			 * freeze kill this, or does standing the adapter down kill
+			 * it? One of the two is innocent and they cannot both be
+			 * tested at once. */
+			{
+				char pk[8];
+
+				if (!savestate_getenv("D3D11SW_GPU_PARK", pk, sizeof(pk)) ||
+				    pk[0] != '0')
+					savestate_set_gpu_park(gpu_park);
+				else
+					d11_log("gpu: park hook NOT installed - the adapter "
+						"keeps running across a freeze");
+			}
+			if (gpu_mode() == 1)
+				swrast_set_gpu_present(gpu_present_framebuffer);
+			savestate_set_gpu_park(gpu_park);
 		}
 	}
 	savestate_guard();
@@ -6759,7 +7076,28 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 			LARGE_INTEGER a, b;
 			double r0 = swrast_prof_peek_raster();
 			QueryPerformanceCounter(&a);
-			swrast_present(&r, s->hwnd);
+			/* At mode 2 the adapter's frame is the one shown, so the
+			 * rasteriser's output still has to be finished - readback and
+			 * the savestate read it - but must not also be blitted, or
+			 * the window would receive two different images a frame. */
+			/* Here because this is the first place the window is
+			 * reachable. It costs the first frame's draws, which no one
+			 * will see. */
+			if (gpu_mode() >= 2)
+				gpu_ensure(s->hwnd);
+			/* Once a frame, after the draws: a texture loaded during
+			 * this frame is then moved before the next one, and the
+			 * game's own loading pauses are where most of them arrive. */
+			if (gpu_mode() >= 3)
+				gpu_sweep_release();
+			if (g_gpu_open) {
+				swrast_flush();
+				if (!gpu_frame_end())
+					swrast_present(&r, s->hwnd);
+				g_gpu_open = 0;
+			} else {
+				swrast_present(&r, s->hwnd);
+			}
 			QueryPerformanceCounter(&b);
 			g_zone[ZONE_PRESENT] += b.QuadPart - a.QuadPart;
 			g_raster_nested_ms += swrast_prof_peek_raster() - r0;
@@ -8253,6 +8591,7 @@ static HRESULT WINAPI Ctx_Map(ID3D11DeviceContext1 *this, ID3D11Resource *res, U
 	if (!mapped)
 		return E_INVALIDARG;
 	memset(mapped, 0, sizeof(*mapped));
+	res_reclaim_cpu(r);
 	if (!r || !r->cpu) {
 		/* A refused Map leaves pData null. A game that checks the HRESULT
 		 * copes; one that does not gets a null base pointer, and any size
@@ -8357,6 +8696,7 @@ static void WINAPI Ctx_UpdateSubresource(ID3D11DeviceContext1 *this, ID3D11Resou
 	(void)depth_pitch;
 	if (!r || !src)
 		return;
+	res_reclaim_cpu(r);
 	if (c && c->dev)
 		lock_dev(c->dev);
 	if (r->kind == 0) {
@@ -8493,7 +8833,15 @@ static void WINAPI Ctx_CopyResource(ID3D11DeviceContext1 *this, ID3D11Resource *
 	if (d->usage == D3D11_USAGE_STAGING && (d->cpu_access & D3D11_CPU_ACCESS_READ) &&
 	    (s->is_bb || (s->bind & D3D11_BIND_RENDER_TARGET))) {
 		static long seen;
-		int ok = res_readback_pixels(d, s);
+		/* At mode 3 the rasteriser did not draw this frame, so its plane is
+		 * not the rendered image and copying it would hand back a stale or
+		 * empty one. The adapter has the pixels; a staging copy is the only
+		 * way to reach them, and it is affordable because the game asks for
+		 * this a few times a session at scene transitions. */
+		int ok = (gpu_mode() >= 3 && s->is_bb)
+				 ? gpu_readback((uint32_t *)d->cpu, d->row_pitch,
+						(int)d->width, (int)d->height)
+				 : res_readback_pixels(d, s);
 
 		if (InterlockedIncrement(&seen) <= 8)
 			d11_log("READBACK: CopyResource into staging #%d %ux%u from #%d "
@@ -8640,6 +8988,14 @@ static void WINAPI Ctx_ClearRenderTargetView(ID3D11DeviceContext1 *this, ID3D11R
 	UINT i, n;
 	if (!v || !v->res)
 		return;
+	/* Remembered rather than issued here: the adapter's frame is opened by the
+	 * first draw, which is after this, and it must start from the same
+	 * background the rasteriser started from. */
+	if (col && v->res->is_bb)
+		g_gpu_clear_argb = ((uint32_t)(col[3] * 255.0f + 0.5f) << 24) |
+				   ((uint32_t)(col[0] * 255.0f + 0.5f) << 16) |
+				   ((uint32_t)(col[1] * 255.0f + 0.5f) << 8) |
+				   (uint32_t)(col[2] * 255.0f + 0.5f);
 	if (c && c->dev)
 		lock_dev(c->dev);
 	d11_trace("ClearRTV #%d %ux%u bb=%d rgba=%.2f,%.2f,%.2f,%.2f", v->res->id, v->res->width,
@@ -9865,7 +10221,33 @@ static void ctx_draw_inner(Sw11Context *c, UINT count, UINT start, INT base, int
 			ntri = 0;
 		}
 		if (ntri) {
-			swrast_triangles(&rast, batch, (int)ntri, tex.pixels ? &tex : NULL, &st);
+			/* At mode 2 the rasteriser stays authoritative and the adapter
+			 * draws the same thing beside it, so a declined draw costs a
+			 * count rather than a torn frame. At mode 3 the adapter owns
+			 * the frame: a draw it accepts is not rasterised at all, which
+			 * is what makes letting go of the texture's CPU bytes safe,
+			 * and a draw it declines is a sprite that will be missing. The
+			 * decline count is therefore a correctness figure at mode 3
+			 * and merely a coverage one at mode 2. */
+			int on_gpu = 0;
+
+			if (gpu_mode() >= 2 && rt->is_bb && src_res &&
+			    (tex.pixels || src_res->gpu_released))
+				on_gpu = gpu_shadow_draw(rt, batch, (int)ntri, src_res, &tex,
+							 &st);
+			if (!(on_gpu && gpu_mode() >= 3)) {
+				swrast_triangles(&rast, batch, (int)ntri,
+						 tex.pixels ? &tex : NULL, &st);
+				/* The rasteriser has just changed this surface, and
+				 * if it is an intermediate target the game will
+				 * sample it next. Only the decode path bumps this
+				 * otherwise, so without it a target composed in
+				 * software uploads once and is never refreshed -
+				 * which is a mirror holding the empty first frame
+				 * forever. */
+				if (rt && !rt->is_bb)
+					rt->gpu_gen++;
+			}
 			census_draw(rt, batch, (int)ntri, src_res, &st);
 		frame_note_draw(rt, ntri);
 			perf_note_area(rt, batch, ntri, src_res ? src_res->id : -1, tex.width,

@@ -2249,6 +2249,13 @@ static int swrast_scale_integer(void)
 	return cached;
 }
 
+static int (*g_gpu_present)(HWND, const uint32_t *, int, int);
+
+void swrast_set_gpu_present(int (*fn)(HWND, const uint32_t *, int, int))
+{
+	g_gpu_present = fn;
+}
+
 void swrast_present(SwRast *r, HWND hwnd_override)
 {
 	BITMAPINFO bmi;
@@ -2259,6 +2266,19 @@ void swrast_present(SwRast *r, HWND hwnd_override)
 
 	swrast_flush();
 	if (!r->color || !hwnd)
+		return;
+
+	/* Stage one of the hardware backend replaces this blit and nothing else.
+	 * The frame above it was rasterised exactly as before, so anything that
+	 * looks wrong on screen is in the presenting and not in a pixel. It
+	 * declines by returning zero whenever no device is up, which leaves the
+	 * GDI path below as the answer rather than a fallback nobody tested.
+	 *
+	 * Through a pointer rather than a direct call because the rasteriser is
+	 * linked into targets that have no hardware backend at all - the OpenGL
+	 * front end and the test harnesses - and none of them should have to
+	 * carry a device they will never create. */
+	if (g_gpu_present && g_gpu_present(hwnd, r->color, r->width, r->height))
 		return;
 
 	memset(&bmi, 0, sizeof(bmi));

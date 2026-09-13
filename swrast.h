@@ -107,6 +107,31 @@ void swrast_prof_simd(double *out, int n);
 /* Names the blend states that fell off the vector path, worst area first.
  * Returns how many were filled in. */
 int swrast_prof_blend_other(int *op, int *src, int *dst, double *area, int n);
+
+/* Hardware backend. Presents the finished software frame through a real
+ * swapchain, or returns 0 if no device is up and the caller should present the
+ * way it always has. */
+void gpu_set_log(void (*log)(const char *));
+int gpu_present_framebuffer(HWND hwnd, const uint32_t *pixels, int w, int h);
+
+/* Stage 2: the draws themselves. gpu_draw returns 0 for anything it cannot
+ * honour exactly, and the caller must then decline the whole frame - a frame
+ * split between two backends is two half-drawn images rather than one. */
+int gpu_ensure(HWND hwnd);
+int gpu_tex_sync(void **slot, const uint32_t *pixels, int w, int h, unsigned gen);
+void gpu_tex_drop(void **slot);
+int gpu_frame_begin(int w, int h, int clear, uint32_t argb);
+int gpu_draw(const SwTri *tris, int n, void *texslot, const SwState *st);
+int gpu_frame_end(void);
+int gpu_readback(uint32_t *dst, unsigned dst_pitch, int w, int h);
+void gpu_park(int on);
+void gpu_prof_take(unsigned *uploads, unsigned *draws, unsigned *verts);
+
+/* Installed by whichever front end has a hardware backend. Left null everywhere
+ * else, which is how the OpenGL path and the harnesses avoid linking one. */
+void swrast_set_gpu_present(int (*fn)(HWND, const uint32_t *, int, int));
+int gpu_is_up(void);
+void gpu_shutdown(void);
 int swrast_cpu_features(void);
 
 /* Set to 0 to force the scalar reference rasteriser. */

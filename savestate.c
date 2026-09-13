@@ -838,6 +838,72 @@ int savestate_patch_iat(HMODULE mod, void *from, void *to)
 	return patch_iat(mod, from, to);
 }
 
+/* The same redirect, found by name rather than by address.
+ *
+ * Matching on the address GetProcAddress returns works for an ordinary export
+ * and fails for a forwarder. kernel32!HeapFree is one: its export entry is the
+ * string "NTDLL.RtlFreeHeap", so GetProcAddress resolves through to ntdll and
+ * hands back an address that need not be the one the loader wrote into this
+ * executable's import slot. Our HeapFree patch found nothing for exactly that
+ * reason, and reported an honest zero.
+ *
+ * The name is not ambiguous the way the address is, so walk the names. The
+ * original thunk array keeps them after binding, which is what it is for; an
+ * import bound by ordinal has no name and is skipped, and says so by matching
+ * nothing rather than by matching the wrong thing.
+ *
+ * The address that was there is handed back so the caller has something to
+ * forward to, which is the one thing the address-matching version got for free.
+ */
+int savestate_patch_iat_named(HMODULE mod, const char *dll, const char *fn, void *to,
+			      void **prev)
+{
+	unsigned char *base = (unsigned char *)mod;
+	IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
+	IMAGE_NT_HEADERS *nt;
+	IMAGE_IMPORT_DESCRIPTOR *imp;
+	DWORD rva;
+	int n = 0;
+
+	if (!mod || dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return 0;
+	nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return 0;
+	rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+	if (!rva)
+		return 0;
+	for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + rva); imp->Name; imp++) {
+		const char *name = (const char *)(base + imp->Name);
+		IMAGE_THUNK_DATA *orig, *cur;
+
+		if (dll && lstrcmpiA(name, dll))
+			continue;
+		if (!imp->OriginalFirstThunk)
+			continue;
+		orig = (IMAGE_THUNK_DATA *)(base + imp->OriginalFirstThunk);
+		cur = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+		for (; orig->u1.AddressOfData; orig++, cur++) {
+			IMAGE_IMPORT_BY_NAME *by;
+			DWORD old;
+
+			if (orig->u1.Ordinal & IMAGE_ORDINAL_FLAG)
+				continue;
+			by = (IMAGE_IMPORT_BY_NAME *)(base + orig->u1.AddressOfData);
+			if (lstrcmpA((const char *)by->Name, fn))
+				continue;
+			if (prev)
+				*prev = (void *)cur->u1.Function;
+			if (!VirtualProtect(cur, sizeof(void *), PAGE_READWRITE, &old))
+				continue;
+			cur->u1.Function = (ULONG_PTR)to;
+			VirtualProtect(cur, sizeof(void *), old, &old);
+			n++;
+		}
+	}
+	return n;
+}
+
 /* A heap the game's allocations were redirected into, when they were.
  *
  * Set before the first save. It makes game_crt_heap answer with a heap that has
@@ -4938,6 +5004,37 @@ static void ss_where_reg(const char *name, uintptr_t v)
  * silently miss them. Mapped views are skipped: they are usually shared with
  * another process, where a rewind has no meaning, and our own snapshot window
  * is one of them. */
+/* Stands the adapter down around the snapshot. Registered by whichever front
+ * end owns a device; null everywhere else, which is how the targets with no
+ * hardware backend avoid linking one. */
+static void (*g_gpu_park_fn)(int on);
+
+void savestate_set_gpu_park(void (*fn)(int on))
+{
+	g_gpu_park_fn = fn;
+}
+
+/* Device mappings passed over, counted so the decision is visible rather than
+ * silent. Reset each save: the question is what this snapshot skipped. */
+static unsigned g_dev_regions;
+static unsigned long long g_dev_bytes;
+
+/* Memory a device owns rather than memory this process owns. Write-combining and
+ * non-cached exist for mappings whose reads must not be cached, which describes
+ * an adapter's aperture and nothing an allocator hands out.
+ *
+ * Shared by everything that walks the address space, because the two callers
+ * want it for different reasons and both are right. The snapshot skips these
+ * because reading one mid-freeze is a fault no handler can service. The
+ * coverage audit skips them because they are unreadably slow - uncached, no
+ * prefetch, across the bus - and because fingerprinting them is meaningless
+ * anyway: the adapter rewrites them on its own schedule, so they would report
+ * "changed" every time and mean nothing by it. */
+static int region_is_device(DWORD prot)
+{
+	return (prot & (PAGE_WRITECOMBINE | PAGE_NOCACHE)) != 0;
+}
+
 static int region_wanted(const MEMORY_BASIC_INFORMATION *mbi)
 {
 	DWORD p = mbi->Protect;
@@ -4969,6 +5066,27 @@ static int region_wanted(const MEMORY_BASIC_INFORMATION *mbi)
 	    (p & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
 		  PAGE_EXECUTE_WRITECOPY)))
 		return 0;
+	/* Device memory, not process memory.
+	 *
+	 * A display driver maps video memory into the process write-combined, and
+	 * the kernel's video memory manager can repoint those mappings at any
+	 * moment - suspending threads holds ours, not the GPU. Reading one during
+	 * the copy is a fault no handler can service, which is how a save with a
+	 * live device died inside win_copy having logged nothing at all: the
+	 * driver's heaps were already left in the present and its threads already
+	 * excluded, so the region walk was the only way in left.
+	 *
+	 * Nothing the game owns is ever mapped like this. Write-combining and
+	 * non-cached exist for memory whose reads must not be cached, which
+	 * describes an aperture and nothing an allocator hands out. Leaving them
+	 * out costs the snapshot nothing it should have had: the contents belong
+	 * to the adapter, and the adapter does not rewind - the same bargain the
+	 * texture arena already runs under. */
+	if (region_is_device(p)) {
+		g_dev_regions++;
+		g_dev_bytes += mbi->RegionSize;
+		return 0;
+	}
 	return !region_excluded((uintptr_t)mbi->BaseAddress, mbi->RegionSize);
 }
 
@@ -5376,6 +5494,25 @@ static HANDLE crt_heap(const char *dll)
 		return NULL;
 	get = (intptr_t(__cdecl *)(void))(void *)GetProcAddress(m, "_get_heap_handle");
 	return get ? (HANDLE)get() : NULL;
+}
+
+/* Does an address range fall inside a module the roster says we are holding?
+ *
+ * The module roster and the captured region list are built by different code
+ * and have never been checked against each other. If a region we write back
+ * lies inside a held module, one of the two is lying about what is ours, and
+ * the restore is reaching into a peer that is still running. */
+static int held_mod_at(uintptr_t lo, uintptr_t hi)
+{
+	int k;
+
+	if (!g_ctl)
+		return -1;
+	for (k = 0; k < g_ctl->nmods; k++)
+		if (!g_ctl->mod_rewound[k] && lo < g_ctl->mod_hi[k] &&
+		    hi > g_ctl->mod_lo[k])
+			return k;
+	return -1;
 }
 
 /* Does this executable name a C runtime in its imports at all?
@@ -7255,6 +7392,15 @@ static void blk_reach_mark(void)
 		      (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
 		       PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
 			continue;
+		/* Nor is the adapter's memory, for both of the reasons that keep it
+		 * out of the snapshot and the coverage pass. It cannot hold a game
+		 * pointer - it holds texels, written by us and rearranged by the
+		 * driver - and reading it is uncached and across the bus, which is
+		 * ruinous for a scan that touches every word. Sixty-six such regions
+		 * appearing alongside the hardware backend took this pass from
+		 * 181.7 ms to 4928.0 ms; nothing about the algorithm changed. */
+		if (region_is_device(mbi.Protect))
+			continue;
 		/* Heaps are not roots, and neither is anything we leave in the
 		 * present - system images and our own memory. What is left is the
 		 * game: its image, its arenas, its stacks. */
@@ -8761,7 +8907,16 @@ static void coverage_take(void)
 	while (VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) == sizeof(mbi)) {
 		uintptr_t base = (uintptr_t)mbi.BaseAddress;
 
-		if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) {
+		/* The adapter's mappings are left out here for the same reason the
+		 * snapshot leaves them out, and the cost of not doing so was
+		 * startling: this pass ran 1185.8 MB in 212.7 ms before a hardware
+		 * backend existed and 1020.0 MB in 4962.8 ms after - less memory,
+		 * twenty-three times slower. The difference was 124 MB of
+		 * write-combined aperture being hashed at about 26 MB/s, which is
+		 * simply what an uncached read across the bus costs. It was ninety
+		 * percent of every save. */
+		if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+		    !region_is_device(mbi.Protect)) {
 			if (g_cov->n >= SS_COV_MAX) {
 				g_cov->truncated = 1;
 				break;
@@ -10661,6 +10816,10 @@ int savestate_park(int ms)
 	dsh_save();
 	dsh_quiet();
 	xa2_sw_park();
+	/* Same reasoning as the two above, and the adapter has the stronger
+	 * claim: suspending threads stops ours, and the GPU is not one of ours. */
+	if (g_gpu_park_fn)
+		g_gpu_park_fn(1);
 	QueryPerformanceCounter(&t0);
 	if (alloc_settle())
 		alloc_ranges_init();
@@ -10954,6 +11113,13 @@ static int do_save(int slotno)
 	 * turned out not to exist - see request(), where a restored thread reports
 	 * save-to-restore wall time as if it were a save duration. */
 	LARGE_INTEGER pf, t0, t_susp, t_excl, t_rel, t_walk, t_copy;
+	/* The phases above start at suspend and stop at the copy, which left most of
+	 * this function unmeasured - and that is where a five-second save turned out
+	 * to be hiding while every phase read faster than it ever had. */
+	LARGE_INTEGER t_begin;
+
+	QueryPerformanceFrequency(&pf);
+	QueryPerformanceCounter(&t_begin);
 
 	/* Here rather than at hooks install, where the arena cannot be taken yet:
 	 * blk_arena registers an exclusion, and there is no control block to
@@ -10989,6 +11155,10 @@ static int do_save(int slotno)
 	 * whole window rather than merely for the copy. */
 	dsh_quiet();
 	xa2_sw_park();
+	/* Same reasoning as the two above, and the adapter has the stronger
+	 * claim: suspending threads stops ours, and the GPU is not one of ours. */
+	if (g_gpu_park_fn)
+		g_gpu_park_fn(1);
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t0);
 	g_blk_save_n = 0;
@@ -11100,6 +11270,8 @@ static int do_save(int slotno)
 	slot_release(s);
 	QueryPerformanceCounter(&t_rel);
 
+	g_dev_regions = 0;
+	g_dev_bytes = 0;
 	while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
 		uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
 		if (next <= addr)
@@ -11134,12 +11306,37 @@ static int do_save(int slotno)
 
 	/* Ceiling above 2 GB means the large-address-aware flag took effect. The
 	 * largest free block is what any future allocation arena has to fit in. */
+	if (g_dev_regions)
+		ss_log("  device memory: %u region(s), %.1f MB, passed over - write-combined "
+		       "or non-cached, so they are the adapter's and not ours to snapshot\n",
+		       g_dev_regions, (double)g_dev_bytes / (1024.0 * 1024.0));
 	ss_log("  address space: top %p, %.0f MB used, %.0f MB free, largest free block "
 	       "%.0f MB\n",
 	       (void *)top, (double)used_total / (1024.0 * 1024.0),
 	       (double)free_total / (1024.0 * 1024.0),
 	       (double)free_largest / (1024.0 * 1024.0));
 
+	/* D3D9SW_SAVE_NOCOPY: everything a save does except the one thing that
+	 * touches the game's pages. Threads are collected and suspended, the
+	 * exclusions are built, the walk runs and the regions are chosen - and
+	 * then it resumes without reading any of them. If the process survives
+	 * this and dies with the knob off, the copy is the killer and nothing
+	 * before it is; if it dies either way, the copy is innocent. One run
+	 * answers a question that would otherwise take several. */
+		{
+		char nc[8];
+		DWORD ncn = ss_getenv("D3D9SW_SAVE_NOCOPY", nc, sizeof(nc));
+
+		if (ncn && nc[0] == '1') {
+		ss_log("  save: NOCOPY - %d region(s), %.1f MB chosen and deliberately "
+		       "NOT read. This proves only whether the copy is what kills the "
+		       "process; no snapshot is kept.\n",
+		       s->nregs, (double)total / (1024.0 * 1024.0));
+			slot_release(s);
+			rc = 0;
+			goto done;
+		}
+	}
 	QueryPerformanceCounter(&t_walk);
 	s->sect = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
 				     (DWORD)(total >> 32), (DWORD)total, NULL);
@@ -11275,8 +11472,9 @@ static int do_save(int slotno)
 	{
 		double q = (double)pf.QuadPart / 1000.0;
 
-		ss_log("  save cost ms: suspend %.1f, exclusions %.1f, release %.1f, "
-		       "walk %.1f, section+copy %.1f\n",
+		ss_log("  save cost ms: prologue %.1f, suspend %.1f, exclusions %.1f, "
+		       "release %.1f, walk %.1f, section+copy %.1f\n",
+		       (double)(t0.QuadPart - t_begin.QuadPart) / q,
 		       (double)(t_susp.QuadPart - t0.QuadPart) / q,
 		       (double)(t_excl.QuadPart - t_susp.QuadPart) / q,
 		       (double)(t_rel.QuadPart - t_excl.QuadPart) / q,
@@ -11446,20 +11644,42 @@ static int do_save(int slotno)
 	rc = 1;
 
 done:
-	resume_all(0);
-	dsh_play();
-	xa2_sw_resume();
-	/* After the first save rather than at install, because half of what it
-	 * reports - the heap partition, the module tenancy, the exclusion count -
-	 * does not exist until a snapshot has been built. */
-	ss_inventory(s);
-	/* Last thing before the save returns, so the fingerprints describe the
-	 * process as the snapshot leaves it rather than as it was mid-copy. */
-	coverage_take();
-	/* Armed as the save finishes, so the window it records is exactly the
-	 * window between this snapshot and whatever restores it. */
-	freed_arm();
-	heap_check("before the save");
+	/* Timed individually, because between them these account for whatever the
+	 * phases above do not, and three of them walk the whole process. Reporting
+	 * a lump sum here would only move the mystery rather than answer it. */
+	{
+		LARGE_INTEGER e0, e1, e2, e3, e4, e5;
+		double q = (double)pf.QuadPart / 1000.0;
+
+		QueryPerformanceCounter(&e0);
+		resume_all(0);
+		dsh_play();
+		xa2_sw_resume();
+		QueryPerformanceCounter(&e1);
+		/* After the first save rather than at install, because half of what it
+		 * reports - the heap partition, the module tenancy, the exclusion
+		 * count - does not exist until a snapshot has been built. */
+		ss_inventory(s);
+		QueryPerformanceCounter(&e2);
+		/* Last thing before the save returns, so the fingerprints describe the
+		 * process as the snapshot leaves it rather than as it was mid-copy. */
+		coverage_take();
+		QueryPerformanceCounter(&e3);
+		/* Armed as the save finishes, so the window it records is exactly the
+		 * window between this snapshot and whatever restores it. */
+		freed_arm();
+		QueryPerformanceCounter(&e4);
+		heap_check("before the save");
+		QueryPerformanceCounter(&e5);
+		ss_log("  save cost ms: resume %.1f, inventory %.1f, coverage %.1f, "
+		       "freed_arm %.1f, heap_check %.1f | whole save %.1f\n",
+		       (double)(e1.QuadPart - e0.QuadPart) / q,
+		       (double)(e2.QuadPart - e1.QuadPart) / q,
+		       (double)(e3.QuadPart - e2.QuadPart) / q,
+		       (double)(e4.QuadPart - e3.QuadPart) / q,
+		       (double)(e5.QuadPart - e4.QuadPart) / q,
+		       (double)(e5.QuadPart - t_begin.QuadPart) / q);
+	}
 	return rc;
 }
 
@@ -12889,6 +13109,7 @@ static int do_load(int slotno)
 		Window wv;
 		unsigned long long vwords = 0;
 		int vdiffer = 0, vunchecked = 0, vnamed = 0, vmode = verify_mode();
+		int pstraddle = 0, pdelta = 0, pnamed = 0;
 		LARGE_INTEGER v0, v1, vf;
 
 		QueryPerformanceFrequency(&vf);
@@ -12909,6 +13130,37 @@ static int do_load(int slotno)
 			DWORD old;
 			int writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
+
+			/* Here, and not beside the writeback at the end of the loop,
+			 * because by then the only protection this region has is the
+			 * one we just gave it. Asked there, the probe answered with
+			 * its own footprints: every PAGE_READWRITE region read back as
+			 * PAGE_EXECUTE_READWRITE and every PAGE_WRITECOPY one as
+			 * PAGE_EXECUTE_WRITECOPY, which is this call, not a change the
+			 * process made. `old` is the value that was really there. */
+			if (writable) {
+				int hm = held_mod_at((uintptr_t)base,
+						     (uintptr_t)base + (uintptr_t)size);
+
+				if (hm >= 0) {
+					pstraddle++;
+					if (pnamed++ < 8)
+						ss_log("  STRADDLE: region %d at %p (%llu "
+						       "byte(s)) lies inside %s, which the "
+						       "module roster says is held\n",
+						       i, base, (unsigned long long)size,
+						       g_ctl->mod_name[hm]);
+				}
+				if (old != s->regs[i].prot) {
+					pdelta++;
+					if (pnamed++ < 8)
+						ss_log("  PROTECT: region %d at %p is %08lX "
+						       "now and was %08lX at the save; "
+						       "handing back the saved value\n",
+						       i, base, (unsigned long)old,
+						       (unsigned long)s->regs[i].prot);
+				}
+			}
 			/* A heap region is not copied wholesale any more. Its blocks
 			 * are put back one at a time below, and the bytes between
 			 * them - which is what the allocator keeps its lists in -
@@ -12996,7 +13248,26 @@ static int do_load(int slotno)
 			if (writable && !by_block)
 				der_apply(i, (unsigned char *)base, (size_t)size);
 			/* Back to the protection the region had when it was saved, not the
-			 * one it happened to have a moment ago. */
+			 * one it happened to have a moment ago.
+			 *
+			 * That is right for memory we own and dangerous for memory we do
+			 * not, so both ways it can be wrong are now counted.
+			 *
+			 * A session ended with Steam's vstdlib_s.dll faulting on a REP
+			 * STOSB into one of its own globals, zero frames after a restore,
+			 * on a page reading PAGE_READONLY. The destination was a fixed
+			 * address with a tidy length, which is a memset doing exactly what
+			 * it was written to do - so the pointer was fine and the page was
+			 * not. This line is the only thing in the engine that can make a
+			 * page less writable than the process left it.
+			 *
+			 * Two questions, because they have different answers. Does a
+			 * captured region overlap a module we said we were holding - which
+			 * would mean the module roster and the region list disagree about
+			 * what is ours. And did the protection change between the save and
+			 * now - a copy-on-write page promoted to read-write after we wrote
+			 * the value down is handed back read-only, and its next writer
+			 * dies without either list being wrong. */
 			if (writable)
 				VirtualProtect(base, size, s->regs[i].prot, &old);
 			pos += size;
@@ -13321,6 +13592,13 @@ static int do_load(int slotno)
 			blk_probe_after();
 		}
 		QueryPerformanceCounter(&v1);
+		if (pstraddle || pdelta)
+			ss_log("  protection: %d region(s) inside a held module, %d "
+			       "whose protection had changed since the save%s\n",
+			       pstraddle, pdelta,
+			       pstraddle ? " <<< the module roster and the region "
+					   "list disagree about what is ours"
+					 : "");
 		if (vmode)
 			ss_log("  verify at restore: %d region(s), %d WRONG (%llu word(s)), %d "
 			       "unchecked, %.1f ms%s\n",
@@ -13613,6 +13891,8 @@ static void do_reclaim(Slot *s, int tier)
 	/* Collected in full before anything is freed: the walk would otherwise be
 	 * enumerating a map that is changing underneath it. */
 	g_ctl->nscratch = 0;
+	g_dev_regions = 0;
+	g_dev_bytes = 0;
 	while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
 		uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
 		uintptr_t base = (uintptr_t)mbi.BaseAddress;
@@ -15018,6 +15298,33 @@ static int pos_ready(void);
  * the rest of our image on every restore, and a key that was down at save time
  * would read as a fresh press afterwards - which on F5 means restoring again,
  * forever. */
+/* Is the game the window the keyboard is actually talking to?
+ *
+ * GetAsyncKeyState reads the keyboard, not this window's share of it, so
+ * every hotkey here fires from whatever the user is typing into - a browser,
+ * an editor, a remote-desktop client, the middle of an IME composition. A
+ * stray F5 then takes a save, or worse a restore, against a game that is not
+ * even on screen, and the log records a session the player did not ask for.
+ *
+ * It is also wrong in a way that outlives the keypress. A restore delivered
+ * while another window owns the focus resumes the game holding a keyboard
+ * state it never saw arrive at, because the presses in between were addressed
+ * to somebody else.
+ *
+ * Asked of the foreground window's process rather than a saved HWND: the game
+ * has more than one window over its life, and the one that has focus is the
+ * one the keys are going to. */
+static int ours_has_focus(void)
+{
+	HWND fg = GetForegroundWindow();
+	DWORD pid = 0;
+
+	if (!fg)
+		return 0;
+	GetWindowThreadProcessId(fg, &pid);
+	return pid == GetCurrentProcessId();
+}
+
 int savestate_key_edge(int vk)
 {
 	static unsigned fallback[8];
@@ -15035,8 +15342,19 @@ int savestate_key_edge(int vk)
 		g_ctl->key_seeded = 1;
 	}
 	bits = g_ctl ? g_ctl->key_down : fallback;
+	/* Tracked even when it is not ours, so a key held down across an alt-tab
+	 * back into the game is already marked down and does not read as a fresh
+	 * press the moment focus returns. The edge is suppressed; the state is
+	 * not. */
 	down = (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
 	was = (bits[(vk >> 5) & 7] >> (vk & 31)) & 1;
+	if (!ours_has_focus()) {
+		if (down)
+			bits[(vk >> 5) & 7] |= 1u << (vk & 31);
+		else
+			bits[(vk >> 5) & 7] &= ~(1u << (vk & 31));
+		return 0;
+	}
 
 	if (down)
 		bits[(vk >> 5) & 7] |= 1u << (vk & 31);
@@ -15047,7 +15365,7 @@ int savestate_key_edge(int vk)
 
 int savestate_key_held(int vk)
 {
-	return (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
+	return ours_has_focus() && (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
 }
 
 void savestate_probe_census(void)
