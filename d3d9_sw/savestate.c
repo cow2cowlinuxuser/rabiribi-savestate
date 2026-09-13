@@ -4322,7 +4322,8 @@ static const char *const g_knobs[] = {
 	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
 	"D3D9SW_RECYCLED",	  "D3D9SW_GAMEHEAP",
-	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN"
+	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN",
+	"D3D9SW_SLOTFILE"
 };
 
 /* Read every knob into the memo before the environment is closed for business.
@@ -5931,6 +5932,46 @@ static uintptr_t heap_infra(uintptr_t base, HANDLE h, int *nheld, int depth)
 				 * how a rewinding heap's segment ends up held. */
 				if (span && !region_excluded(ab, span) &&
 				    !infra_clash(ab, span, "the header list walk")) {
+					/* Said out loud for the big ones, because this
+					 * site holds whole allocations on the strength of
+					 * a shape match and the cost of a false positive
+					 * scales with the block. A 128 MB allocation held
+					 * here is 128 MB the game changes and a restore
+					 * never puts back.
+					 *
+					 * points_back is the stricter test the other site
+					 * already uses: real heap infrastructure carries
+					 * the heap's own handle near its start. Reported
+					 * rather than enforced, because a large block that
+					 * genuinely is the heap's must stay held - its
+					 * metadata is indexed by a header we do not rewind
+					 * - and one run's evidence should decide which of
+					 * those this is. */
+					if (span >= (1u << 20)) {
+						/* Where the list node sits inside the block
+						 * it supposedly describes, and what the node
+						 * claims that block's reserved size is.
+						 *
+						 * Windows puts a large allocation's entry at
+						 * the very front of the allocation, so a
+						 * genuine one has the node at offset 0 and a
+						 * reserve size that matches the span. A
+						 * pointer we followed into the middle of an
+						 * unrelated allocation has neither. That is
+						 * the difference this site never checked. */
+						unsigned long res = 0;
+
+						if (ss_readable(ab + 0x14, sizeof(unsigned)))
+							res = *(const unsigned *)(ab + 0x14);
+						ss_log("    infra: holding %08lX (%.2f MB) off "
+						       "heap %p's header list - node at +%lX "
+						       "in it, node's reserve field %lX vs "
+						       "span %lX\n",
+						       (unsigned long)ab,
+						       (double)span / (1024.0 * 1024.0),
+						       (void *)h, (unsigned long)(p - ab), res,
+						       (unsigned long)span);
+					}
 					ss_exclude_as("private memory reached from a held heap header", (void *)ab, (size_t)span);
 					held += span;
 					(*nheld)++;
@@ -10319,6 +10360,157 @@ static void slot_release(Slot *s)
 	s->bytes = 0;
 }
 
+/* -------------------------------------------------- a slot that outlives us
+ *
+ * D3D9SW_SLOTFILE=1 backs the snapshot with a file instead of the pagefile and
+ * writes the slot's description beside it, so a save taken in one session can
+ * be handed to the next.
+ *
+ * Deliberately the smallest thing that answers the question. Slot is plain
+ * data - region base/size pairs, thread contexts, file states, module bases -
+ * with one field that cannot travel, the section handle, so persisting it is a
+ * write and a read rather than a serialiser.
+ *
+ * What it cannot do is make the restore correct across a relaunch, and that is
+ * the point of running it. The engine leaves 16.4 MB of heap, every system
+ * thread and all 91 module images in the present because they cannot be
+ * rewound; today that is safe because the present is continuous with the save.
+ * A second session is a different present. If this works at all it says the
+ * snapshot carries more of the game than we thought; if it fails it says where
+ * the continuity is load-bearing, and either answer is worth one run.
+ */
+static int slotfile_mode(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_SLOTFILE", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '1') ? 1 : 0;
+	}
+	return cached;
+}
+
+static void slotfile_path(char *buf, int cap, int slotno, const char *ext)
+{
+	char leaf[64];
+
+	wsprintfA(leaf, "d3d9sw_slot%d.%s", slotno, ext);
+	if (!GetFullPathNameA(leaf, (DWORD)cap, buf, NULL))
+		lstrcpynA(buf, leaf, cap);
+}
+
+/* The section, backed by a file this time. Returns NULL to let the caller fall
+ * back to the pagefile, because a slot we cannot persist is still a slot. */
+static HANDLE slotfile_section(int slotno, unsigned long long total)
+{
+	char path[MAX_PATH];
+	HANDLE f, sect;
+
+	slotfile_path(path, sizeof(path), slotno, "bin");
+	f = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) {
+		ss_log("  slotfile: cannot create %s, err=%lu - falling back to the "
+		       "pagefile\n",
+		       path, GetLastError());
+		return NULL;
+	}
+	sect = CreateFileMappingA(f, NULL, PAGE_READWRITE, (DWORD)(total >> 32),
+				  (DWORD)total, NULL);
+	if (!sect)
+		ss_log("  slotfile: mapping %s at %llu bytes failed, err=%lu\n", path, total,
+		       GetLastError());
+	else
+		ss_log("  slotfile: snapshot is backed by %s, %.1f MB\n", path,
+		       (double)total / (1024.0 * 1024.0));
+	/* The mapping keeps the file alive on its own. */
+	CloseHandle(f);
+	return sect;
+}
+
+/* Never a local copy of a Slot. SS_MAX_REGIONS is 65536 and every one of 256
+ * thread slots carries a CONTEXT, so the struct runs to several megabytes and a
+ * stack copy of it is an immediate C00000FD - which is exactly how the first
+ * version of this ended, freezing the process on the first F5. The handle is
+ * nulled in place and put back instead. */
+static void slotfile_write_meta(int slotno, Slot *s)
+{
+	char path[MAX_PATH];
+	HANDLE f, keep;
+	DWORD wrote = 0;
+
+	slotfile_path(path, sizeof(path), slotno, "meta");
+	f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+			NULL);
+	if (f == INVALID_HANDLE_VALUE) {
+		ss_log("  slotfile: cannot write %s, err=%lu\n", path, GetLastError());
+		return;
+	}
+	/* Meaningless in another process, and leaving a stale value in it is how a
+	 * hydrated slot would close somebody else's handle. */
+	keep = s->sect;
+	s->sect = NULL;
+	WriteFile(f, s, (DWORD)sizeof(*s), &wrote, NULL);
+	s->sect = keep;
+	CloseHandle(f);
+	ss_log("  slotfile: %s written, %d region(s), %d thread(s), %.1f MB of bytes "
+	       "alongside\n",
+	       path, s->nregs, s->nthreads, (double)s->bytes / (1024.0 * 1024.0));
+}
+
+/* Fills an empty slot from the pair of files, so Shift+F5 in a fresh session
+ * has something to restore. */
+static int slotfile_read(int slotno, Slot *s)
+{
+	char path[MAX_PATH];
+	HANDLE f;
+	DWORD got = 0;
+	HANDLE sect;
+
+	slotfile_path(path, sizeof(path), slotno, "meta");
+	f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE)
+		return 0;
+	/* Straight into the slot, for the same reason the writer does not take a
+	 * copy: this struct is far too large to sit on a stack. Safe only because
+	 * the caller checked the slot was empty, and any failure below leaves it
+	 * marked invalid. */
+	s->valid = 0;
+	if (!ReadFile(f, s, (DWORD)sizeof(*s), &got, NULL) || got != sizeof(*s)) {
+		ss_log("  slotfile: %s is %lu bytes, expected %u - ignoring it\n", path, got,
+		       (unsigned)sizeof(*s));
+		CloseHandle(f);
+		return 0;
+	}
+	CloseHandle(f);
+
+	slotfile_path(path, sizeof(path), slotno, "bin");
+	f = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) {
+		ss_log("  slotfile: %s missing, err=%lu - the description is no use "
+		       "without the bytes\n",
+		       path, GetLastError());
+		return 0;
+	}
+	sect = CreateFileMappingA(f, NULL, PAGE_READWRITE, 0, 0, NULL);
+	CloseHandle(f);
+	if (!sect) {
+		ss_log("  slotfile: cannot map %s, err=%lu\n", path, GetLastError());
+		return 0;
+	}
+	s->sect = sect;
+	s->valid = 1;
+	ss_log("  slotfile: loaded a slot taken in another session - %d region(s), %d "
+	       "thread(s), %.1f MB. Nothing about this restore is expected to be "
+	       "safe; the run is the experiment\n",
+	       s->nregs, s->nthreads, (double)s->bytes / (1024.0 * 1024.0));
+	return 1;
+}
+
 /* Is any thread executing inside the JIT?
  *
  * The snapshot suspends threads at whatever instruction they happen to be on,
@@ -11338,8 +11530,10 @@ static int do_save(int slotno)
 		}
 	}
 	QueryPerformanceCounter(&t_walk);
-	s->sect = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-				     (DWORD)(total >> 32), (DWORD)total, NULL);
+	s->sect = slotfile_mode() ? slotfile_section(slotno, total) : NULL;
+	if (!s->sect)
+		s->sect = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+					     (DWORD)(total >> 32), (DWORD)total, NULL);
 	if (!s->sect) {
 		ss_log("save: section %llu bytes failed, err=%lu\n", total, GetLastError());
 		goto done;
@@ -11641,6 +11835,9 @@ static int do_save(int slotno)
 	witness_save(s);
 	cap_record(s);
 	carry_save();
+	/* Last, because everything above fills fields the description has to carry. */
+	if (slotfile_mode())
+		slotfile_write_meta(slotno, s);
 	rc = 1;
 
 done:
@@ -12615,6 +12812,10 @@ static int do_load(int slotno)
 	int i, j, restored = 0, skipped = 0, tls_done = 0, blocked = 0;
 	int handskip = 0, handscrib = 0;
 
+	/* Only when there is nothing in memory, so a session that took its own save
+	 * restores that one and the file is the fallback rather than the rule. */
+	if (!s->valid && slotfile_mode())
+		slotfile_read(slotno, s);
 	if (!s->valid)
 		return 0;
 	/* Sampled here, before a single byte moves, because this is the only moment
