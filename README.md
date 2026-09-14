@@ -1,29 +1,63 @@
 # rabiribi-savestate
 
-Does state save for Rabi-Ribi. Not complete, and not reliable.
+Does state save for Rabi-Ribi. Now usable within a session.
 
 In-process save and restore of a running 32-bit Windows game: memory regions,
-heap blocks, thread contexts, the clock, and DirectSound cursors, taken and put
-back without a debugger and without the game's cooperation. It works often
-enough to be interesting and not often enough to be used.
+heap blocks, thread contexts, the clock, and audio cursors, taken and put back
+without a debugger and without the game's cooperation. It renders on the GPU
+and covers the monitor while doing it.
 
-## Current state
+## Current state (v1.3)
 
-A save and a restore complete. The engine's own checks pass: every captured
-region is written back byte-for-byte (`0 WRONG`), no region is skipped, and all
-tracked DirectSound buffers are stopped and seeked. The game frequently faults
-within a frame of the resume anyway.
+Save and restore both complete in under a second and survive normal play.
+Multiple full sessions with repeated saves and restores across rooms, with no
+crash attributable to the engine. This is a large change from earlier versions,
+where a restore usually faulted within a frame.
 
-The best current account of why is a split rather than a copying failure. The
-game's runtime allocates from the shared process heap, so one heap serves both
-it and Windows. Block-level restore with ownership filtering deliberately
-leaves any block Windows can also reach in the present, and about twelve system
-threads keep running forward with stacks that are never rewound. Objects that
-those threads hold then no longer describe the buffers the restored game
-believes in.
+Three things got it there.
 
-Known gaps, all measured rather than assumed:
+**The game's own heap.** `D3D9SW_GAMEHEAP=1` creates a heap for the game and
+redirects the executable's `malloc` family into it. Rabi-Ribi links ucrtbase,
+which does not create a heap — it calls `GetProcessHeap` and allocates
+alongside ntdll, GDI and combase. Interleaving the game's blocks with Windows'
+in one arena is what forced every restore to guess which blocks it owned, and
+was behind most of the faults.
 
+**Not reading device memory.** The region walk now skips `PAGE_WRITECOMBINE`
+and `PAGE_NOCACHE` pages. Reading the aperture at 26 MB/s was the original
+cause of the save-time crashes and of multi-second saves.
+
+**Writing only what changed.** `D3D9SW_DIFFWRITE=1` compares before writing.
+About 90% of a 390 MB snapshot is static DxLib arenas, so a restore writes
+roughly 30 MB.
+
+Rendering moved to the adapter in the same period: heavy scenes went from 19
+fps to a stable 60, and mirroring textures into video memory cut the CPU-side
+texture payload from 641 MB to about 195 MB, which is what makes a snapshot fit
+in a 2 GB process at all.
+
+`D3D11SW_BORDERLESS=1` covers the monitor at its true resolution and does the
+upscale itself, so `D3D11SW_SCALE=point,integer` gives clean nearest-neighbour
+pixels rather than the panel's scaler.
+
+### Refused on purpose
+
+Restoring a save taken in a different world is rejected. It faults immediately
+on a pointer into what is now text data: the heap reuses blocks across a world
+transition, and a restored pointer to a block that has since been freed and
+reallocated cannot be made valid by writing memory back. `D3D9SW_CROSSWORLD=1`
+allows the attempt for anyone experimenting.
+
+Cross-session restore fails for the same underlying reason. The snapshot is
+address-dependent and the game's dynamic allocations do not land at
+reproducible addresses across launches. Both need a save that can be
+deterministically repaired at restore time rather than replayed verbatim.
+
+### Known gaps, measured rather than assumed
+
+- Ribbon sweeps to the player after a restore. Both entities restore to correct
+  positions, so she is chasing a third piece of state that is not in the
+  snapshot.
 - roughly 4.7 MB of `MEM_MAPPED` regions are never captured, because the region
   filter accepts `MEM_PRIVATE` and `MEM_IMAGE` only
 - a heap can be classified as the game's and still contribute almost nothing,
@@ -31,6 +65,9 @@ Known gaps, all measured rather than assumed:
   heap lives in reservations that do not carry one
 - the snapshot is not a single instant; one region has been observed changing
   during the copy with every thread in the process suspended
+- Steam's threads are not rewound, so alt-tabbing after a restore has been seen
+  to fault inside `steamclient.dll`
+- occasional texture atlas seams, and brief audio artefacts on the title screen
 
 ## Layout
 
@@ -39,10 +76,19 @@ Known gaps, all measured rather than assumed:
 - `dsoundhook.c` — DirectSound buffer tracking, so play cursors can be put back.
 - `d3d11_sw.c`, `swrast.c`, `dxbc.c`, `vsinterp.c` — the software renderer this
   grew inside. The game loads it as `d3d11.dll` / `dxgi.dll`.
+- `gpu.c`, `gpu_quad.hlsl` — the hardware backend. Textures are mirrored into
+  video memory and their CPU copies released where it is safe, which is what
+  frees the address space a snapshot needs.
+- `gameheap.c` — the game's private heap and the import redirection into it.
 - `ss_harness.c`, `ds_harness.c`, `rr_harness.c` — drive the engine with no game
   attached. `rr_harness` is the most useful: it reproduces the game's structural
   shape (shared process heap, present-time system threads, tracked audio
   buffers, thread counts) and asserts oracles after every restore.
+- `gh_replay.c` — replays a recorded allocation trace against candidate
+  allocators, to ask which of them place blocks reproducibly.
+- `dispprobe.c` — prints what every monitor-size API reports, side by side.
+  Built without a DPI manifest on purpose, so it sees the invented coordinates
+  the game sees.
 - `examples/rabiribi/` — the configuration the game is actually run with.
 
 ## Building

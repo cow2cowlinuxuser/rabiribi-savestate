@@ -41,6 +41,23 @@ if ($LASTEXITCODE -eq 0) { "built ds_harness32.exe (DirectSound rewind test, no 
 & $zig cc @warn -target x86-windows-gnu -o rr_harness32.exe rr_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c -luser32 -lwinmm
 if ($LASTEXITCODE -eq 0) { "built rr_harness32.exe (all four conditions, no game)" }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Replays a recorded allocation trace against candidate allocators. Standalone -
+# it links nothing from the engine, because the question it answers is about the
+# allocator alone and a dependency on savestate.c would only make it slower to
+# build and harder to trust. 32-bit on purpose: header sizes, alignment and the
+# low-fragmentation heap's bucket boundaries are all width-dependent, so a
+# 64-bit replay would answer a question nobody asked.
+& $zig cc @warn -target x86-windows-gnu -o gh_replay32.exe gh_replay.c
+if ($LASTEXITCODE -eq 0) { "built gh_replay32.exe (allocation trace replay, no game)" }
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Prints what every monitor-size API reports, side by side. Built with no DPI
+# manifest on purpose, so it sees the same invented coordinates the game does -
+# a manifest here would hide the exact discrepancy it exists to show.
+& $zig cc @warn -target x86-windows-gnu -o dispprobe32.exe dispprobe.c -lgdi32 -luser32
+if ($LASTEXITCODE -eq 0) { "built dispprobe32.exe (monitor size and refresh probe)" }
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "built ss_harness32.exe (savestate engine, PE32)"
 
 # test_simd.exe only compares the scalar rasteriser against the vector one, so a

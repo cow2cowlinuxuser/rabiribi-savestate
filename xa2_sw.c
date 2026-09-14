@@ -295,14 +295,24 @@ typedef struct {
 
 static Pending g_pend[XA2_PEND];
 static int g_pend_head, g_pend_n;
+/* Two reasons a callback never runs, and they mean opposite things.
+ *
+ * Dropped at the park is by design: a callback queued before a rewind is about
+ * a world that no longer exists, and the mixer asks again on the next pass.
+ * Dropped because the ring was full is the game talking faster than we drain,
+ * and that is the shape of audio going quiet. They shared one counter, which
+ * is why a jump from 32 to 505 could not be read: it was either twenty parks
+ * behaving normally or the ring saturating once, and the number could not say
+ * which. */
 static unsigned long g_pend_lost;
+static unsigned long g_pend_full;
 
 static void cb_post(XA2Callback *c, int slot, void *ctx)
 {
 	if (!c || !c->vtbl)
 		return;
 	if (g_pend_n >= XA2_PEND) {
-		g_pend_lost++;
+		g_pend_full++;
 		return;
 	}
 	g_pend[(g_pend_head + g_pend_n) % XA2_PEND].cb = c;
@@ -1415,9 +1425,12 @@ void xa2_sw_report(void)
 	 * anyone having to listen for it: at 1024 frames a block, a few thousand
 	 * dry frames is an underrun and not a rounding error. */
 	ss_log("xa2_sw: %lu voice(s), %lu buffer(s) submitted, %lu block(s) mixed, "
-	       "%lu dry frame(s), %lu overflow(s), %lu callback(s) dropped. Every "
-	       "callback ran on the game's own thread\n",
-	       g_voices, g_submits, g_blocks_out, g_starved, g_overflow, g_pend_lost);
+	       "%lu dry frame(s), %lu overflow(s), %lu callback(s) dropped at a park "
+	       "and %lu because the ring was full%s. Every callback ran on the "
+	       "game's own thread\n",
+	       g_voices, g_submits, g_blocks_out, g_starved, g_overflow, g_pend_lost,
+	       g_pend_full,
+	       g_pend_full ? " <<< the second number is audio going quiet" : "");
 	for (i = 0; i < M_MAX; i++)
 		if (g_calls[i])
 			ss_log("  %-22s %lu call(s)\n", g_mname[i], g_calls[i]);
