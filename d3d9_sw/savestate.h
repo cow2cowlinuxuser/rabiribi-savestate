@@ -25,6 +25,9 @@ int savestate_slot_valid(int slot);
 /* Cheap, call once per frame. Reclaims addresses the snapshot still needs
  * before another allocator can take them. */
 void savestate_guard(void);
+/* Milliseconds spent inside savestate_guard, and inside the audio drain it
+ * makes, since the last call. Both are reset by reading them. */
+void savestate_perf_take(double *guard_ms, double *audio_ms);
 double savestate_last_ms(void);
 double savestate_last_mb(void);
 /* Nonzero if the operation that just completed was a restore, whichever of
@@ -133,6 +136,17 @@ int savestate_park(int ms);
 /* Stands a hardware backend down around a save, restore or park, the way
  * dsh_quiet already does for audio. Null unless a front end registers one. */
 void savestate_set_gpu_park(void (*fn)(int on));
+
+/* Told by the present path when the window changes state: 0 foreground,
+ * 1 background, 2 minimised. Recorded in a small ring and printed by the fault
+ * report, because a focus change is the thing that wakes the libraries we do
+ * not rewind and is therefore the last step of more than one crash. */
+void savestate_note_focus(int state);
+
+/* Called once per presented frame. Emits the watched addresses for a while
+ * after a save or a restore when D3D9SW_WATCH_TRACE is set, so a value can be
+ * judged by the shape of its motion rather than by two samples. */
+void savestate_watch_tick(void);
 
 /* Write the main module out as it exists in memory, for a disassembler. The
  * game's .text is encrypted on disk behind a Steam stub; in here it is not. */

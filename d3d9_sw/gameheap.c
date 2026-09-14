@@ -88,6 +88,67 @@ static volatile LONG g_nreg;
 static unsigned long g_alloc, g_freed_ours, g_freed_theirs, g_toobig, g_regfull;
 static unsigned long g_stale, g_fellback;
 
+/* -------------------------------------------------- the allocation trace
+ *
+ * D3D9SW_GHTRACE=N records the first N allocator operations - what kind, how
+ * big, and where in the heap the block landed - and writes them to gh_trace.txt
+ * beside the log.
+ *
+ * The reason to have it is an observation that is currently resting on two data
+ * points. The player entity has been found at heap base + 0x7F4B8 in two
+ * separate sessions whose heap bases differed (0DFB0000 and 0DC70000), which
+ * says the heap's internal placement is a function of the allocation sequence
+ * and nothing else - the base moves, the contents do not. If that holds over
+ * tens of thousands of operations rather than one lucky pointer, then a
+ * snapshot is relocatable and an address in it can be derived from a single
+ * anchor. If it does not hold, everything built on it falls over, and it is far
+ * cheaper to find that out from a diff of two traces than from a restore that
+ * faults.
+ *
+ * Two runs, diff the offset column. Identical means deterministic.
+ *
+ * Constraints this sits under: it runs inside the game's malloc, on every call,
+ * so it must not allocate, must not lock, and must not touch a file. A slot is
+ * claimed with one interlocked increment into a buffer reserved up front, and
+ * the whole thing is written out later from the census, which already runs on a
+ * frame boundary. A lock here would change the timing of the very thing being
+ * measured.
+ */
+#define GH_TR_ALLOC 'A'  /* served from our heap */
+#define GH_TR_CALLOC 'C' /* served from our heap, zeroed */
+#define GH_TR_REALLOC 'R'
+#define GH_TR_FREE 'F'
+#define GH_TR_BIG 'B'	 /* over GH_BIG, handed to the runtime */
+#define GH_TR_OTHER 'O'	 /* freed something that was never ours */
+
+typedef struct {
+	unsigned op;
+	unsigned size;
+	unsigned off; /* from the heap base, or ~0 when it is not in our heap */
+} GhTr;
+
+static GhTr *g_tr;
+static volatile LONG g_tr_n;
+static LONG g_tr_cap;
+
+static void gh_trace(unsigned op, size_t n, const void *u)
+{
+	LONG i;
+
+	if (!g_tr)
+		return;
+	i = InterlockedIncrement(&g_tr_n) - 1;
+	if (i >= g_tr_cap)
+		return;
+	g_tr[i].op = op;
+	g_tr[i].size = (unsigned)n;
+	/* A Windows heap handle is the address of its first segment, so the handle
+	 * doubles as the base the offsets are measured from. */
+	g_tr[i].off = (u && g_heap && (uintptr_t)u > (uintptr_t)g_heap)
+			      ? (unsigned)((uintptr_t)u - (uintptr_t)g_heap)
+			      : 0xFFFFFFFFu;
+}
+
 typedef void *(__cdecl *PFN_malloc)(size_t);
 typedef void *(__cdecl *PFN_calloc)(size_t, size_t);
 typedef void *(__cdecl *PFN_realloc)(void *, size_t);
@@ -200,6 +261,7 @@ static void *gh_malloc(size_t n)
 
 	if (!g_ready || n >= GH_BIG) {
 		g_toobig += n >= GH_BIG;
+		gh_trace(GH_TR_BIG, n, NULL);
 		return r_malloc(n);
 	}
 	raw = HeapAlloc(g_heap, 0, n + sizeof(GhHead));
@@ -207,7 +269,12 @@ static void *gh_malloc(size_t n)
 		g_fellback++;
 		return r_malloc(n);
 	}
-	return give(raw, n);
+	{
+		void *u = give(raw, n);
+
+		gh_trace(GH_TR_ALLOC, n, u);
+		return u;
+	}
 }
 
 static void *gh_calloc(size_t c, size_t s)
@@ -219,6 +286,7 @@ static void *gh_calloc(size_t c, size_t s)
 		return NULL;
 	if (!g_ready || n >= GH_BIG) {
 		g_toobig += n >= GH_BIG;
+		gh_trace(GH_TR_BIG, n, NULL);
 		return r_calloc(c, s);
 	}
 	raw = HeapAlloc(g_heap, HEAP_ZERO_MEMORY, n + sizeof(GhHead));
@@ -226,7 +294,12 @@ static void *gh_calloc(size_t c, size_t s)
 		g_fellback++;
 		return r_calloc(c, s);
 	}
-	return give(raw, n);
+	{
+		void *u = give(raw, n);
+
+		gh_trace(GH_TR_CALLOC, n, u);
+		return u;
+	}
 }
 
 static void gh_free(void *p)
@@ -236,11 +309,14 @@ static void gh_free(void *p)
 	if (!h) {
 		if (p)
 			g_freed_theirs++;
+		if (p)
+			gh_trace(GH_TR_OTHER, 0, NULL);
 		r_free(p);
 		return;
 	}
 	h->magic = 0;
 	g_freed_ours++;
+	gh_trace(GH_TR_FREE, h->size, p);
 	HeapFree(g_heap, 0, h);
 }
 
@@ -266,7 +342,12 @@ static void *gh_realloc(void *p, size_t n)
 	if (n < GH_BIG) {
 		raw = HeapReAlloc(g_heap, 0, h, n + sizeof(GhHead));
 		if (raw)
-			return give(raw, n);
+			{
+				void *u = give(raw, n);
+
+				gh_trace(GH_TR_REALLOC, n, u);
+				return u;
+			}
 	}
 	/* Either it outgrew what we keep, or the heap could not extend it. Move
 	 * it out to the runtime rather than fail: a realloc that returns NULL
@@ -553,6 +634,27 @@ int gameheap_install(void)
 		ss_log("gameheap: no memory for trampolines, error %lu\n", GetLastError());
 		return 0;
 	}
+	{
+		char v[16];
+		unsigned cap = savestate_getenv("D3D9SW_GHTRACE", v, sizeof(v));
+		long want = 0;
+		unsigned k;
+
+		for (k = 0; k < cap && v[k] >= '0' && v[k] <= '9'; k++)
+			want = want * 10 + (v[k] - '0');
+		if (want > 0) {
+			/* Reserved before the first allocation is served, because a
+			 * trace that starts late starts after the layout it is meant
+			 * to explain has already been decided. */
+			g_tr = (GhTr *)VirtualAlloc(NULL, (SIZE_T)want * sizeof(GhTr),
+						    MEM_COMMIT | MEM_RESERVE,
+						    PAGE_READWRITE);
+			g_tr_cap = g_tr ? (LONG)want : 0;
+			ss_log("gameheap: tracing the first %ld allocator operation(s) "
+			       "into gh_trace.txt%s\n",
+			       want, g_tr ? "" : " - RESERVATION FAILED, tracing off");
+		}
+	}
 	g_heap = HeapCreate(0, 1u << 20, 0);
 	if (!g_heap) {
 		ss_log("gameheap: HeapCreate failed, error %lu\n", GetLastError());
@@ -605,8 +707,49 @@ int gameheap_install(void)
 	return wired;
 }
 
+/* Written from the census rather than from the allocator, because this opens a
+ * file and formats text and neither belongs on a path the game takes millions of
+ * times. Rewritten in full each time rather than appended, so the file always
+ * describes one run from its first allocation and two runs can be diffed
+ * directly. */
+static void gh_trace_dump(void)
+{
+	HANDLE f;
+	char line[64];
+	LONG n = g_tr_n, i;
+	DWORD wrote = 0;
+
+	if (!g_tr)
+		return;
+	if (n > g_tr_cap)
+		n = g_tr_cap;
+	f = CreateFileA("gh_trace.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) {
+		ss_log("gameheap: cannot write gh_trace.txt, error %lu\n", GetLastError());
+		return;
+	}
+	/* The base goes in a comment rather than into the offsets, which are what a
+	 * diff compares. Two runs with different bases and identical offset columns
+	 * is the whole result. */
+	wsprintfA(line, "# heap %08lX  %ld op(s)%s\r\n", (unsigned long)(uintptr_t)g_heap,
+		  (long)n, (g_tr_n > g_tr_cap) ? "  TRUNCATED" : "");
+	WriteFile(f, line, (DWORD)lstrlenA(line), &wrote, NULL);
+	WriteFile(f, "# op size offset\r\n", 18, &wrote, NULL);
+	for (i = 0; i < n; i++) {
+		int k = wsprintfA(line, "%c %08lX %08lX\r\n", (char)g_tr[i].op,
+				  (unsigned long)g_tr[i].size, (unsigned long)g_tr[i].off);
+		WriteFile(f, line, (DWORD)k, &wrote, NULL);
+	}
+	CloseHandle(f);
+	ss_log("gameheap: gh_trace.txt written, %ld of %ld operation(s)%s\n", (long)n,
+	       (long)g_tr_n,
+	       (g_tr_n > g_tr_cap) ? " - the buffer filled, raise D3D9SW_GHTRACE" : "");
+}
+
 void gameheap_report(void)
 {
+	gh_trace_dump();
 	if (!g_ready) {
 		if (on())
 			ss_log("gameheap: asked for, but not installed\n");

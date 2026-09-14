@@ -286,6 +286,69 @@ static int module_of(uintptr_t v);
  * module names read from the table gathered at the last save rather than asked
  * of the loader. It handles only the conversions used below. */
 static void ss_raw(const char *fmt, ...);
+
+/* -------------------------------------------------- the window's focus, kept
+ *
+ * A crash report that says where the fault was but not what the process was
+ * doing leaves the last step to be reconstructed from a second log file
+ * afterwards, by hand, comparing file timestamps. That is how the Steam fault
+ * was pinned down: the render log's last line was "window is now in the
+ * background" and the savestate log was written 354 ms later, which turned an
+ * intermittent crash into a sequence - restore, play four seconds, alt-tab,
+ * die. Steam's threads sit on memory the restore rewound underneath them and
+ * nothing makes them read it until a focus change wakes the overlay.
+ *
+ * Worth recording rather than inferring, because it is the difference between
+ * a crash that looks random and one with a cause. A ring of the last few
+ * transitions costs two words each and prints inside the fault path, which
+ * must not allocate, take a lock or call the C runtime - so it is a fixed
+ * array, a counter, and nothing else.
+ */
+#define SS_FOCUS_RING 8
+static struct {
+	DWORD tick;
+	int state; /* 0 foreground, 1 background, 2 minimised */
+} g_focus[SS_FOCUS_RING];
+static volatile LONG g_focus_n;
+
+void savestate_note_focus(int state)
+{
+	LONG i = InterlockedIncrement(&g_focus_n) - 1;
+
+	g_focus[(unsigned)i & (SS_FOCUS_RING - 1)].tick = GetTickCount();
+	g_focus[(unsigned)i & (SS_FOCUS_RING - 1)].state = state;
+}
+
+static void focus_report(void)
+{
+	DWORD now = GetTickCount();
+	LONG n = g_focus_n, i;
+
+	if (n <= 0)
+		return;
+	if (n > SS_FOCUS_RING)
+		n = SS_FOCUS_RING;
+	for (i = n - 1; i >= 0; i--) {
+		LONG k = g_focus_n - 1 - (n - 1 - i);
+		const char *w;
+
+		if (k < 0)
+			continue;
+		switch (g_focus[(unsigned)k & (SS_FOCUS_RING - 1)].state) {
+		case 2:
+			w = "MINIMISED";
+			break;
+		case 1:
+			w = "went to the BACKGROUND";
+			break;
+		default:
+			w = "came to the foreground";
+			break;
+		}
+		ss_raw("       focus: %s, %u ms before the fault\n", w,
+		       (unsigned long)(now - g_focus[(unsigned)k & (SS_FOCUS_RING - 1)].tick));
+	}
+}
 static void fmt_report_for(DWORD tid);
 static const char *ss_module(uintptr_t v, unsigned *off);
 static int region_excluded(uintptr_t base, uintptr_t size);
@@ -2730,6 +2793,7 @@ static LONG CALLBACK ss_fault_log(EXCEPTION_POINTERS *ep)
 		       (unsigned long)code, (void *)pc, in ? in : "unknown", off,
 		       (unsigned long)GetCurrentThreadId(), (long)g_frames_since_load);
 	}
+	focus_report();
 	/* What the instruction was reaching for.
 	 *
 	 * rabiribi.exe+6E9F8 has now killed the process twice, once immediately
@@ -4013,8 +4077,12 @@ static void cfg_load(void)
 	if (g_cfg_tried)
 		return;
 	g_cfg_tried = 1;
-	g_cfg = (char *)VirtualAlloc(NULL, SS_CFG_MAX, MEM_COMMIT | MEM_RESERVE,
-				     PAGE_READWRITE);
+	/* Reused rather than reallocated, because this is now reached more than
+	 * once: the watch knob clears g_cfg_tried to re-read the file mid-session,
+	 * and a fresh reservation per reload would leak one buffer each time. */
+	if (!g_cfg)
+		g_cfg = (char *)VirtualAlloc(NULL, SS_CFG_MAX, MEM_COMMIT | MEM_RESERVE,
+					     PAGE_READWRITE);
 	if (!g_cfg)
 		return;
 	h = CreateFileA("d3d9_sw.cfg", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
@@ -4323,7 +4391,12 @@ static const char *const g_knobs[] = {
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
 	"D3D9SW_RECYCLED",	  "D3D9SW_GAMEHEAP",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN",
-	"D3D9SW_SLOTFILE"
+	"D3D9SW_SLOTFILE",
+	"D3D9SW_WATCH_AT",
+	"D3D9SW_EXCLSKIP",
+	"D3D9SW_WATCH_TRACE",
+	"D3D9SW_DELTA",		  "D3D9SW_DELTA_KB",
+	"D3D9SW_OBJWATCH"
 };
 
 /* Read every knob into the memo before the environment is closed for business.
@@ -5801,6 +5874,30 @@ static int points_back(uintptr_t at, uintptr_t want)
 	return 0;
 }
 
+/* Is this list node really a heap's large-block entry, or a field that happened
+ * to look like one?
+ *
+ * points_back is the wrong test here and saying so cost a run. It looks for the
+ * heap's handle, which the low-fragmentation front end does carry - but a large
+ * block is fronted by a _HEAP_VIRTUAL_ALLOC_ENTRY, which carries list links and
+ * sizes and no handle at all. Every candidate failed it, genuine ones included,
+ * so it separated nothing.
+ *
+ * Nor does anything else that can be read from out here. Two further tests were
+ * tried and both measured something other than the block. The list node's
+ * offset inside its allocation measures the walk order, because a block on
+ * several candidate lists is attributed to whichever head reaches it first: the
+ * same 128 MB allocation reported +0 on one run and +4000 on the next. The
+ * entry's reserve size against the span measures a number that moves - the
+ * field reads 8002000 while the span has come out at 128.01, 128.02 and 128.05
+ * MB on three consecutive runs. Each wrong answer released a real block along
+ * with its entry, and the restore faulted.
+ *
+ * The reserve field is still worth printing, so the log carries the evidence
+ * for whoever tries a third time with better information.
+ */
+#define HEAP_VA_ENTRY_RESERVE 0x14u
+
 /* Would excluding this span take memory away from a heap we rewind?
  *
  * heap_infra runs for heaps left in the present and holds back whatever their
@@ -5926,52 +6023,50 @@ static uintptr_t heap_infra(uintptr_t base, HANDLE h, int *nheld, int depth)
 				span = alloc_span(ab);
 				seen_lo = ab;
 				seen_hi = ab + span;
-				/* The looser of the two sites: this one follows list
-				 * heads found by shape alone, with no check that the
-				 * far end has anything to do with this heap. That is
-				 * how a rewinding heap's segment ends up held. */
 				if (span && !region_excluded(ab, span) &&
 				    !infra_clash(ab, span, "the header list walk")) {
-					/* Said out loud for the big ones, because this
-					 * site holds whole allocations on the strength of
-					 * a shape match and the cost of a false positive
-					 * scales with the block. A 128 MB allocation held
-					 * here is 128 MB the game changes and a restore
-					 * never puts back.
+					/* Everything this walk reaches is held, which is
+					 * where two attempts to be cleverer ended up.
 					 *
-					 * points_back is the stricter test the other site
-					 * already uses: real heap infrastructure carries
-					 * the heap's own handle near its start. Reported
-					 * rather than enforced, because a large block that
-					 * genuinely is the heap's must stay held - its
-					 * metadata is indexed by a header we do not rewind
-					 * - and one run's evidence should decide which of
-					 * those this is. */
-					if (span >= (1u << 20)) {
-						/* Where the list node sits inside the block
-						 * it supposedly describes, and what the node
-						 * claims that block's reserved size is.
-						 *
-						 * Windows puts a large allocation's entry at
-						 * the very front of the allocation, so a
-						 * genuine one has the node at offset 0 and a
-						 * reserve size that matches the span. A
-						 * pointer we followed into the middle of an
-						 * unrelated allocation has neither. That is
-						 * the difference this site never checked. */
-						unsigned long res = 0;
-
-						if (ss_readable(ab + 0x14, sizeof(unsigned)))
-							res = *(const unsigned *)(ab + 0x14);
-						ss_log("    infra: holding %08lX (%.2f MB) off "
-						       "heap %p's header list - node at +%lX "
-						       "in it, node's reserve field %lX vs "
-						       "span %lX\n",
+					 * Both tried to tell a large block whose payload is
+					 * the game's from a piece of the heap's own
+					 * machinery, and both read something that is not a
+					 * property of the block. Testing where the list
+					 * node sat inside the allocation tested the walk
+					 * order: a block reachable from several candidate
+					 * heads is attributed to whichever arrives first,
+					 * and the same 128 MB allocation reported +0 on one
+					 * run and +4000 on the next. Testing the entry's
+					 * reserve size against the span tested a number
+					 * that moves: the reserve field reads 8002000 while
+					 * the span has measured 128.01, 128.02 and 128.05
+					 * MB across three runs. Each misclassification
+					 * released a genuine block with its entry and the
+					 * restore faulted.
+					 *
+					 * The framing was wrong as well as the tests. This
+					 * walk only ever reaches nodes on lists anchored in
+					 * this heap's header, so everything it finds really
+					 * is on one of the heap's lists; the front end and
+					 * segment entries legitimately sit at non-zero
+					 * offsets. "Not at the start" never meant "not the
+					 * heap's".
+					 *
+					 * Reported, because the sizes are worth seeing and
+					 * the 128 MB block is still the largest changing
+					 * thing missing from every save. Answering that
+					 * wants evidence about what is in it, not another
+					 * guess at Windows' internals. */
+					if (span >= (1u << 20))
+						ss_log("    infra: holding %08lX (%.2f MB) off heap "
+						       "%p's header list, reserve field %lX\n",
 						       (unsigned long)ab,
-						       (double)span / (1024.0 * 1024.0),
-						       (void *)h, (unsigned long)(p - ab), res,
-						       (unsigned long)span);
-					}
+						       (double)span / (1024.0 * 1024.0), (void *)h,
+						       ss_readable(ab + HEAP_VA_ENTRY_RESERVE,
+								   sizeof(unsigned))
+							       ? *(const unsigned *)(ab +
+										     HEAP_VA_ENTRY_RESERVE)
+							       : 0u);
 					ss_exclude_as("private memory reached from a held heap header", (void *)ab, (size_t)span);
 					held += span;
 					(*nheld)++;
@@ -9626,6 +9721,10 @@ static void build_exclusions(void)
 	int i, nstack = 0, nteb = 0, nmod = 0, ntrans = 0;
 	char onames[8][64];
 	int ocounts[8], nown = 0;
+	/* The same tally for the threads we rewind, so the report describes the
+	 * whole thread set rather than only the exempt half. */
+	char rnames[8][64];
+	int rcounts[8], nrewound = 0;
 
 	memset(g_ctl->transient, 0, sizeof(g_ctl->transient));
 	GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -9774,6 +9873,31 @@ static void build_exclusions(void)
 			 * restores over churn the game never saw. So it is left
 			 * alone entirely - stack excluded, registers untouched, not
 			 * counted as divergence. */
+			/* The other side of the same question, counted.
+			 *
+			 * This test has only ever reported who we leave alone, which
+			 * reads as complete until something we rewound turns out to
+			 * have needed leaving alone too. A Steam worker faulted 226
+			 * frames after a restore, doing a rep movsb into a read-only
+			 * page of steamclient.dll's own image - a destination computed
+			 * from a stack and a working buffer we had just rewound
+			 * underneath it, while steamclient.dll itself was held in the
+			 * present and the Steam client it talks to lives in another
+			 * process entirely. It is the same shape as the display driver,
+			 * which is why amdxx32 has sixteen threads on the exempt list.
+			 *
+			 * Steam should have been caught by the very test above, because
+			 * its image is held and therefore excluded. It was not, and the
+			 * reason is not visible from outside: the exempt tally names
+			 * ntdll, inputhost, dinput, wdmaud, d3d11, amdxx32 and amdihk32
+			 * and simply does not mention the thread that crashed. Naming
+			 * the rewound side says whether its start address lands in a
+			 * module we did not expect, in no module at all, or in
+			 * steamclient after all - and those three want different
+			 * fixes. Guessing between them is how the last two heap
+			 * classifiers went wrong. */
+			if (!region_excluded((uintptr_t)g_ctl->starts[i], 1))
+				tally_owner(rnames, rcounts, &nrewound, g_ctl->starts[i]);
 			if (region_excluded((uintptr_t)g_ctl->starts[i], 1)) {
 				g_ctl->transient[i] = 1;
 				ss_exclude_as("thread stack", (void *)foot, (size_t)(hi - foot));
@@ -9845,6 +9969,15 @@ static void build_exclusions(void)
 			off += ss_fmt(line + off, (int)sizeof(line) - off, "%s%s x%d",
 				      k ? ", " : "", onames[k], ocounts[k]);
 		ss_log("  those threads belong to: %s\n", line);
+	}
+	if (nrewound) {
+		char line[512];
+		int off = 0, k;
+
+		for (k = 0; k < nrewound && off < (int)sizeof(line) - 80; k++)
+			off += ss_fmt(line + off, (int)sizeof(line) - off, "%s%s x%d",
+				      k ? ", " : "", rnames[k], rcounts[k]);
+		ss_log("  rewound threads belong to: %s\n", line);
 	}
 	audit_present_threads();
 	audit_system_reachable();
@@ -10430,6 +10563,315 @@ static HANDLE slotfile_section(int slotno, unsigned long long total)
 	return sect;
 }
 
+/* -------------------------------------------------- watching one address
+ *
+ * D3D9SW_WATCH_AT=<hex> names an address to report a pair of floats from, at
+ * the save and again once the restore has settled. Two readings answer the only
+ * question that matters about a value that visibly does not come back:
+ *
+ *   same at both        restored, and it stayed restored
+ *   differs afterwards  restored and then overwritten, which is the game
+ *                       re-deriving it from something we did not rewind
+ *   not in the snapshot  never captured, and the coverage list says where
+ *
+ * The player has had this since the beginning - see witness_save - and it is
+ * how we know a restore reached her. This is the same instrument pointed
+ * wherever the evidence says to point it. Ribbon was found at 31876868 by
+ * searching a dump for a float pair near the player's position; she is in the
+ * snapshot, so the interesting question is now the second line above.
+ *
+ * A pair of floats because that is how this game stores a position, and because
+ * a single word that happens to match proves much less than two that do.
+ */
+/* Whether a region that is a live stack or TEB now, but was ordinary memory at
+ * the save, aborts the restore or is simply left alone. On by default; see the
+ * reasoning at the test site. */
+static int exclskip_mode(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_EXCLSKIP", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+#define SS_WATCH_MAX 8
+static uintptr_t g_watch_at[SS_WATCH_MAX];
+static int g_watch_at_n = -1;
+
+/* A list rather than one address, because a search never returns one candidate.
+ * Looking for Ribbon turned up three sites holding the same X to a decimal
+ * place and three different Y values - one hovering character recorded in
+ * several places, not three characters - and there is no way to tell from
+ * outside which of them the game reads. Watching all of them costs a line each
+ * and settles it in one run instead of three. */
+static void watch_at_parse(int live)
+{
+	char v[128];
+	DWORD n, i;
+	uintptr_t a = 0;
+	int have = 0;
+	int rel = 0;
+
+	/* Re-read on request, because the address cannot be known before the
+	 * session that contains it. Finding it means taking a save and searching
+	 * the dump, and by then this process has long since started; a knob fixed
+	 * at startup could only ever carry an address from a previous run, and
+	 * the game's allocations do not survive a relaunch. So the reading that
+	 * matters takes the knob fresh.
+	 *
+	 * Only ever from outside the suspended window. ss_getenv can fall back to
+	 * reading the cfg file, and a file read between suspend_all and
+	 * resume_all is how this engine deadlocks itself - which is what the warm
+	 * list above exists to prevent. */
+	if (g_watch_at_n >= 0 && !live)
+		return;
+	g_watch_at_n = 0;
+	if (live) {
+		/* Re-read the file, not the copy of it taken at startup.
+		 *
+		 * Everything else in this engine wants the config frozen: knobs are
+		 * warmed into a memo before the threads stop so that no lookup
+		 * allocates inside the window, and cfg_load slurps the file once.
+		 * That is right for every other knob and wrong for this one, because
+		 * this one carries an address that cannot exist until the session is
+		 * already running - you take a save, search the dump, and only then
+		 * know what to type. A value fixed at launch can only ever be an
+		 * address from a previous launch, and the game's allocations do not
+		 * survive a relaunch.
+		 *
+		 * Safe here and nowhere else: this call site runs 100 ms after the
+		 * restore, on the render thread, with every game thread already
+		 * resumed. */
+		g_cfg_tried = 0;
+		g_cfg_len = 0;
+		g_cfg_over = 0;
+		cfg_load();
+	}
+	/* cfg_lookup rather than ss_getenv on the live path, because the memo in
+	 * env_once would answer with the startup value and never reach the file. */
+	n = live ? cfg_lookup("D3D9SW_WATCH_AT", v, sizeof(v))
+		 : ss_getenv("D3D9SW_WATCH_AT", v, sizeof(v));
+	if (n == 0 || n >= sizeof(v))
+		return;
+	/* One past the end, so a trailing address is flushed by the same branch
+	 * that handles a separator rather than by a copy of it afterwards. */
+	for (i = 0; i <= n; i++) {
+		char c = (i < n) ? v[i] : ',';
+		int d = -1;
+
+		/* A leading + means "this far past the player's entity", which is the
+		 * only form that survives a relaunch.
+		 *
+		 * The arena moves every session - three runs put its base at
+		 * 0E34F000, 0E03F000 and 0E1AF000 - but the entities inside it do
+		 * not. Two independent saves put the player at base+4C4 and Ribbon at
+		 * base+2A738, so she is +2A280 from the player's x field in both, to
+		 * the byte. The engine already records the player's entity address at
+		 * every save for the witness, so a relative address resolves itself
+		 * and an absolute one has to be looked up and retyped between the
+		 * save and the restore - which is a step that has now been got wrong
+		 * three times in a row, twice by pasting the same three constants. */
+		if (c == '+' && !have) {
+			rel = 1;
+			continue;
+		}
+		if (c >= '0' && c <= '9')
+			d = c - '0';
+		else if (c >= 'a' && c <= 'f')
+			d = c - 'a' + 10;
+		else if (c >= 'A' && c <= 'F')
+			d = c - 'A' + 10;
+		if (d >= 0) {
+			a = (a << 4) | (uintptr_t)d;
+			have = 1;
+			continue;
+		}
+		if (have && rel) {
+			if (g_ctl && g_ctl->wit_valid && g_ctl->wit_ent) {
+				if (g_watch_at_n < SS_WATCH_MAX)
+					g_watch_at[g_watch_at_n++] = g_ctl->wit_ent + a;
+			} else {
+				ss_log("  watch +%lX: no player entity recorded yet, so a "
+				       "relative address cannot be resolved\n",
+				       (unsigned long)a);
+			}
+		} else if (have && a && g_watch_at_n < SS_WATCH_MAX) {
+			g_watch_at[g_watch_at_n++] = a;
+		}
+		a = 0;
+		have = 0;
+		rel = 0;
+	}
+}
+
+/* -------------------------------------------------- the watch, frame by frame
+ *
+ * D3D9SW_WATCH_TRACE=N logs the watched addresses on each of the next N frames
+ * after a save and after a restore.
+ *
+ * Two readings a hundred milliseconds apart cannot tell a value that was
+ * restored wrongly from one that was restored rightly and then moved, and the
+ * gap involved here is small: Ribbon read 16018.03 at a save and 16013.65 after
+ * the restore settled, four units, which is either a defect or an idle
+ * animation. A trace decides it by looking at the shape rather than the
+ * endpoints - an animation oscillates around a centre, a botched restore sits
+ * wherever it landed, and a follower converges on the player.
+ *
+ * There is a detail in the two-sample data that a trace also settles. Her Y has
+ * read 4596F2AD - the same bits - in every sample across four sessions, while X
+ * moves. If she is visibly bobbing, then the bob is computed per frame for
+ * drawing and never stored, and the stored Y is not what the eye is following.
+ * That matters, because the field we watch has to be the field that decides
+ * where she is.
+ */
+static int trace_mode(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[16];
+		DWORD n = ss_getenv("D3D9SW_WATCH_TRACE", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v)) ? atoi(v) : 0;
+		if (cached < 0)
+			cached = 0;
+	}
+	return cached;
+}
+
+static volatile LONG g_trace_left;
+static const char *g_trace_why = "";
+static int g_trace_frame;
+
+static void watch_trace_arm(const char *why)
+{
+	if (!trace_mode() || g_watch_at_n <= 0)
+		return;
+	g_trace_why = why;
+	g_trace_frame = 0;
+	g_trace_left = trace_mode();
+}
+
+void savestate_watch_tick(void)
+{
+	int k;
+
+	if (g_trace_left <= 0)
+		return;
+	g_trace_left--;
+	g_trace_frame++;
+	for (k = 0; k < g_watch_at_n; k++) {
+		uintptr_t a = g_watch_at[k];
+		float f[2];
+		unsigned w[2];
+
+		if (!ss_readable(a, sizeof(f)))
+			continue;
+		memcpy(f, (const void *)a, sizeof(f));
+		memcpy(w, f, sizeof(w));
+		ss_log("  trace %s +%d %08lX: x %d.%02d y %d.%02d (%08lX %08lX)\n",
+		       g_trace_why, g_trace_frame, (unsigned long)a, (int)f[0],
+		       (int)((f[0] < 0 ? -f[0] : f[0]) * 100.0f) % 100, (int)f[1],
+		       (int)((f[1] < 0 ? -f[1] : f[1]) * 100.0f) % 100,
+		       (unsigned long)w[0], (unsigned long)w[1]);
+	}
+}
+
+static void watch_at_report(const char *when, int live)
+{
+	int k;
+
+	watch_at_parse(live);
+	for (k = 0; k < g_watch_at_n; k++) {
+		uintptr_t a = g_watch_at[k];
+		float f[2];
+		unsigned w[2];
+
+		if (!ss_readable(a, sizeof(f))) {
+			ss_log("  watch %08lX: not readable %s\n", (unsigned long)a, when);
+			continue;
+		}
+		memcpy(f, (const void *)a, sizeof(f));
+		memcpy(w, f, sizeof(w));
+		/* The raw words as well as the decimals. Two positions that print the
+		 * same to two places are not necessarily the same value, and "did this
+		 * come back exactly" is the entire question being asked here. */
+		ss_log("  watch %08lX: x %d.%02d  y %d.%02d  (%08lX %08lX) %s\n",
+		       (unsigned long)a, (int)f[0],
+		       (int)((f[0] < 0 ? -f[0] : f[0]) * 100.0f) % 100, (int)f[1],
+		       (int)((f[1] < 0 ? -f[1] : f[1]) * 100.0f) % 100,
+		       (unsigned long)w[0], (unsigned long)w[1], when);
+	}
+}
+
+/* A plain-text map from addresses to offsets in the .bin.
+ *
+ * The description file has all of this already, but only as a Slot, and any
+ * reader of that would have to reproduce a C layout with 65536-entry arrays to
+ * find a single region. This costs one small file and makes the snapshot a flat
+ * seekable address space that anything can walk - which is what turns a dump
+ * into evidence rather than 388 MB of opaque bytes.
+ *
+ * The player's position goes in the header because it is the one value in the
+ * snapshot whose correct answer is known independently, so it is the way to
+ * check a reader works before trusting anything it says about a value that is
+ * not known.
+ */
+static void slotfile_write_index(int slotno, const Slot *s)
+{
+	char path[MAX_PATH], line[160];
+	HANDLE f;
+	DWORD wrote = 0;
+	unsigned long long off = 0;
+	int i, n;
+
+	slotfile_path(path, sizeof(path), slotno, "regions");
+	f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+			NULL);
+	if (f == INVALID_HANDLE_VALUE)
+		return;
+	/* wsprintfA is the Win32 formatter, not the CRT's: it has no ll modifier,
+	 * and "%012llX" silently emits the literal text lX. Everything here is cast
+	 * to 32 bits instead, which is exact rather than a compromise - the total is
+	 * the sum of regions in a 32-bit address space and cannot reach 4 GB. */
+	n = wsprintfA(line, "# slot %d  %d region(s)  %lu byte(s)\r\n", slotno, s->nregs,
+		      (unsigned long)s->bytes);
+	WriteFile(f, line, (DWORD)n, &wrote, NULL);
+	if (g_ctl && g_ctl->wit_valid) {
+		/* The raw bits as well as the rounded value. A reader searching for
+		 * the position needs the exact float, and the decimal here is an int
+		 * cast: the player at "x 16080" is at some 16080.something, so a
+		 * search for 16080.0 finds nothing and looks like a broken index
+		 * rather than a truncated number. */
+		unsigned long xb, yb;
+
+		memcpy(&xb, &g_ctl->wit_x, sizeof(xb));
+		memcpy(&yb, &g_ctl->wit_y, sizeof(yb));
+		n = wsprintfA(line,
+			      "# player entity %08lX  x %d  y %d  world %u  xbits %08lX  "
+			      "ybits %08lX\r\n",
+			      (unsigned long)g_ctl->wit_ent, (int)g_ctl->wit_x,
+			      (int)g_ctl->wit_y, g_ctl->wit_map, xb, yb);
+		WriteFile(f, line, (DWORD)n, &wrote, NULL);
+	}
+	n = wsprintfA(line, "# base size offset prot\r\n");
+	WriteFile(f, line, (DWORD)n, &wrote, NULL);
+	for (i = 0; i < s->nregs; i++) {
+		n = wsprintfA(line, "%08lX %08lX %08lX %lX\r\n",
+			      (unsigned long)s->regs[i].base, (unsigned long)s->regs[i].size,
+			      (unsigned long)off, (unsigned long)s->regs[i].prot);
+		WriteFile(f, line, (DWORD)n, &wrote, NULL);
+		off += s->regs[i].size;
+	}
+	CloseHandle(f);
+	ss_log("  slotfile: %s written - the .bin is addressable from it\n", path);
+}
+
 /* Never a local copy of a Slot. SS_MAX_REGIONS is 65536 and every one of 256
  * thread slots carries a CONTEXT, so the struct runs to several megabytes and a
  * stack copy of it is an immediate C00000FD - which is exactly how the first
@@ -10458,6 +10900,7 @@ static void slotfile_write_meta(int slotno, Slot *s)
 	ss_log("  slotfile: %s written, %d region(s), %d thread(s), %.1f MB of bytes "
 	       "alongside\n",
 	       path, s->nregs, s->nthreads, (double)s->bytes / (1024.0 * 1024.0));
+	slotfile_write_index(slotno, s);
 }
 
 /* Fills an empty slot from the pair of files, so Shift+F5 in a fresh session
@@ -11290,6 +11733,189 @@ static int settle_tries(void)
 	return v;
 }
 
+/* D3D9SW_DELTA: how much of a snapshot is actually new since the last one.
+ *
+ * Eight regions carry ninety percent of the 390 MB, and all eight look like
+ * asset arenas that ought to sit still while the player walks around a room.
+ * If that holds, a snapshot could store and write back only what moved, and
+ * the value of doing so is not speed - a second is already acceptable - but
+ * that a restore which writes ten megabytes has far fewer ways to clobber
+ * something that should have stayed in the present than one which writes
+ * three hundred and ninety.
+ *
+ * Ought to holds is not a foundation, so this measures it. Per-chunk hashes
+ * of the previous save are kept and compared against the current ones, which
+ * costs one extra read of the snapshot and no memory beyond our own BSS - the
+ * copy window forbids allocating or taking a lock, and a diagnostic is not
+ * worth breaking that rule for. */
+#define SS_DELTA_MAX 65536u
+
+typedef struct {
+	uintptr_t at;
+	unsigned hash;
+} DeltaChunk;
+
+static DeltaChunk g_dl_a[SS_DELTA_MAX], g_dl_b[SS_DELTA_MAX];
+static DeltaChunk *g_dl_prev = g_dl_a, *g_dl_cur = g_dl_b;
+static unsigned g_dl_nprev, g_dl_ncur;
+static int g_dl_have;
+/* Held out of the stack deliberately: one per region at the region cap is half
+ * a megabyte, and a save runs on whichever thread pressed the key. A stack copy
+ * of a structure this size is what crashed the slotfile work with C00000FD. */
+static unsigned long long g_dl_moved[SS_MAX_REGIONS];
+
+static int delta_mode(void)
+{
+	static int v = -1;
+	if (v < 0) {
+		char b[8];
+		DWORD n = ss_getenv("D3D9SW_DELTA", b, sizeof(b));
+		v = (n && b[0] == '1') ? 1 : 0;
+	}
+	return v;
+}
+
+/* Smaller chunks measure more finely and cost more to track. 64 KB is the
+ * granularity a delta engine would plausibly use anyway, so measuring at any
+ * other size would answer a question we are not asking. */
+static unsigned delta_chunk(void)
+{
+	static unsigned v = 0;
+	if (!v) {
+		char b[16];
+		DWORD n = ss_getenv("D3D9SW_DELTA_KB", b, sizeof(b));
+		int kb = (n && n < sizeof(b)) ? atoi(b) : 64;
+		if (kb < 4)
+			kb = 4;
+		v = (unsigned)kb * 1024u;
+	}
+	return v;
+}
+
+static unsigned delta_hash(const void *p, size_t n)
+{
+	const unsigned *w = (const unsigned *)p;
+	const unsigned char *tail;
+	unsigned h = 2166136261u;
+	size_t i, nw = n / 4;
+
+	for (i = 0; i < nw; i++) {
+		h ^= w[i];
+		h *= 16777619u;
+	}
+	tail = (const unsigned char *)p + nw * 4;
+	for (i = nw * 4; i < n; i++) {
+		h ^= *tail++;
+		h *= 16777619u;
+	}
+	return h;
+}
+
+/* 1 the chunk is byte-identical, 0 it changed, -1 this address was not in the
+ * previous save. The third case is its own answer: memory that came into
+ * existence between the two saves is not a delta engine's problem, it is a
+ * region-set change, and lumping it in with changed bytes would overstate how
+ * much a delta would have to write. */
+static int delta_seen(uintptr_t at, unsigned h)
+{
+	int lo = 0, hi = (int)g_dl_nprev - 1;
+
+	while (lo <= hi) {
+		int mid = lo + (hi - lo) / 2;
+		if (g_dl_prev[mid].at == at)
+			return g_dl_prev[mid].hash == h;
+		if (g_dl_prev[mid].at < at)
+			lo = mid + 1;
+		else
+			hi = mid - 1;
+	}
+	return -1;
+}
+
+static void delta_scan(Slot *s)
+{
+	unsigned chunk = delta_chunk();
+	unsigned long long same = 0, moved = 0, fresh = 0;
+	unsigned long long *r_moved = g_dl_moved;
+	DeltaChunk *swap;
+	LARGE_INTEGER f, t0, t1;
+	int i, listed = 0;
+
+	QueryPerformanceFrequency(&f);
+	QueryPerformanceCounter(&t0);
+	g_dl_ncur = 0;
+
+	for (i = 0; i < s->nregs; i++) {
+		uintptr_t at = s->regs[i].base, end = at + s->regs[i].size;
+
+		r_moved[i] = 0;
+		for (; at < end; at += chunk) {
+			size_t n = (size_t)((end - at < chunk) ? end - at : chunk);
+			unsigned h = delta_hash((const void *)at, n);
+			int was = g_dl_have ? delta_seen(at, h) : -1;
+
+			if (was == 1) {
+				same += n;
+			} else if (was == 0) {
+				moved += n;
+				r_moved[i] += n;
+			} else {
+				fresh += n;
+			}
+			if (g_dl_ncur < SS_DELTA_MAX) {
+				g_dl_cur[g_dl_ncur].at = at;
+				g_dl_cur[g_dl_ncur].hash = h;
+				g_dl_ncur++;
+			}
+		}
+	}
+	QueryPerformanceCounter(&t1);
+
+	if (!g_dl_have) {
+		ss_log("  delta: first save, %u chunk(s) of %u KB fingerprinted in %.0f ms "
+		       "- the next save is the one that reports\n",
+		       g_dl_ncur, chunk / 1024u,
+		       1000.0 * (double)(t1.QuadPart - t0.QuadPart) / (double)f.QuadPart);
+	} else {
+		unsigned long long tot = same + moved + fresh;
+
+		ss_log("  delta: %.1f MB in %u chunk(s) of %u KB - %.1f MB changed since the "
+		       "previous save (%.1f%%), %.1f MB identical, %.1f MB not in it. "
+		       "Fingerprinting took %.0f ms\n",
+		       (double)tot / (1024.0 * 1024.0), g_dl_ncur, chunk / 1024u,
+		       (double)moved / (1024.0 * 1024.0),
+		       tot ? 100.0 * (double)moved / (double)tot : 0.0,
+		       (double)same / (1024.0 * 1024.0), (double)fresh / (1024.0 * 1024.0),
+		       1000.0 * (double)(t1.QuadPart - t0.QuadPart) / (double)f.QuadPart);
+
+		/* Named per region, because the whole question is whether the churn
+		 * is spread everywhere or concentrated in the small regions. A total
+		 * cannot tell those apart and they call for different engines. */
+		while (listed < 12) {
+			int best = -1;
+
+			for (i = 0; i < s->nregs; i++)
+				if (r_moved[i] && (best < 0 || r_moved[i] > r_moved[best]))
+					best = i;
+			if (best < 0)
+				break;
+			ss_log("  delta:   %08lX  %8.2f MB held, %8.2f MB changed (%.1f%%)\n",
+			       (unsigned long)s->regs[best].base,
+			       (double)s->regs[best].size / (1024.0 * 1024.0),
+			       (double)r_moved[best] / (1024.0 * 1024.0),
+			       100.0 * (double)r_moved[best] / (double)s->regs[best].size);
+			r_moved[best] = 0;
+			listed++;
+		}
+	}
+
+	swap = g_dl_prev;
+	g_dl_prev = g_dl_cur;
+	g_dl_cur = swap;
+	g_dl_nprev = g_dl_ncur;
+	g_dl_have = 1;
+}
+
 static int do_save(int slotno)
 {
 	Slot *s = &g_ctl->slots[slotno];
@@ -11552,6 +12178,11 @@ static int do_save(int slotno)
 		pos += s->regs[i].size;
 	}
 	win_close(&w);
+	/* After the copy, so a fault while hashing cannot cost the snapshot, and
+	 * still inside the suspended window so the bytes hashed are the bytes
+	 * saved rather than whatever the game reached next. */
+	if (delta_mode())
+		delta_scan(s);
 	/* Re-read while everything is still suspended. Nothing here allocates or
 	 * takes a lock, which is the rule this window is governed by - the
 	 * unwind-table reconciliation froze the process by breaking it. Two reads and
@@ -11834,6 +12465,8 @@ static int do_save(int slotno)
 	       slotno, s->nregs, g_ctl->last_mb, g_ctl->nids, s->nthreads, s->nfiles);
 	witness_save(s);
 	cap_record(s);
+	watch_at_report("at the save", 0);
+	watch_trace_arm("save");
 	carry_save();
 	/* Last, because everything above fills fields the description has to carry. */
 	if (slotfile_mode())
@@ -12375,6 +13008,7 @@ static void clobber_check(void)
 	w.total = s->bytes;
 	ss_log("clobber: %d ms after the restore, checking what came back\n",
 	       clobber_mode());
+	watch_at_report("after the restore settled", 1);
 	if (nothread_mode())
 		g_nothr_until = GetTickCount() + (DWORD)nothread_mode();
 	der_learn(s, &w);
@@ -12810,6 +13444,7 @@ static int do_load(int slotno)
 	Window w;
 	unsigned long long pos = 0;
 	int i, j, restored = 0, skipped = 0, tls_done = 0, blocked = 0;
+	int skipped_excl = 0;
 	int handskip = 0, handscrib = 0;
 
 	/* Only when there is nothing in memory, so a session that took its own save
@@ -13024,7 +13659,27 @@ static int do_load(int slotno)
 		if (region_excluded(base, size)) {
 			ss_log("  region %p+%lx is excluded now but was saved\n", (void *)base,
 			       (unsigned long)size);
-			skipped++;
+			/* Counted apart from the other failures, because refusing over
+			 * this one protects nothing.
+			 *
+			 * Every other way a region fails the test leaves a real choice:
+			 * the memory is still there and we are declining to write it
+			 * because we are not sure it is the same memory. This case has
+			 * no such choice. The region is a live thread's stack or TEB
+			 * now, so the only two options are to skip it or to write the
+			 * game's old bytes over a running thread's stack, and the
+			 * second is never right. Whatever the game had there is already
+			 * gone in the present; the restore cannot bring it back and
+			 * refusing does not preserve it.
+			 *
+			 * It became worth separating when the hardware backend arrived.
+			 * The display driver runs sixteen threads of its own and cycles
+			 * them, so freed stack memory gets captured as ordinary private
+			 * memory at the save and is a live stack again by the restore -
+			 * four 32 KB regions out of 264 was enough to refuse a restore
+			 * that was otherwise entirely sound. Set D3D9SW_EXCLSKIP=0 to
+			 * go back to refusing. */
+			skipped_excl++;
 			continue;
 		}
 		/* Fitting is not the same as belonging. An address the game has
@@ -13209,6 +13864,15 @@ static int do_load(int slotno)
 		}
 	}
 
+	if (skipped_excl) {
+		if (!exclskip_mode())
+			skipped += skipped_excl;
+		else
+			ss_log("  %d region(s) skipped because they are excluded now - "
+			       "live stacks or TEBs at addresses that held ordinary memory "
+			       "at the save. The restore goes ahead without them\n",
+			       skipped_excl);
+	}
 	if (skipped) {
 		ss_log("load: refused, %d of %d regions unrestorable\n", skipped, s->nregs);
 		resume_all(0);
@@ -13808,6 +14472,27 @@ static int do_load(int slotno)
 			       vdiffer ? " <<< THE RESTORE DID NOT TAKE" : "");
 	}
 	win_close(&w);
+	/* The only reading that separates "we failed to write it" from "we wrote it
+	 * and the game moved it".
+	 *
+	 * The sample taken with the clobber check is 100 ms late by design, which is
+	 * right for asking whether something got overwritten and useless for asking
+	 * whether it arrived: Ribbon read 16018.03 at a save and 15860.34 a hundred
+	 * milliseconds after the restore, which is either a restore that missed by
+	 * 158 units or a restore that landed and was followed by a hundred
+	 * milliseconds of her flying back to the player. Those want opposite fixes.
+	 *
+	 * Here the bytes are written and no game thread has run yet, so the value is
+	 * exactly what the restore put there. Deliberately live=0: the address list
+	 * was resolved at the save, and this point is inside the suspended window
+	 * where reading the config file is not allowed. */
+	watch_at_report("as the restore finishes, before any thread resumes", 0);
+	/* Armed here rather than with the clobber sample, which runs 100 ms later.
+	 * The first run traced a restore from frame six of the sweep onward and
+	 * showed a clean exponential converging on the saved value - but the six
+	 * frames it could not see are the ones that say how far she was displaced
+	 * to begin with, and that displacement is the whole effect. */
+	watch_trace_arm("load");
 	/* Memory is back, so ntdll's list can be put back to match it. Unstick first
 	 * and unconditionally: a lock the restore froze in the held state wedges the
 	 * process whether or not the reconciliation itself is enabled. */
@@ -14550,7 +15235,41 @@ static void guard_release(void)
  * roughly 700 MB of headroom that runs out fast, so what it holds is capped and
  * handed back whenever a new save supersedes the old region list. */
 #define SS_GUARD_CAP (96ull * 1024ull * 1024ull)
+/* What the hooks this file runs from inside Present actually cost.
+ *
+ * They are called before the wrapper opens any of its timing zones, so every
+ * one of them has been landing in the residual the split line labels as the
+ * game's own code - the same place the frame pacer hid a flat 16 ms. An
+ * address-space walk and an audio drain are not the game, and a dip that is
+ * ours should not be attributed to it. */
+static LONGLONG g_hook_guard, g_hook_audio;
+
+void savestate_perf_take(double *guard_ms, double *audio_ms)
+{
+	LARGE_INTEGER f;
+
+	QueryPerformanceFrequency(&f);
+	if (guard_ms)
+		*guard_ms = f.QuadPart ? 1000.0 * (double)g_hook_guard / (double)f.QuadPart : 0.0;
+	if (audio_ms)
+		*audio_ms = f.QuadPart ? 1000.0 * (double)g_hook_audio / (double)f.QuadPart : 0.0;
+	g_hook_guard = 0;
+	g_hook_audio = 0;
+}
+
+static void guard_body(void);
+
 void savestate_guard(void)
+{
+	LARGE_INTEGER a, b;
+
+	QueryPerformanceCounter(&a);
+	guard_body();
+	QueryPerformanceCounter(&b);
+	g_hook_guard += b.QuadPart - a.QuadPart;
+}
+
+static void guard_body(void)
 {
 	static unsigned tick;
 	MEMORY_BASIC_INFORMATION mbi;
@@ -14574,7 +15293,14 @@ void savestate_guard(void)
 	 * going - so a voice started into silence could otherwise sit waiting to be
 	 * asked for audio by a queue waiting to be drained. Once a frame breaks
 	 * that, and costs nothing when the queue is empty. */
-	xa2_sw_pump();
+	{
+		LARGE_INTEGER a, b;
+
+		QueryPerformanceCounter(&a);
+		xa2_sw_pump();
+		QueryPerformanceCounter(&b);
+		g_hook_audio += b.QuadPart - a.QuadPart;
+	}
 	decoder_patch_once();
 	heap_watch_tick();
 
@@ -15661,8 +16387,33 @@ static int om_coordlike(unsigned bits)
 	return f >= 1.0f && f <= 200000.0f;
 }
 
+/* D3D9SW_OBJWATCH, off unless asked for.
+ *
+ * The object monitor shadows a megabyte of the address space each frame and
+ * diffs it against the frame before, moving the window on by a VirtualQuery
+ * walk. That is the right shape for finding a moving object by hand, and the
+ * wrong thing to leave running: measured at up to 173.5 ms of a 185.1 ms
+ * frame, against 1.9 ms for the game itself and 0.0 for the audio drain. The
+ * dips came back on a cadence because the walk sweeps the address space and
+ * the cost follows how densely regions are packed where the cursor happens to
+ * be. It had no knob, so every session paid for it. */
+static int objwatch_mode(void)
+{
+	static int v = -1;
+
+	if (v < 0) {
+		char b[8];
+		DWORD n = ss_getenv("D3D9SW_OBJWATCH", b, sizeof(b));
+
+		v = (n && b[0] == '1') ? 1 : 0;
+	}
+	return v;
+}
+
 static int om_ready(void)
 {
+	if (!objwatch_mode())
+		return 0;
 	if (g_om_shadow)
 		return 1;
 	g_om_shadow = (unsigned char *)blk_arena(OM_WIN);

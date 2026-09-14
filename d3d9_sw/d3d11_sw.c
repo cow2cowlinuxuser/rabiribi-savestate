@@ -3144,7 +3144,20 @@ static uint32_t pack_argb(float r, float g, float b, float a)
  * owner. These accumulate ticks per zone so the split can be read off rather
  * than guessed at; the cost is two QPC calls per draw. ZONE_RASTER time is
  * nested inside DRAW and PRESENT, so it is reported, not subtracted. */
-enum { ZONE_DRAW, ZONE_DECODE, ZONE_PRESENT, ZONE_N };
+/* ZONE_PACE is its own bucket because it used to fall outside all of them.
+ * The present zone closes before present_wait runs, so every DwmFlush and
+ * every Sleep in the pacer landed in the residual - which the split line then
+ * labelled as the game's own code. A frame spent blocked in our pacing and a
+ * frame spent inside the game read identically, and the whole question of why
+ * frame time varies is exactly the question those two answer differently. */
+enum { ZONE_DRAW, ZONE_DECODE, ZONE_PRESENT, ZONE_PACE, ZONE_HOOKS, ZONE_N };
+
+/* Written by present_wait, read and zeroed by perf_tick. File scope rather
+ * than statics inside the pacer so the report does not need a second entry
+ * point into it. */
+static double g_pace_dwm;
+static unsigned g_pace_calls, g_pace_resets, g_pace_late;
+static double g_pace_hz, g_pace_target;
 static LONGLONG g_zone[ZONE_N];
 
 /* Once the split showed 13.6 ms of a 32 ms frame inside draw but outside the
@@ -6530,7 +6543,11 @@ static void perf_tick(void)
 		{
 			double ms = 1000.0 / (double)freq.QuadPart;
 			double dr = g_zone[ZONE_DRAW] * ms, de = g_zone[ZONE_DECODE] * ms,
-			       pr = g_zone[ZONE_PRESENT] * ms;
+			       pr = g_zone[ZONE_PRESENT] * ms, pa = g_zone[ZONE_PACE] * ms,
+			       hk = g_zone[ZONE_HOOKS] * ms;
+			double guard_ms = 0.0, audio_ms = 0.0;
+
+			savestate_perf_take(&guard_ms, &audio_ms);
 			double total = 1000.0 * secs;
 			/* Flushes fire from wherever a surface is next read, which
 			 * for this game is mostly a render-target switch, so most
@@ -6541,10 +6558,35 @@ static void perf_tick(void)
 			if (rout < 0.0)
 				rout = 0.0;
 			d11_log("perf split ms/frame: draw %.1f (raster %.1f nested) decode %.1f "
-				"present %.1f | flush elsewhere %.1f | game %.1f of %.1f",
-				dr / f, g_raster_nested_ms / f, de / f, pr / f, rout / f,
-				(total - dr - de - pr - rout) / f, total / f);
+				"present %.1f pace %.1f hooks %.1f | flush elsewhere %.1f | "
+				"game %.1f of %.1f",
+				dr / f, g_raster_nested_ms / f, de / f, pr / f, pa / f, hk / f,
+				rout / f, (total - dr - de - pr - pa - hk - rout) / f, total / f);
+			/* Broken out because "is the audio eating the frame" is a question
+			 * the totals cannot answer: the drain runs inside the guard, and
+			 * the guard also walks the address space. */
+			if (hk > 0.0)
+				d11_log("perf hooks: %.1f ms/frame - guard %.1f (of which audio "
+					"drain %.1f), watches %.1f",
+					hk / f, guard_ms / f, audio_ms / f,
+					(hk / f) - (guard_ms / f));
+			/* Only worth a line when the pacer actually ran. What it
+			 * says: how much of the pace bucket is the compositor
+			 * holding us versus our own deadline arithmetic, how many
+			 * flushes the display rate is asking for, and how often we
+			 * arrive already past the deadline - which is the signature
+			 * of the pacer being a victim rather than the cause. */
+			if (pa > 0.0)
+				d11_log("perf pace: %.1f ms/frame total - %.1f in DwmFlush "
+					"(%.1f call(s)/frame), %.1f in sleep/spin | display "
+					"%.0f Hz, target %.0f fps, %u arrived late, %u reset",
+					pa / f, g_pace_dwm * ms / f,
+					f > 0.0 ? (double)g_pace_calls / f : 0.0,
+					(pa - g_pace_dwm * ms) / f, g_pace_hz, g_pace_target,
+					g_pace_late, g_pace_resets);
 			memset(g_zone, 0, sizeof(g_zone));
+			g_pace_dwm = 0.0;
+			g_pace_calls = g_pace_resets = g_pace_late = 0;
 			g_raster_nested_ms = 0.0;
 		}
 		if (g_n_draws) {
@@ -6680,6 +6722,27 @@ static double fps_cap(void)
 	return v;
 }
 
+/* How many DwmFlush calls to spend per frame. 1 aligns the wait to a
+ * composition boundary and lets the deadline do the pacing; 0 drops the
+ * compositor out of it entirely; higher values restore the old
+ * one-per-compositor-frame behaviour for comparison. */
+static int pace_flushes(void)
+{
+	static int v = -1;
+
+	if (v < 0) {
+		char buf[16];
+		unsigned n = savestate_getenv("D3D11SW_PACE_FLUSH", buf, sizeof(buf));
+		unsigned i;
+		int acc = 0;
+
+		for (i = 0; i < n && buf[i] >= '0' && buf[i] <= '9'; i++)
+			acc = acc * 10 + (buf[i] - '0');
+		v = n ? acc : 1;
+	}
+	return v;
+}
+
 static void present_wait(HWND hwnd, UINT sync)
 {
 	static HRESULT(WINAPI * dwm_flush)(void);
@@ -6691,7 +6754,8 @@ static void present_wait(HWND hwnd, UINT sync)
 	double cap = fps_cap();
 	double period;
 	LARGE_INTEGER now;
-	UINT i, n;
+	UINT i;
+	int waited;
 
 	if (!ready) {
 		HMODULE m = LoadLibraryA("dwmapi.dll");
@@ -6714,30 +6778,59 @@ static void present_wait(HWND hwnd, UINT sync)
 		}
 	}
 	period = 1.0 / ((cap > 0.0 && cap < hz) ? cap : hz);
+	g_pace_hz = hz;
+	g_pace_target = 1.0 / period;
 
 	/* Waiting on the compositor keeps the presents lined up with the display
 	 * even when the target is a fraction of it: at 240 Hz and a 60 fps target
 	 * that is every fourth compositor frame. */
-	if (dwm_flush) {
-		n = (UINT)(period * hz + 0.5);
-		if (n < 1)
-			n = 1;
-		for (i = 0; i < sync * n; i++)
+	/* One flush, not one per compositor frame in the interval.
+	 *
+	 * DwmFlush blocks until the next composition, so calling it n times blocks
+	 * for n compositions - and it does so from wherever the frame happened to
+	 * finish, not from a fixed origin. At 480 Hz into a 60 fps target n was 8,
+	 * each flush cost one 2.08 ms compositor frame, and the loop added a flat
+	 * 16.2 ms to every frame no matter how much work preceded it. Measured:
+	 * 8.4 ms of work became a 24.6 ms frame, and pace never varied by more
+	 * than a millisecond between the lightest and heaviest frames in the log.
+	 * It was a tax, not a limit.
+	 *
+	 * Presenting on every nth compositor frame is what the absolute deadline
+	 * below already does, and correctly, because it accumulates from a fixed
+	 * origin and so absorbs the work instead of following it. The single flush
+	 * that remains is only to start the wait on a composition boundary. */
+	if (dwm_flush && pace_flushes()) {
+		LARGE_INTEGER d0, d1;
+
+		QueryPerformanceCounter(&d0);
+		for (i = 0; i < (UINT)pace_flushes(); i++)
 			dwm_flush();
+		QueryPerformanceCounter(&d1);
+		g_pace_dwm += (double)(d1.QuadPart - d0.QuadPart);
+		g_pace_calls += (UINT)pace_flushes();
 	}
 	/* Backstop, and the whole mechanism when DwmFlush is missing. It also
 	 * covers the refresh rate being misreported, since the deadline is real
 	 * time and does not care what the display claimed. */
 	QueryPerformanceCounter(&now);
-	if (!next.QuadPart || now.QuadPart > next.QuadPart + freq.QuadPart)
+	if (!next.QuadPart || now.QuadPart > next.QuadPart + freq.QuadPart) {
 		next.QuadPart = now.QuadPart; /* first frame, or we fell far behind */
+		g_pace_resets++;
+	}
 	next.QuadPart += (LONGLONG)(period * sync * (double)freq.QuadPart);
-	for (;;) {
+	for (waited = 0;; waited = 1) {
 		double left;
 		QueryPerformanceCounter(&now);
 		left = (double)(next.QuadPart - now.QuadPart) / (double)freq.QuadPart;
-		if (left <= 0.0)
+		if (left <= 0.0) {
+			/* Already past the deadline on arrival means the backstop
+			 * never slept and something upstream ate the interval. How
+			 * often that happens separates a pacer that is too slow from
+			 * one that is being handed frames too late to pace. */
+			if (!waited)
+				g_pace_late++;
 			return;
+		}
 		/* Sleep rounds up to the scheduler tick, so hand it only the part
 		 * that comfortably clears one and spin the remainder. */
 		if (left > 0.002)
@@ -6801,6 +6894,10 @@ static void pace_probe(HWND hwnd, UINT sync, UINT flags)
 		d11_log("present: window is now %s", state == 2	  ? "MINIMISED"
 						     : state == 1 ? "in the background"
 								  : "in the foreground");
+		/* Also told to the savestate engine, so its fault report can say
+		 * whether a focus change preceded a crash without the two logs having
+		 * to be lined up by file timestamp afterwards. */
+		savestate_note_focus(state);
 	}
 	if (!qpc(&now) || !freq.QuadPart)
 		return;
@@ -6900,9 +6997,19 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 			savestate_set_gpu_park(gpu_park);
 		}
 	}
-	savestate_guard();
-	savestate_pos_watch();
-	savestate_object_watch();
+	/* Timed as a block: these run before any zone opens, so without this they
+	 * are indistinguishable from the game's own time in the split line. */
+	{
+		LARGE_INTEGER h0, h1;
+
+		QueryPerformanceCounter(&h0);
+		savestate_guard();
+		savestate_pos_watch();
+		savestate_watch_tick();
+		savestate_object_watch();
+		QueryPerformanceCounter(&h1);
+		g_zone[ZONE_HOOKS] += h1.QuadPart - h0.QuadPart;
+	}
 	/* F6 arms the soak driver, which then drives save and restore by itself.
 	 * Read once per frame outside the slot loop so the keystroke is consumed
 	 * exactly once however many slots there are. */
@@ -7106,8 +7213,14 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	/* After the blit, so the wait overlaps nothing the player is waiting on.
 	 * D3D11SW_VSYNC=0 restores the old free-running behaviour for measuring
 	 * how fast the rasteriser can actually go. */
-	if (sync && vsync_on())
+	if (sync && vsync_on()) {
+		LARGE_INTEGER p0, p1;
+
+		QueryPerformanceCounter(&p0);
 		present_wait(s->hwnd, sync);
+		QueryPerformanceCounter(&p1);
+		g_zone[ZONE_PACE] += p1.QuadPart - p0.QuadPart;
+	}
 	pace_probe(s->hwnd, sync, flags);
 	perf_tick();
 	return S_OK;
