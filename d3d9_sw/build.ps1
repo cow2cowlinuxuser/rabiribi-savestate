@@ -51,6 +51,13 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $zig cc @warn -target x86-windows-gnu -o gh_replay32.exe gh_replay.c
 if ($LASTEXITCODE -eq 0) { "built gh_replay32.exe (allocation trace replay, no game)" }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Prints what every monitor-size API reports, side by side. Built with no DPI
+# manifest on purpose, so it sees the same invented coordinates the game does -
+# a manifest here would hide the exact discrepancy it exists to show.
+& $zig cc @warn -target x86-windows-gnu -o dispprobe32.exe dispprobe.c -lgdi32 -luser32
+if ($LASTEXITCODE -eq 0) { "built dispprobe32.exe (monitor size and refresh probe)" }
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "built ss_harness32.exe (savestate engine, PE32)"
 
 # test_simd.exe only compares the scalar rasteriser against the vector one, so a

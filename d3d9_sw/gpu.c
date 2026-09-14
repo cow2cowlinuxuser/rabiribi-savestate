@@ -335,6 +335,383 @@ static int gpu_on(void)
 	return savestate_getenv("D3D11SW_GPU", b, sizeof(b)) && b[0] > '0' && b[0] <= '9';
 }
 
+/* How the finished image is fitted to the window.
+ *
+ * D3D11SW_SCALE=point keeps the pixels square on the way up, which is what
+ * this art wants and what a stretched window destroys. fit letterboxes rather
+ * than distorting, and integer restricts the upscale to whole multiples so
+ * that no source row is duplicated while its neighbour is not - the uneven
+ * doubling that makes pixel art crawl as it scrolls.
+ *
+ * Default is the old behaviour: linear, stretched, no letterbox. Nothing
+ * changes for anyone who does not ask. */
+static int gpu_scale_is(const char *want)
+{
+	char b[16];
+	unsigned n = savestate_getenv("D3D11SW_SCALE", b, sizeof(b));
+	unsigned i;
+
+	for (i = 0; i < n; i++) {
+		unsigned j = 0;
+
+		while (want[j] && i + j < n &&
+		       (b[i + j] | 0x20) == (want[j] | 0x20))
+			j++;
+		if (!want[j])
+			return 1;
+	}
+	return 0;
+}
+
+static int gpu_scale_point(void)
+{
+	return gpu_scale_is("point") || gpu_scale_is("nearest");
+}
+
+static int gpu_scale_fit(void)
+{
+	return gpu_scale_is("fit") || gpu_scale_is("integer");
+}
+
+static int gpu_scale_integer(void)
+{
+	return gpu_scale_is("integer");
+}
+
+/* D3D11SW_BORDERLESS=1: cover the monitor, at the monitor's own resolution.
+ *
+ * The existing fullscreen path takes the other road - ChangeDisplaySettingsEx
+ * drops the desktop to the game's 1280x720 and lets the panel's scaler do the
+ * upscale, which is where the soft edges come from and which no amount of
+ * sampler choice here can undo. This leaves the display alone, makes the
+ * window a borderless popup the size of the monitor, and hands the upscale to
+ * the blit, where D3D11SW_SCALE decides how it is done.
+ *
+ * Run before the client rect is read, so the swap chain is created at the
+ * final size and never has to be resized.
+ *
+ * The monitor is the one the window is already on, not the primary: a 480 Hz
+ * panel beside a 60 Hz one is exactly the setup where guessing wrong is both
+ * easy and very visible. */
+/* The monitor's true pixel count, which is not what GetMonitorInfo reports.
+ *
+ * A process without a DPI manifest - this game, and so this DLL - is handed
+ * invented coordinates: a 2560x1440 panel at 150% measures as 1707x960, and
+ * the 1600x1200 one beside it at 125% as 1280x960. Everything the process then
+ * draws is stretched back to the real size by the compositor, bilinearly,
+ * downstream of every choice made here.
+ *
+ * Two calls see past that, and a probe confirmed both do so from a process
+ * that really is unaware: the display mode out of the driver, and the
+ * DESKTOPHORZRES cap that exists for precisely this question. GetDpiForMonitor
+ * is not one of them - it is virtualised too and cheerfully answers 96.
+ *
+ * Only the size is taken from here. Window placement stays in the virtualised
+ * space, because that is the space SetWindowPos writes to. */
+static int monitor_pixels(const char *device, int *w, int *h, int *hz)
+{
+	DEVMODEA dm;
+	HDC dc;
+
+	memset(&dm, 0, sizeof(dm));
+	dm.dmSize = sizeof(dm);
+	if (EnumDisplaySettingsA(device, ENUM_CURRENT_SETTINGS, &dm) &&
+	    dm.dmPelsWidth > 0 && dm.dmPelsHeight > 0) {
+		*w = (int)dm.dmPelsWidth;
+		*h = (int)dm.dmPelsHeight;
+		*hz = (int)dm.dmDisplayFrequency;
+		return 1;
+	}
+	dc = CreateDCA(device, device, NULL, NULL);
+	if (dc) {
+		int pw = GetDeviceCaps(dc, DESKTOPHORZRES);
+		int ph = GetDeviceCaps(dc, DESKTOPVERTRES);
+
+		*hz = GetDeviceCaps(dc, VREFRESH);
+		DeleteDC(dc);
+		if (pw > 0 && ph > 0) {
+			*w = pw;
+			*h = ph;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* What the borderless request asked for, so a later frame can check it stuck. */
+static HWND g_bl_hwnd;
+static int g_bl_x, g_bl_y, g_bl_w, g_bl_h;
+static LONG g_bl_style;
+static WNDPROC g_bl_prev;
+/* Resize notifications withheld from the game, and size decisions overruled.
+ * Both should be small and then stop; a count that keeps climbing means the
+ * window is still being fought over every frame. */
+static unsigned g_bl_ate, g_bl_forced;
+
+/* Overrule the window's own idea of how big it is allowed to be.
+ *
+ * The evidence for needing this: setting the style to WS_POPUP stuck and held,
+ * and SetWindowPos returned success with no error, yet the client area was
+ * still the old size when the very next line read it back. A change that was
+ * merely queued would not behave that way. The size is being refused inside
+ * the window procedure while the style change sails through, which is DxLib
+ * keeping the client area it was configured for.
+ *
+ * The original handler still runs first, so the game sees every message and
+ * gets to keep whatever bookkeeping it does. The fields are rewritten
+ * afterwards, which is the one point where the decision is final and no later
+ * handler can undo it.
+ *
+ * Only sizes and positions are touched, and only while the window is not
+ * minimised - clamping an iconic window to the monitor rect would stop it
+ * from ever restoring. */
+static LRESULT CALLBACK gpu_bl_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+	LRESULT r;
+
+	/* Resize the window without ever telling the game it was resized.
+	 *
+	 * Forcing the size alone put the first attempt into a loop: the game was
+	 * sent WM_SIZE, set its window back to its own size, had that overridden
+	 * here, and was sent WM_SIZE again. Each lap rebuilt the swap chain -
+	 * five fresh backbuffers appeared in as many samples, resource IDs in the
+	 * 2600s - and the screen went black while the device was torn down and
+	 * remade over and over.
+	 *
+	 * Swallowing WM_WINDOWPOSCHANGED is what stops it, and it is the usual
+	 * way to suppress a resize notification: WM_SIZE and WM_MOVE are not sent
+	 * by the system but synthesised by DefWindowProc while it handles that
+	 * message, so a handler that does not pass it on means neither is ever
+	 * generated. WM_SIZE is dropped too in case the game posts its own.
+	 *
+	 * The game carries on believing its window is the size it asked for,
+	 * which is exactly right: it should keep rendering at its own resolution
+	 * and let the blit do the upscale. Nothing downstream of here wants the
+	 * game to react to the monitor's size.
+	 *
+	 * Minimise and restore still get through, because those the game does
+	 * need to see, and its window really has changed when they arrive. */
+	if (g_bl_w && g_bl_h && !IsIconic(h)) {
+		if (msg == WM_WINDOWPOSCHANGED) {
+			g_bl_ate++;
+			return 0;
+		}
+		if (msg == WM_SIZE && wp != SIZE_MINIMIZED) {
+			g_bl_ate++;
+			return 0;
+		}
+	}
+
+	r = CallWindowProcA(g_bl_prev, h, msg, wp, lp);
+
+	if (!g_bl_w || !g_bl_h)
+		return r;
+	if (msg == WM_GETMINMAXINFO) {
+		/* A window cannot be sized past ptMaxTrackSize no matter who asks,
+		 * so a game that pins this to its render size refuses the monitor
+		 * rect before any of the sizing code is reached. */
+		MINMAXINFO *mm = (MINMAXINFO *)lp;
+
+		if (mm->ptMaxTrackSize.x < g_bl_w)
+			mm->ptMaxTrackSize.x = g_bl_w;
+		if (mm->ptMaxTrackSize.y < g_bl_h)
+			mm->ptMaxTrackSize.y = g_bl_h;
+		if (mm->ptMaxSize.x < g_bl_w)
+			mm->ptMaxSize.x = g_bl_w;
+		if (mm->ptMaxSize.y < g_bl_h)
+			mm->ptMaxSize.y = g_bl_h;
+	} else if (msg == WM_WINDOWPOSCHANGING && !IsIconic(h)) {
+		WINDOWPOS *p = (WINDOWPOS *)lp;
+
+		if (p->cx != g_bl_w || p->cy != g_bl_h || p->x != g_bl_x ||
+		    p->y != g_bl_y)
+			g_bl_forced++;
+		p->x = g_bl_x;
+		p->y = g_bl_y;
+		p->cx = g_bl_w;
+		p->cy = g_bl_h;
+		/* With no frame left on the window the client area and the window
+		 * rect are the same rectangle, so these are already client pixels
+		 * and need no adjusting. */
+		p->flags &= ~(UINT)(SWP_NOSIZE | SWP_NOMOVE);
+	}
+	return r;
+}
+
+static int gpu_borderless(HWND hwnd, int *out_w, int *out_h)
+{
+	char b[8];
+	MONITORINFOEXA mi;
+	HMONITOR mon;
+	LONG style;
+	int lw, lh, pw = 0, ph = 0, hz = 0;
+
+	if (!hwnd)
+		return 0;
+	if (!savestate_getenv("D3D11SW_BORDERLESS", b, sizeof(b)) || b[0] != '1')
+		return 0;
+	mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+	memset(&mi, 0, sizeof(mi));
+	mi.cbSize = sizeof(mi);
+	if (!mon || !GetMonitorInfoA(mon, (MONITORINFO *)&mi))
+		return 0;
+	lw = (int)(mi.rcMonitor.right - mi.rcMonitor.left);
+	lh = (int)(mi.rcMonitor.bottom - mi.rcMonitor.top);
+	style = GetWindowLongA(hwnd, GWL_STYLE);
+	{
+		LONG want = (style & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |
+				       WS_MAXIMIZEBOX | WS_SYSMENU | WS_DLGFRAME |
+				       WS_BORDER)) |
+			    WS_POPUP;
+		LONG got;
+		BOOL ok;
+		RECT after;
+
+		g_bl_hwnd = hwnd;
+		g_bl_x = mi.rcMonitor.left;
+		g_bl_y = mi.rcMonitor.top;
+		g_bl_w = lw;
+		g_bl_h = lh;
+		g_bl_style = want;
+
+		/* Before the resize, so the first attempt is already the one that
+		 * cannot be refused. */
+		{
+			char cls[64];
+			DWORD wtid = GetWindowThreadProcessId(hwnd, NULL);
+
+			cls[0] = 0;
+			GetClassNameA(hwnd, cls, sizeof(cls));
+			SetLastError(0);
+			/* -4 is GWL_WNDPROC, which this toolchain's headers only
+			 * define when STRICT windowing is off. */
+			g_bl_prev = (WNDPROC)(uintptr_t)SetWindowLongA(
+				hwnd, -4, (LONG)(uintptr_t)gpu_bl_proc);
+			gpu_say("gpu: borderless window is class \"%s\", owned by thread "
+				"%lu (this is %lu), parent %p, root %p - size veto %s",
+				cls, wtid, GetCurrentThreadId(), (void *)GetParent(hwnd),
+				(void *)GetAncestor(hwnd, 2 /* GA_ROOT */),
+				g_bl_prev ? "intercepted" : "NOT intercepted, subclass refused");
+		}
+
+		SetLastError(0);
+		SetWindowLongA(hwnd, GWL_STYLE, want);
+		got = GetWindowLongA(hwnd, GWL_STYLE);
+		SetLastError(0);
+		ok = SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+				  lw, lh, SWP_FRAMECHANGED | SWP_SHOWWINDOW |
+					  SWP_NOACTIVATE);
+		memset(&after, 0, sizeof(after));
+		GetClientRect(hwnd, &after);
+		/* Every step reported separately, because the first attempt failed
+		 * silently and there was no way to tell from the log whether the
+		 * call had been refused, had been ignored, or had been undone
+		 * again by the game a moment later. */
+		gpu_say("gpu: borderless asked %p for %dx%d at %ld,%ld - style %08lx "
+			"-> %08lx (wanted %08lx), SetWindowPos %s (err %lu), client "
+			"is %ldx%ld right now",
+			(void *)hwnd, lw, lh, mi.rcMonitor.left, mi.rcMonitor.top,
+			(unsigned long)style, (unsigned long)got, (unsigned long)want,
+			ok ? "ok" : "FAILED", GetLastError(), after.right, after.bottom);
+	}
+	/* The size asked for, never the one the window reports.
+	 *
+	 * The window belongs to the game's thread while this runs on whichever
+	 * thread reached Present, so SetWindowPos only queues the change and the
+	 * owning thread applies it at its next message pump. GetClientRect called
+	 * straight afterwards still answers with the old size - which is how the
+	 * first attempt built a 1280x720 swap chain for a window that was about to
+	 * become 1707x960, and covered three quarters of the screen. */
+
+	/* The swap chain does not have to agree with the client rect - DXGI takes
+	 * explicit buffer dimensions - so it is built at the monitor's real pixel
+	 * count even though the window measures smaller. The buffer then lands on
+	 * physical pixels one for one and the compositor has nothing left to
+	 * resample, which is the whole point of a nearest-neighbour upscale.
+	 *
+	 * It also decides whether the fit is a whole number. This game renders
+	 * 1280x720: against a true 2560x1440 that is exactly 2x with no bars,
+	 * against a virtualised 1707x960 it is 1.33x and every other game pixel
+	 * would be doubled. */
+	if (!monitor_pixels(mi.szDevice, &pw, &ph, &hz) || pw < lw || ph < lh) {
+		pw = lw;
+		ph = lh;
+	}
+	*out_w = pw;
+	*out_h = ph;
+	if (pw != lw || ph != lh)
+		gpu_say("gpu: borderless on %s, %dx%d real pixels at %d Hz - the window "
+			"measures %dx%d because this process has no DPI manifest and "
+			"the desktop is at %d%%, so the buffer is built at the real "
+			"size to land on physical pixels unresampled",
+			mi.szDevice, pw, ph, hz, lw, lh, lw ? 100 * pw / lw : 0);
+	else
+		gpu_say("gpu: borderless on %s, %dx%d at %d Hz - the display mode is "
+			"untouched and the upscale is ours",
+			mi.szDevice, pw, ph, hz);
+	return 1;
+}
+
+/* Re-assert the borderless geometry until the window keeps it.
+ *
+ * SetWindowPos from a thread that does not own the window is only a request:
+ * it is delivered as a message and the owning thread decides what to do with
+ * it, including sizing itself back in a WM_WINDOWPOSCHANGING handler. DxLib
+ * manages its own window, so being overruled is a real possibility and is
+ * indistinguishable, from one call's return value, from the change simply not
+ * having been processed yet.
+ *
+ * Asking once per frame settles both cases: a queued change lands on the next
+ * pump and this goes quiet, while a window that actively resizes itself back
+ * keeps tripping the mismatch and says so. It stops after a fixed number of
+ * frames either way rather than fighting for the whole session. */
+static void gpu_borderless_tick(void)
+{
+	static int tries, done, complained, frames;
+	RECT rc;
+
+	if (!g_bl_hwnd)
+		return;
+	/* One late sample, well after everything has settled. A tally that is
+	 * still growing here is the resize loop having come back. */
+	if (++frames == 600)
+		gpu_say("gpu: borderless settled - %u resize notification(s) withheld "
+			"from the game, %u size decision(s) overruled, in 600 frames",
+			g_bl_ate, g_bl_forced);
+	if (done)
+		return;
+	if (!GetClientRect(g_bl_hwnd, &rc)) {
+		done = 1;
+		return;
+	}
+	if (rc.right == g_bl_w && rc.bottom == g_bl_h) {
+		if (tries)
+			gpu_say("gpu: borderless took hold after %d frame(s), client is "
+				"%ldx%ld",
+				tries, rc.right, rc.bottom);
+		done = 1;
+		return;
+	}
+	if (++tries > 240) {
+		gpu_say("gpu: borderless never took - asked for %dx%d over %d frames "
+			"and the client stayed %ldx%ld, so the window is being sized "
+			"by something that outranks us",
+			g_bl_w, g_bl_h, tries - 1, rc.right, rc.bottom);
+		done = 1;
+		return;
+	}
+	if (tries == 30 && !complained) {
+		complained = 1;
+		gpu_say("gpu: borderless not applied after 30 frames - client %ldx%ld, "
+			"wanted %dx%d, style now %08lx; still asking",
+			rc.right, rc.bottom, g_bl_w, g_bl_h,
+			(unsigned long)GetWindowLongA(g_bl_hwnd, GWL_STYLE));
+	}
+	SetWindowLongA(g_bl_hwnd, GWL_STYLE, g_bl_style);
+	SetWindowPos(g_bl_hwnd, HWND_TOP, g_bl_x, g_bl_y, g_bl_w, g_bl_h,
+		     SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+}
+
 static HMODULE gpu_system_dll(const char *leaf)
 {
 	char path[MAX_PATH];
@@ -440,6 +817,7 @@ static int gpu_init(HWND hwnd)
 	GpuSwapDesc scd;
 	GpuDeviceVtbl *dv;
 	RECT rc;
+	int bl_w = 0, bl_h = 0;
 	UINT level = 0;
 	HRESULT hr;
 
@@ -450,14 +828,19 @@ static int gpu_init(HWND hwnd)
 	g.tried = 1;
 	if (!gpu_on())
 		return 0;
-	if (!hwnd || !GetClientRect(hwnd, &rc) || rc.right <= 0 || rc.bottom <= 0) {
+	if (gpu_borderless(hwnd, &bl_w, &bl_h) && bl_w > 0 && bl_h > 0) {
+		g.hwnd = hwnd;
+		g.bb_w = bl_w;
+		g.bb_h = bl_h;
+	} else if (!hwnd || !GetClientRect(hwnd, &rc) || rc.right <= 0 || rc.bottom <= 0) {
 		gpu_say("gpu: no usable client area on %p, staying in software",
 			(void *)hwnd);
 		return 0;
+	} else {
+		g.hwnd = hwnd;
+		g.bb_w = rc.right;
+		g.bb_h = rc.bottom;
 	}
-	g.hwnd = hwnd;
-	g.bb_w = rc.right;
-	g.bb_h = rc.bottom;
 
 	real_dxgi = gpu_system_dll("dxgi.dll");
 	real_d3d11 = gpu_system_dll("d3d11.dll");
@@ -725,12 +1108,44 @@ static int gpu_blit(void *srv)
 		/* Two triangles in pixel coordinates, which is what the shader's
 		 * transform expects. White, because the source is already the
 		 * finished image and the modulate must not alter it. */
-		const float x1 = (float)g.bb_w, y1 = (float)g.bb_h;
+		float x0 = 0.0f, y0 = 0.0f, x1 = (float)g.bb_w, y1 = (float)g.bb_h;
 		static const float uv[6][2] = { { 0, 0 }, { 1, 0 }, { 0, 1 },
 						{ 1, 0 }, { 1, 1 }, { 0, 1 } };
-		const float px[6][2] = { { 0, 0 },   { x1, 0 },  { 0, y1 },
-					 { x1, 0 }, { x1, y1 }, { 0, y1 } };
+		float px[6][2];
 		int i;
+
+		/* Fit the source inside the backbuffer without distorting it.
+		 *
+		 * Stretching to fill is only correct while the window happens to
+		 * carry the source's aspect, which stops being true the moment the
+		 * window covers a whole monitor. Letterboxing costs the bars and
+		 * keeps circles round; the bars are already black because the
+		 * backbuffer was cleared before this ran. */
+		if (gpu_scale_fit() && g.rt_w > 0 && g.rt_h > 0 && g.bb_w > 0 && g.bb_h > 0) {
+			double sx = (double)g.bb_w / (double)g.rt_w;
+			double sy = (double)g.bb_h / (double)g.rt_h;
+			double s = sx < sy ? sx : sy;
+			double w, h;
+
+			/* Whole multiples when one fits, because a nearest-neighbour
+			 * upscale at a fractional factor duplicates some source rows
+			 * and not others, and on pixel art that reads as a texture
+			 * crawling over the image as it moves. */
+			if (gpu_scale_integer() && s >= 1.0)
+				s = (double)(int)s;
+			w = (double)g.rt_w * s;
+			h = (double)g.rt_h * s;
+			x0 = (float)(((double)g.bb_w - w) * 0.5);
+			y0 = (float)(((double)g.bb_h - h) * 0.5);
+			x1 = (float)(x0 + w);
+			y1 = (float)(y0 + h);
+		}
+		px[0][0] = x0; px[0][1] = y0;
+		px[1][0] = x1; px[1][1] = y0;
+		px[2][0] = x0; px[2][1] = y1;
+		px[3][0] = x1; px[3][1] = y0;
+		px[4][0] = x1; px[4][1] = y1;
+		px[5][0] = x0; px[5][1] = y1;
 
 		if (FAILED(cv->Map(g.ctx, g.vb, 0, GPU_MAP_WRITE_DISCARD, 0, &m)))
 			return 0;
@@ -789,10 +1204,14 @@ static int gpu_blit(void *srv)
 		cv->VSSetConstantBuffers(g.ctx, 0, 1, &g.cb);
 		cv->PSSetShader(g.ctx, g.ps, NULL, 0);
 		cv->PSSetConstantBuffers(g.ctx, 0, 1, &g.ps_cb);
+		void *smp = gpu_scale_point() ? g.smp_point : g.smp_linear;
+
 		cv->PSSetShaderResources(g.ctx, 0, 1, &srv);
-		/* Linear, because the window is rarely the source's size and this
-		 * is a rescale. Point would alias the downscale into shimmer. */
-		cv->PSSetSamplers(g.ctx, 0, 1, &g.smp_linear);
+		/* Linear by default, because the window is rarely the source's size
+		 * and a downscale sampled at point aliases into shimmer. Point is
+		 * the right answer in the other direction: this is pixel art, and
+		 * an upscale wants the pixels kept square rather than smeared. */
+		cv->PSSetSamplers(g.ctx, 0, 1, &smp);
 		cv->OMSetBlendState(g.ctx, g.blend_off, NULL, 0xffffffffu);
 		cv->RSSetState(g.ctx, g.rs_plain);
 		cv->Draw(g.ctx, 6, 0);
@@ -1140,6 +1559,7 @@ int gpu_frame_end(void)
 	sv->Present(g.swap, 1, 0);
 	if (++g.frames == 1)
 		gpu_say("gpu: first frame drawn and presented entirely on the adapter");
+	gpu_borderless_tick();
 	return 1;
 }
 
