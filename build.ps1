@@ -57,6 +57,11 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # a manifest here would hide the exact discrepancy it exists to show.
 & $zig cc @warn -target x86-windows-gnu -o dispprobe32.exe dispprobe.c -lgdi32 -luser32
 if ($LASTEXITCODE -eq 0) { "built dispprobe32.exe (monitor size and refresh probe)" }
+
+# Asking the game where it landed costs a Steam launch and thirty-five seconds.
+# Asking this costs a millisecond, and it runs where the game cannot.
+& $zig cc @warn -target x86-windows-gnu -o baseprobe32.exe baseprobe.c
+if ($LASTEXITCODE -eq 0) { "built baseprobe32.exe (ASLR image base probe)" }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "built ss_harness32.exe (savestate engine, PE32)"
 
