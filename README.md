@@ -105,7 +105,7 @@ nine tracks responsible, and the `D3D9SW_GHVORBIS` knob that reports them live.
   `linux-rabi.sh` / `xrestore.sh` / `wrapper.sh` are the Linux restore path
   (Proton + the Steam game, not distro Wine + a no-game harness). They still
   compile with `zig cc -target x86-windows-gnu`; they do not add a Wine/MinGW
-  toolchain. Launch always passes `-noaudio`.
+  toolchain. Launch always passes `-xaudio2`, same as Windows.
 - `examples/rabiribi/` — the configuration the game is actually run with.
 
 ## Building
@@ -126,7 +126,9 @@ harness is a separate Cloud Agent environment; it does not run the game.
 
 In-session save and restore work under Proton, including room to room in the
 same world. F5 saves, Shift+F5 loads. First launch is language select; later
-launches go straight to the title. Launch always passes `-noaudio`.
+launches go straight to the title. Launch always passes `-xaudio2`, same
+as Windows (the software XAudio2 trampoline). Linux Steam prompted to
+confirm `-noaudio`; Windows does not prompt for `-xaudio2`.
 
 ```
 tools/linux-rabi.sh build

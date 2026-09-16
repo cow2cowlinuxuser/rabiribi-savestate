@@ -61,17 +61,16 @@ mkdir -p "$KEEP"
 # A leftover launch*.txt from a crashed earlier sweep would mix into the answer.
 rm -f "$KEEP"/launch*.txt
 
-# steam://rungameid pops Steam's "Launch Game with custom arguments" dialog
-# when LaunchOptions is set (-noaudio). The line that actually starts the
-# exe on this box is steam-launch-wrapper + reaper + SteamLinuxRuntime, same
-# as tools/linux-rabi.sh. Bare proton waitforexitandrun exits 53 while Steam
-# holds the app.
+# Windows launches with steam://rungameid and LaunchOptions=-xaudio2; the
+# client just passes the arg. Linux Steam prompted to confirm -noaudio every
+# time. Same arg as Windows, same steam:// launch as tools/baserun.ps1.
 [ -x "$WRAP" ] && [ -x "$REAPER" ] && [ -x "$SLR" ] && [ -x "$PROTON" ] \
 	|| { echo "steam-launch-wrapper/reaper/proton/SLR missing" >&2; exit 1; }
 export DISPLAY="${DISPLAY:-:1}"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_ROOT"
 export STEAM_COMPAT_DATA_PATH="$COMPAT"
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-d3d11,dxgi,dsound,xaudio2_9,xinput1_4=n,b}"
+ATTACH="$GAME/d3d11_sw.log"
 
 # The module table is only printed when a save is taken, so the sweep needs one.
 # QUIT_AT then ends every launch at the same frame - a run that stops whenever
@@ -108,6 +107,49 @@ kill_game() {
 		| xargs -r kill 2>/dev/null || true
 }
 
+# Linux Steam's "Launch Game with custom arguments" window is titled
+# "Rabi-Ribi" (steamwebhelper). The game window is "Rabi-Ribi ver ...".
+# Return is the Continue button. Windows does not show this for -xaudio2.
+dismiss_args_prompt() {
+	command -v xdotool >/dev/null 2>&1 || return 0
+	local id cls
+	for id in $(xdotool search --name '^Rabi-Ribi$' 2>/dev/null); do
+		cls=$(xdotool getwindowclassname "$id" 2>/dev/null || true)
+		case "$cls" in
+		steam|steamwebhelper|Steam)
+			xdotool windowactivate --sync "$id" 2>/dev/null || true
+			xdotool key Return 2>/dev/null || true
+			;;
+		esac
+	done
+}
+
+# A wine process that exists for a second is not a session. The first sweep
+# treated Proton's boot stub as "started" then "exited" and reported 0 of 0
+# modules moved. The module table is in the savestate log, which only exists
+# after our d3d11.dll has attached and taken a save.
+attached() {
+	running || return 1
+	[ -f "$ATTACH" ] || return 1
+	[ -f "$KEEP/.t0" ] || return 1
+	local t0 mt
+	t0=$(cat "$KEEP/.t0")
+	mt=$(stat -c %Y "$ATTACH")
+	[ "$mt" -ge "${t0%.*}" ] || return 1
+	grep -q 'process attach' "$ATTACH" 2>/dev/null
+}
+
+wait_until_attached() {
+	local t=0
+	while [ "$t" -lt "$START_TIMEOUT" ]; do
+		dismiss_args_prompt
+		if attached; then return 0; fi
+		sleep 1
+		t=$((t + 1))
+	done
+	return 1
+}
+
 wait_for() { # wait_for <seconds> <predicate-true-means-done>
 	local t=0
 	while [ "$t" -lt "$1" ]; do
@@ -128,17 +170,17 @@ cfg_set D3D11SW_GPU 0
 for i in $(seq 1 "$N"); do
 	printf '\n=== launch %d of %d ===\n' "$i" "$N"
 	rm -f "$LOG"
-	"$WRAP" -- "$REAPER" SteamLaunch AppId="$APPID" -- \
-		"$SLR" --verb=waitforexitandrun -- \
-		"$PROTON" waitforexitandrun "$GAME/rabiribi.exe" -noaudio \
-		>/dev/null 2>&1 &
+	date +%s >"$KEEP/.t0"
+	# Same launch as tools/baserun.ps1. Steam supplies -xaudio2 from
+	# LaunchOptions; Linux may still pop a confirm dialog, which we Return.
+	steam "steam://rungameid/$APPID" >/dev/null 2>&1 &
 
-	if ! wait_for "$START_TIMEOUT" running; then
+	if ! wait_until_attached; then
 		echo "  never started, skipping"
 		kill_game
 		continue
 	fi
-	echo "  started"
+	echo "  started (wrapper attached)"
 
 	if ! wait_for "$RUN_TIMEOUT" not_running; then
 		echo "  did not close itself, ending it"
