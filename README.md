@@ -102,9 +102,10 @@ nine tracks responsible, and the `D3D9SW_GHVORBIS` knob that reports them live.
   reads the asset archive, `tagdiff.py` and `trdiff.py` compare two allocation
   traces by block identity rather than by address, `symres.c` turns the
   `module+RVA` in a fault report into a function and source line.
-  `linux-rabi.sh` / `xrestore.sh` / `wrapper.sh` are the Proton/Linux stand-ins
-  for the PowerShell deploy and cross-session restore tools. They still compile
-  with `zig cc -target x86-windows-gnu`; they do not add a Wine/MinGW toolchain.
+  `linux-rabi.sh` / `xrestore.sh` / `wrapper.sh` are the Linux restore path
+  (Proton + the Steam game, not distro Wine + a no-game harness). They still
+  compile with `zig cc -target x86-windows-gnu`; they do not add a Wine/MinGW
+  toolchain. Launch always passes `-noaudio`.
 - `examples/rabiribi/` — the configuration the game is actually run with.
 
 ## Building
@@ -116,6 +117,25 @@ Needs [zig](https://ziglang.org) as the C compiler.
 ```
 
 `build.ps1` also deploys to hardcoded local paths for other titles. Trim it.
+
+## Linux (Proton)
+
+This is the Linux restore path going forward: Proton Experimental, the Steam
+copy of Rabi-Ribi, and `tools/linux-rabi.sh`. Distro Wine plus a no-game
+harness is a separate Cloud Agent environment; it does not run the game and
+does not finish a freeze save.
+
+```
+tools/linux-rabi.sh build
+tools/linux-rabi.sh deploy
+tools/linux-rabi.sh launch
+```
+
+`launch` always passes `-noaudio`. `xrestore` always sets `D3D11SW_GPU=0`.
+The launch line is `steam-launch-wrapper` + reaper + SteamLinuxRuntime; bare
+`proton waitforexitandrun` exits 53 while Steam holds the app. Native
+DllOverrides in the Proton prefix are what make the game-folder `d3d11.dll`
+win over DXVK.
 
 ## Running the harness
 
