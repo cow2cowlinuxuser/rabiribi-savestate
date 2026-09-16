@@ -94,6 +94,34 @@ Exploit Protection is not an alternative. Its ASLR settings are
 randomisation on images that did not opt in. There is no per-process switch to
 un-opt an image that set `DYNAMICBASE` itself, so no policy can pin this exe.
 
+## Do not test cross-session restore against the live GPU backend
+
+The night this was measured ended in a bluescheck: `0x9F`
+`DRIVER_POWER_STATE_FAILURE` subcode 3, a device object holding a power IRP past
+its deadline during shutdown. The dump header proves that much. It does not
+prove which device, because naming the object in parameter 2 needs a debugger
+resolving kernel pointers and the module list in a minidump names every loaded
+driver once.
+
+The circumstantial case is strong enough to act on. The hour before it filed
+eight `VIDEO_ENGINE_TIMEOUT_DETECTED` (`0x141`) reports and one full
+`VIDEO_TDR_TIMEOUT_DETECTED` (`0x117`), and those appeared on every restore
+attempt and on none of the six plain launches in the same session. The wrapper
+is GPU-authoritative, so each cross-session restore handed the driver a device
+and a resource set belonging to a process that had exited, and the engine hung
+every time. Windows recovered each hang live, which is not the same as recovering
+cleanly, and `0x9F` is what a wedged display driver does when something finally
+asks it to change power state.
+
+So: set `D3D11SW_GPU=0` before running `tools/xrestore.ps1`. The software
+rasterizer limits a bad restore to killing the process. Nothing is lost for this
+particular investigation, because the fault being chased is in text and device
+contexts rather than in rendering.
+
+Our own log never recorded `DEVICE_REMOVED` or `DEVICE_HUNG` through any of it.
+The backend kept submitting into a device that no longer existed and never
+noticed, which is a gap worth closing on its own.
+
 ## Where that leaves cross-session restore
 
 Same boot: the heap is pinned, the allocation stream is identical, our modules
