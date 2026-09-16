@@ -102,6 +102,9 @@ nine tracks responsible, and the `D3D9SW_GHVORBIS` knob that reports them live.
   reads the asset archive, `tagdiff.py` and `trdiff.py` compare two allocation
   traces by block identity rather than by address, `symres.c` turns the
   `module+RVA` in a fault report into a function and source line.
+  `linux-rabi.sh` / `xrestore.sh` / `wrapper.sh` are the Proton/Linux stand-ins
+  for the PowerShell deploy and cross-session restore tools. They still compile
+  with `zig cc -target x86-windows-gnu`; they do not add a Wine/MinGW toolchain.
 - `examples/rabiribi/` — the configuration the game is actually run with.
 
 ## Building
