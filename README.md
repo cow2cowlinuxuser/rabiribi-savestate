@@ -142,6 +142,9 @@ win over DXVK. Wine/Proton is detected at save time (`wine_get_version`):
 only game threads are frozen, HeapWalk is skipped, and xa2/gpu park is
 skipped so the helper does not wait on wineserver.
 
+A zip of the Proton session logs (savestate + wrapper, not the 471 MB slot
+`.bin`) is in [`logs/linux-proton-room-to-room.zip`](logs/linux-proton-room-to-room.zip).
+
 ## Running the harness
 
 ```
