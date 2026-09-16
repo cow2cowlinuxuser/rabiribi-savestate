@@ -1,0 +1,15 @@
+this probe's own DPI awareness: PER-MONITOR AWARE
+virtual screen metrics:        1280 x 1024  at 0,0
+
+monitor 0  \\.\DISPLAY1  (primary)
+  GetMonitorInfo rcMonitor      1280 x 1024  at 0,0
+  EnumDisplaySettings CURRENT   1280 x 1024  at 0,0  0 Hz  32 bpp
+  GetDeviceCaps HORZRES         1280 x 1024  (virtualised)
+  GetDeviceCaps DESKTOPHORZRES  1280 x 1024  (physical)  1 Hz  logpixels 96
+  implied scale                 100%
+  GetDpiForMonitor EFFECTIVE    96 dpi  (100%)
+
+refresh rates offered at each attached device's current size:
+  \\.\DISPLAY1 (Wine Adapter) at 1280x1024: 0 0 0  <- now 0 Hz
+X connection to :100 broken (explicit kill or server shutdown).
+X connection to :100 broken (explicit kill or server shutdown).
