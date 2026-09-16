@@ -35,6 +35,17 @@ carries enough zero padding that the most common byte at each of the twelve
 positions *is* the key byte; over 16 MB every position came out with a 3.4x margin
 over the runner-up. Decrypted, offset 0 reads `DX\x04\x00`.
 
+`kanobi.py key` re-runs both steps against your own copy and says whether the
+result matches the key the tool ships with, so none of the above has to be taken
+on trust:
+
+```
+  lag 12    4.99%      <- noise is about 0.39%
+  lag 36    3.89%
+recovered key: BE 43 BD 5A A5 F6 B4 D7 89 4E C5 FD
+MATCHES the key this tool ships with
+```
+
 The header is `<HHIIIII`: magic, version, header size, data start, then the
 absolute address of the name table and the file and directory tables relative to
 it. File table entries are 44 bytes - name address, attributes, three `FILETIME`s,
@@ -62,10 +73,19 @@ libVorbis 1.3.5, whose vendor string is 36 characters and so allocates 37 bytes:
 | `bgm58.ogg` | 202.319 s | 23532 |
 | `bgm59.ogg` | 149.277 s | 15007 |
 
-The rest are libVorbis 1.3.4, `Xiph.Org libVorbis I 20140122 (Turpakaerajiin)`,
-45 characters and so 46 bytes. The codenames are stored in Latin-1 rather than
-UTF-8, which is why the arithmetic lands exactly on 37 and 46 rather than on the
-larger UTF-8 lengths.
+The other fifty-one are libVorbis 1.3.4, whose vendor string is
+`Xiph.Org libVorbis I 20140122 (Turpak<e4>r<e4>jiin)` - the codename is
+*Turpakäräjiin*, and both of its non-ASCII characters are stored as a single
+Latin-1 byte rather than as two bytes of UTF-8. That makes the string 45 bytes
+and the allocation 46.
+
+Write the codename out in ASCII as "Turpakaerajiin" and you get 47, which is
+wrong; the byte count only works in the encoding the file actually uses. Two
+further traps sit next to this one. The 20101101 build's vendor string,
+`Xiph.Org libVorbis I 20101101 (Schaufenugget)`, is *also* 45 bytes, so the size
+alone cannot distinguish the two builds and only the logged string settles it.
+And 1.3.5's codename is four snowmen, which the log renders as `(????)`; they
+occupy four bytes here, not the twelve that four UTF-8 snowmen would.
 
 `bgm56` through `bgm59` being contiguous is consistent with tracks added later and
 encoded with a newer library. Two tracks are licensed rather than original; their
@@ -109,8 +129,27 @@ All under `tools/`, none of which need the game running.
   duration table. Useful only for attaching human track titles to `bgmN`: the
   in-game files are loop-edited, so their durations do not match the masters. Only
   15 of 60 matched within 300 ms, and two different streams matched the same title.
+  `kanobi.py` does not read it; the archive supplies its own sample counts.
 - `trackmatch.py` - an earlier attempt to name tracks by matching allocation sizes
   to durations. Superseded; kept because the negative result is informative.
+
+## What here is measurement and what is testimony
+
+Worth stating, because the archive is not committed and `.gitignore` excludes
+`.csv`, `.txt` and `.log`, so most numbers above are reports of runs that cannot
+be re-read from this repository.
+
+Reproducible from a checkout plus an installed copy of the game: the key, via
+`kanobi.py key`, which re-derives it rather than asserting it; the archive
+inventory, the file table, and the per-stream serials, sample counts and vendor
+strings, via `names`, `files`, `streams` and `match`.
+
+Testimony, in that the instrument is committed but the run is not: the two
+sessions agreeing through operation 6816, the nineteen track loads with no large
+allocation within 120 operations either side, the 1284 to 1394 operations a room
+transition costs, and the absence of a sixty-entry loop table at strides 4 to 16.
+All of those are re-runnable with `D3D9SW_GHVORBIS=1` and `D3D9SW_GHTRACE`, and
+none of them should be believed harder than that.
 
 ## The knob
 

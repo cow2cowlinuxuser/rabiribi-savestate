@@ -11,13 +11,15 @@ in it has a serial number that is fixed per file and a final granule position th
 is the exact sample count, and a sample count is a duration, and the store
 soundtrack supplies durations with names attached.
 
-  py -3 kanobi.py streams        list every Ogg stream with serial and length
+  py -3 kanobi.py key            re-derive the XOR key and check it against ours
   py -3 kanobi.py names          list the file names the archive carries
-  py -3 kanobi.py match          name each stream against ost.csv
+  py -3 kanobi.py files          the same, with archive offsets and sizes
+  py -3 kanobi.py streams        list every Ogg stream with serial and length
+  py -3 kanobi.py match          join streams to file names, writes tracks.csv
 """
 
 import argparse
-import csv
+
 import os
 import re
 import struct
@@ -127,28 +129,64 @@ def files(d):
     return out
 
 
-def load_ost(path):
-    out = []
-    if not os.path.exists(path):
-        return out
-    with open(path, "r", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            out.append((row["track"], float(row["seconds"])))
-    return out
+def recover_key(path, period=12, sample=16 * 1024 * 1024):
+    """Re-derive the key from the archive, so it is a result rather than a claim.
+
+    Two steps. The period comes from an index of coincidence: for a repeating-key
+    XOR, positions a whole key apart share a key byte, so any repeated plaintext
+    survives as a repeated ciphertext byte and the match rate spikes at multiples
+    of the key length. The bytes then come from frequency: the plaintext carries
+    enough zero padding that the most common byte at each position is the key
+    byte itself.
+    """
+    with open(path, "rb") as f:
+        d = f.read(sample)
+
+    lags = []
+    for lag in range(1, 49):
+        hit = sum(1 for i in range(0, 65536) if d[i] == d[i + lag])
+        lags.append((hit / 65536.0, lag))
+    lags.sort(reverse=True)
+
+    key = bytearray(period)
+    margins = []
+    for k in range(period):
+        hist = [0] * 256
+        for i in range(k, len(d), period):
+            hist[d[i]] += 1
+        best = max(range(256), key=lambda v: hist[v])
+        runner = max(v for i, v in enumerate(hist) if i != best)
+        key[k] = best
+        expected = len(d) / period / 256.0
+        margins.append((hist[best] / expected, runner / expected))
+    return bytes(key), lags[:6], margins
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["streams", "names", "match", "files"])
+    ap.add_argument("cmd", choices=["streams", "names", "match", "files", "key"])
     ap.add_argument("--pack", default=DEFAULT)
-    ap.add_argument("--ost", default="ost.csv")
     ap.add_argument("--out", default="tracks.csv")
-    ap.add_argument("--tol", type=float, default=0.30, help="seconds of slack")
     args = ap.parse_args()
 
     if not os.path.exists(args.pack):
         print("missing: %s" % args.pack, file=sys.stderr)
         return 1
+
+    if args.cmd == "key":
+        key, lags, margins = recover_key(args.pack)
+        print("strongest coincidence lags (noise is about 0.39%):")
+        for rate, lag in lags:
+            print("  lag %2d  %6.2f%%" % (lag, rate * 100))
+        print("\nrecovered key: " + " ".join("%02X" % b for b in key))
+        print("expected key:  " + " ".join("%02X" % b for b in KEY))
+        print("\nper position, how far the winning byte beat the runner-up:")
+        for i, (best, runner) in enumerate(margins):
+            print("  pos %2d  %.2fx  (runner-up %.2fx)" % (i, best, runner))
+        print("\n%s" % ("MATCHES the key this tool ships with"
+                        if key == KEY else "DIFFERS from the shipped key"))
+        return 0
+
     d = decrypt(args.pack)
     head = struct.unpack_from("<HHIIIII", d, 0)
     if d[:2] != b"DX":

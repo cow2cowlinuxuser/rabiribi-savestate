@@ -4397,7 +4397,18 @@ static const char *const g_knobs[] = {
 	"D3D9SW_EXCLSKIP",
 	"D3D9SW_WATCH_TRACE",
 	"D3D9SW_DELTA",		  "D3D9SW_DELTA_KB",
-	"D3D9SW_OBJWATCH"
+	"D3D9SW_OBJWATCH",
+	/* The game heap's own knobs. They reach the environment through gh_knob,
+	 * which calls savestate_getenv like everything else, so leaving them out of
+	 * this list did not stop them working - it stopped them being memoised, and
+	 * the first read of one is on a free path long after the environment is
+	 * declared closed. Seal them here with the rest. */
+	"D3D9SW_GHTRACE",	  "D3D9SW_GHPIN",
+	"D3D9SW_GHPIN_MB",
+	"D3D9SW_GHPEEK",	  "D3D9SW_GHVORBIS",
+	"D3D9SW_ENTS",		  "D3D9SW_CLOCKPROBE",
+	"D3D9SW_KEY_EVERY",	  "D3D9SW_KEY_HOLD",
+	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK"
 };
 
 /* Read every knob into the memo before the environment is closed for business.

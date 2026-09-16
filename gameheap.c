@@ -1465,8 +1465,13 @@ static void gh_peek(void)
 /* -------------------------------------------------- the vorbis witness
  *
  * The block whose size differs between two runs turned out to be the Vorbis
- * vendor string: 0x25 holds "Xiph.Org libVorbis I 20150105 (????)", 0x2E holds
- * the 20101101 build's longer one. The music was not all encoded with the same
+ * vendor string: 0x25 holds "Xiph.Org libVorbis I 20150105 (????)" and 0x2E
+ * holds the 20140122 one, whose codename is Latin-1 and so 45 bytes rather than
+ * the 47 an ASCII transliteration of it would suggest. This comment named the
+ * 20101101 build before the run that settled it, which is a trap worth leaving
+ * marked: that build's vendor string is also 45 bytes, so the arithmetic alone
+ * cannot tell the two apart and only the logged string can. The music was not
+ * all encoded with the same
  * library version, so the allocator's stream depends on which track is being
  * decoded - that is game state, not chance. Naming the track at the operation
  * number it loads at turns the divergence from a nuisance into a coordinate.
