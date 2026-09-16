@@ -139,6 +139,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   & $zig cc @warn -target x86-windows-gnu -shared -o x86\xaudio2_9.dll xa2_fwd.c xaudio2_9.def -luser32
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  # DxLib tries xinput1_4 first, so that is the name to own. Forwards to the
+  # system DLL unless D3D9SW_XINPUT=0, which pins every pad absent; pad
+  # recognition changes the game's RNG consumption and so its allocation stream.
+  & $zig cc @warn -target x86-windows-gnu -shared -o x86\xinput1_4.dll xinput_sw.c xinput.def
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 $rabi = "C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi"
 if ((Test-Path $rabi) -and (Test-Path "x86\xaudio2_9.dll")) {
   Copy-Item -Force x86\xaudio2_9.dll (Join-Path $rabi "xaudio2_9.dll")
