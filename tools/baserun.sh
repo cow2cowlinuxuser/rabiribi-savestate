@@ -61,10 +61,13 @@ mkdir -p "$KEEP"
 # A leftover launch*.txt from a crashed earlier sweep would mix into the answer.
 rm -f "$KEEP"/launch*.txt
 
-# Windows LaunchOptions is -xaudio2. This VM has no sound device (no /dev/snd,
-# no Pulse), so that flag dies before d3d11.dll attaches. -noaudio is the
-# playable Proton path. Keep Steam LaunchOptions empty so the Linux client
-# does not prompt; pass -noaudio on the exe line instead of through steam://.
+# Windows LaunchOptions is -xaudio2. This VM has no sound device, so that
+# flag dies before d3d11.dll attaches; -noaudio is the playable Proton path.
+# Put -noaudio in Steam Launch Options and launch with steam://rungameid
+# (same as tools/baserun.ps1). Passing -noaudio on the exe line or as
+# steam://run/400910//-noaudio is what pops "Launch Game with custom
+# arguments" — Steam treats those as injected args, even when they match
+# the saved LaunchOptions.
 [ -x "$WRAP" ] && [ -x "$REAPER" ] && [ -x "$SLR" ] && [ -x "$PROTON" ] \
 	|| { echo "steam-launch-wrapper/reaper/proton/SLR missing" >&2; exit 1; }
 export DISPLAY="${DISPLAY:-:1}"
@@ -154,12 +157,9 @@ for i in $(seq 1 "$N"); do
 	printf '\n=== launch %d of %d ===\n' "$i" "$N"
 	rm -f "$LOG"
 	date +%s >"$KEEP/.t0"
-	# Not steam://: LaunchOptions in the client is how Linux Steam pops the
-	# confirm dialog, and -xaudio2 is not playable here (no sound device).
-	"$WRAP" -- "$REAPER" SteamLaunch AppId="$APPID" -- \
-		"$SLR" --verb=waitforexitandrun -- \
-		"$PROTON" waitforexitandrun "$GAME/rabiribi.exe" -noaudio \
-		>/dev/null 2>&1 &
+	# Official launch: LaunchOptions supplies -noaudio. Do not append it
+	# here or Steam rewrites this to steam://run/400910//-noaudio and asks.
+	steam "steam://rungameid/$APPID" >/dev/null 2>&1 &
 
 	if ! wait_until_attached; then
 		echo "  never started, skipping"

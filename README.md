@@ -105,8 +105,7 @@ nine tracks responsible, and the `D3D9SW_GHVORBIS` knob that reports them live.
   `linux-rabi.sh` / `xrestore.sh` / `wrapper.sh` are the Linux restore path
   (Proton + the Steam game, not distro Wine + a no-game harness). They still
   compile with `zig cc -target x86-windows-gnu`; they do not add a Wine/MinGW
-  toolchain. Launch always passes `-noaudio` (this VM has no sound device;
-  Windows uses `-xaudio2`).
+  toolchain. Proton Launch Options is `-noaudio`; launch with `steam://rungameid`.
 - `examples/rabiribi/` — the configuration the game is actually run with.
 
 ## Building
@@ -127,10 +126,11 @@ harness is a separate Cloud Agent environment; it does not run the game.
 
 In-session save and restore work under Proton, including room to room in the
 same world. F5 saves, Shift+F5 loads. First launch is language select; later
-launches go straight to the title. Launch always passes `-noaudio`: this
-VM has no `/dev/snd`, and `-xaudio2` (the Windows LaunchOptions) exits
-before our wrapper attaches. Keep Steam LaunchOptions empty so the Linux
-client does not prompt; the flag is on the exe line.
+launches go straight to the title. Proton Launch Options is `-noaudio`
+(this VM has no `/dev/snd`; Windows uses `-xaudio2`). Launch with
+`steam://rungameid` so Steam supplies that flag itself. Passing it on
+the exe line becomes `steam://run/400910//-noaudio` and the Linux
+client prompts "Launch Game with custom arguments".
 
 ```
 tools/linux-rabi.sh build
