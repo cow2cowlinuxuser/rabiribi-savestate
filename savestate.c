@@ -4409,7 +4409,8 @@ static const char *const g_knobs[] = {
 	"D3D9SW_ENTS",		  "D3D9SW_CLOCKPROBE",
 	"D3D9SW_KEY_EVERY",	  "D3D9SW_KEY_HOLD",
 	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK",
-	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT"
+	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT",
+	"D3D9SW_LOAD_AT"
 };
 
 /* Read every knob into the memo before the environment is closed for business.
@@ -17234,6 +17235,37 @@ static void key_at_tick(void)
 	}
 }
 
+/* Restore on a fixed frame, for the cross-session test.
+ *
+ * A state written to a file in one launch and read back in the next is the
+ * whole question, and it cannot be asked by hand: the two launches have to
+ * reach the same frame, from the same save file, with the same input, or a
+ * failure says nothing about addresses and everything about the operator.
+ *
+ * Paired with D3D9SW_SAVE_AT in the first launch and D3D9SW_SLOTFILE so the
+ * slot survives the process. The point is not to succeed; it is to find out
+ * exactly which stage refuses first, and the log after this fires is the
+ * answer. */
+static int load_at_frame(void)
+{
+	static long at = -1;
+	static long frame;
+	static int done;
+
+	if (at < 0) {
+		at = (long)soak_knob("D3D9SW_LOAD_AT", 0);
+		if (at > 0)
+			ss_log("load-at: this run will restore slot 0 at frame %ld, "
+			       "from whatever the last session left in the file\n",
+			       at);
+	}
+	if (at <= 0 || done || ++frame < at)
+		return 0;
+	done = 1;
+	ss_log("load-at: frame %ld reached, asking for the restore\n", at);
+	return 1;
+}
+
 /* Quit on a fixed frame, so that two runs are the same length.
  *
  * The first comparison pair was ended by hand at different moments. The traces
@@ -17316,6 +17348,10 @@ int savestate_soak_action(void)
 	 * ladder to get at it. */
 	if (save_at_frame())
 		return SS_SOAK_SAVE;
+	/* After the save trigger, so a config that sets both takes the state
+	 * before trying to put one back and the ordering is never in doubt. */
+	if (load_at_frame())
+		return SS_SOAK_LOAD;
 	if (g_ctl->soak_state == SOAK_OFF || g_ctl->soak_state == SOAK_DONE)
 		return SS_SOAK_NOTHING;
 
