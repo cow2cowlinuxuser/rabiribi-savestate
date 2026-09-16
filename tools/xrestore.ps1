@@ -75,4 +75,10 @@ $c | Select-String -Pattern 'load-at:|REFUSED|refus|abort|mismatch|cannot|exclud
 
 Write-Host "`n=== and whether it survived ==="
 $c | Select-String -Pattern 'quit-at: frame|exception|fault|C0000005' | Select-Object -First 6 | % { Write-Host "  $($_.Line.Trim())" }
-Write-Host "`n  logs in det\xrestore\"
+
+# Always, and last. Leaving LOAD_AT armed means the next ordinary launch - by
+# anyone, for any reason - attempts a cross-session restore and dies doing it.
+# The first run of this script left exactly that behind.
+SetKnobs @{ 'D3D9SW_SAVE_AT' = 0; 'D3D9SW_LOAD_AT' = 0; 'D3D9SW_QUIT_AT' = 0 }
+Write-Host "`n  knobs disarmed - the game launches and plays normally again"
+Write-Host "  logs in det\xrestore\"
