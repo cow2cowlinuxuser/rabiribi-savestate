@@ -12177,58 +12177,31 @@ static int do_save(int slotno)
 	       g_decpatch > 0	 ? "APPLIED"
 	       : g_decpatch < 0	 ? "given up on"
 				 : "still trying");
-	/* The stages announce themselves before they run, not after.
-	 *
-	 * Five sessions under Wine - both harnesses and the game - ended on the
-	 * decoder line above and printed nothing more. That places the hang inside
-	 * do_save and nowhere better, because from there to the far side of
-	 * suspend_all almost nothing speaks: the three census calls below stay
-	 * silent when no audio stand-in is serving, and a freeze that never returns
-	 * cannot report itself afterwards.
-	 *
-	 * Saying it first is what makes the log answer. ss_raw goes straight to
-	 * WriteFile with no buffer, no lock and no C runtime, so the last line in
-	 * the file is the stage that did not come back - which is the only question
-	 * a log of a hang is able to settle. Eight lines per save, and saves are a
-	 * keypress, so the cost is nothing next to another round of guessing. */
-	ss_raw("save stage: audio snapshot\n");
 	dsh_save();
 	/* Beside dsh_save, because these answer the same question for whichever
 	 * audio stand-in is serving. They were in savestate_object_report, which
 	 * this config gates off, so a whole working session produced no census at
 	 * all - and the census is the one piece of evidence the run was for. */
-	ss_raw("save stage: census\n");
 	ds_sw_report();
 	xa2_sw_report();
 	gameheap_report();
 	/* Before suspend_all, because the point is to have nothing playing for the
 	 * whole window rather than merely for the copy. */
-	ss_raw("save stage: quieting the audio\n");
 	dsh_quiet();
 	xa2_sw_park();
 	/* Same reasoning as the two above, and the adapter has the stronger
 	 * claim: suspending threads stops ours, and the GPU is not one of ours. */
-	ss_raw("save stage: parking the adapter\n");
 	if (g_gpu_park_fn)
 		g_gpu_park_fn(1);
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t0);
 	g_blk_save_n = 0;
 	/* Before collect_threads, because everything past this point runs with the
-	 * process held still and this reaches for the loader lock.
-	 *
-	 * Named separately from the two around it because it is the likeliest of
-	 * them to be where Wine stops: it wants the loader lock, and the ranges it
-	 * builds describe Windows' own allocator, which is not the code a non-
-	 * Windows loader is running. */
-	ss_raw("save stage: allocator ranges (this one takes the loader lock)\n");
+	 * process held still and this reaches for the loader lock. */
 	if (alloc_settle())
 		alloc_ranges_init();
-	ss_raw("save stage: collecting threads\n");
 	collect_threads();
-	ss_raw("save stage: suspending\n");
 	suspend_all();
-	ss_raw("save stage: threads held, settling\n");
 	/* Let go and look again while anything is inside the JIT. Threads must be
 	 * suspended to read their contexts, so each attempt is a full suspend, and
 	 * the release has to be real - a thread cannot leave the JIT while held. */
@@ -12271,12 +12244,10 @@ static int do_save(int slotno)
 	if (blk_mode() && blk_alloc()) {
 		int capped = 0;
 
-		ss_raw("save stage: heap locks\n");
 		resume_all(0);
 		blk_lock_all();
 		collect_threads();
 		suspend_all();
-		ss_raw("save stage: locks held, settling again\n");
 		/* Settle again, because the release just above reopened the window the
 		 * first loop closed. Fewer attempts than the first pass: the heap locks
 		 * are held now, so a thread that wants the classic allocator will park
