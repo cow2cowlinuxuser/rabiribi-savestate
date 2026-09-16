@@ -125,9 +125,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # is - and the x64 build cannot load into them at all. Nothing in the source
 # needed changing for this; savestate.c and swrast.c were already building
 # 32-bit for the D3D9 wrapper, and the rest followed on a target triple alone.
-& $zig cc @warn -DD3D9SW_VARIANT=d3d11 -DSWRAST_DEFAULT_THREADS=32 -DSWRAST_THREADS_PHYSICAL -target x86-windows-gnu -shared -o x86\d3d11.dll @d3d11src -lgdi32 -luser32 -lwinmm
+& $zig cc @warn -DD3D9SW_VARIANT=d3d11 -DSWRAST_DEFAULT_THREADS=32 -DSWRAST_THREADS_PHYSICAL -target x86-windows-gnu -shared -o x86\d3d11.dll @d3d11src -lgdi32 -luser32 -lwinmm "-Wl,--image-base=0x60000000"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  & $zig cc @warn -target x86-windows-gnu -shared -o x86\dxgi.dll dxgi_fwd.c dxgi.def
+  & $zig cc @warn -target x86-windows-gnu -shared -o x86\dxgi.dll dxgi_fwd.c dxgi.def "-Wl,--image-base=0x61000000"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # A same-folder dsound.dll so that Windows' never loads. Only the 32-bit one
@@ -141,14 +141,20 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   # Steam does not preload it, so the game folder wins. Forwards XAudio2Create
   # into d3d11.dll and exports the rest of the real DLL's names so DxLib's
   # delay-load of X3DAudioInitialize is not a jump to NULL.
-  & $zig cc @warn -target x86-windows-gnu -shared -o x86\xaudio2_9.dll xa2_fwd.c xaudio2_9.def -luser32
+  & $zig cc @warn -target x86-windows-gnu -shared -o x86\xaudio2_9.dll xa2_fwd.c xaudio2_9.def -luser32 "-Wl,--image-base=0x62000000"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # DxLib tries xinput1_4 first, so that is the name to own. Forwards to the
   # system DLL unless D3D9SW_XINPUT=0, which pins every pad absent; pad
   # recognition changes the game's RNG consumption and so its allocation stream.
-  & $zig cc @warn -target x86-windows-gnu -shared -o x86\xinput1_4.dll xinput_sw.c xinput.def
+  & $zig cc @warn -target x86-windows-gnu -shared -o x86\xinput1_4.dll xinput_sw.c xinput.def "-Wl,--image-base=0x63000000"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # Each of the four now links at its own base; this makes the loader prefer
+  # that base instead of randomising it. Every module we pin is one less delta
+  # a cross-session restore has to reconcile.
+  Write-Host "pinning wrapper image bases:"
+  & (Join-Path $PSScriptRoot "tools\noaslr.ps1") -Path x86\d3d11.dll, x86\dxgi.dll, x86\xaudio2_9.dll, x86\xinput1_4.dll
 
 $rabi = "C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi"
 if ((Test-Path $rabi) -and (Test-Path "x86\xaudio2_9.dll")) {
