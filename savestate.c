@@ -14919,9 +14919,11 @@ static int do_load(int slotno)
 	 * holding. The window is now the few microseconds between the two calls
 	 * instead of the clobber delay.
 	 *
-	 * Only the starting half runs here: dsh_seek above has already put every
-	 * cursor where the game expects it, so a thread that reads one before this
-	 * line gets the right answer from a stopped buffer. */
+	 * Only the starting half runs here. When D3D9SW_DSSEEK is on, dsh_seek
+	 * above has already put every cursor where the game expects it, so a thread
+	 * that reads one before this line gets the right answer from a stopped
+	 * buffer. When it is off, which is the default, no cursor moves in either
+	 * place and the buffers resume from where they actually are. */
 	dsh_play();
 	xa2_sw_resume();
 	ss_log("  resume: done, all threads runnable\n");

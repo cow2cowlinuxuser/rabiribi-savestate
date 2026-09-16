@@ -1185,13 +1185,30 @@ void dsh_quiet(void)
 	       n);
 }
 
+/* Whether cursors go back at all.
+ *
+ * In one place because dsh_seek and dsh_play both act on the answer, and them
+ * disagreeing about it was a real defect rather than a stale comment. dsh_seek
+ * declined to wind cursors back, and said so in the log, while dsh_play wound
+ * them back anyway for every buffer the snapshot knew was playing - which is
+ * exactly the case dsh_seek's reasoning is about, not an exception to it. The
+ * result was the failure that reasoning exists to prevent, on the buffers most
+ * likely to matter: a cursor in the past against ring contents in the present. */
+static int dsh_seek_on(void)
+{
+	char v[8];
+	unsigned got = savestate_getenv("D3D9SW_DSSEEK", v, sizeof(v));
+
+	return got > 0 && got < sizeof(v) && v[0] == '1';
+}
+
 /* Start again from where each buffer was when it was stopped.
  *
  * Only the ones that were playing at the snapshot: starting a buffer that was
  * idle would produce sound the game never asked for. */
 void dsh_play(void)
 {
-	int i, n = 0, rescued = 0;
+	int i, n = 0, rescued = 0, seek = dsh_seek_on();
 
 	if (!g_ready)
 		return;
@@ -1204,12 +1221,15 @@ void dsh_play(void)
 		if (!snap && !now)
 			continue;
 		v = *(void ***)g_buf[i].p;
-		/* The cursor is only moved for buffers the snapshot knows about.
-		 * One the present alone vouches for has no saved position worth
-		 * having - dsh_seek has already put every cursor where the game
-		 * expects it, and overwriting that with a stale figure would be
-		 * inventing a position rather than keeping one. */
-		if (snap)
+		/* Only when cursors are going back at all, and then only for
+		 * buffers the snapshot knows about. One the present alone vouches
+		 * for has no saved position worth having, and writing a stale
+		 * figure into it would be inventing a position rather than keeping
+		 * one. With seeking off - which is the default, because
+		 * DirectSound's objects stay in the present - the buffer plays on
+		 * from wherever it actually is, which is the only place the ring
+		 * agrees with. */
+		if (seek && snap)
 			((PFN_SETPOS)v[DSB_SET_POSITION])(g_buf[i].p, g_buf[i].play);
 		((PFN_PLAY)v[DSB_PLAY])(g_buf[i].p, 0, 0, DSBPLAY_LOOPING);
 		n++;
@@ -1219,7 +1239,8 @@ void dsh_play(void)
 	if (g_present)
 		g_present->n = 0;
 	LeaveCriticalSection(&g_cs);
-	ss_log("dsound: %d buffer(s) playing again from where they were stopped%s\n", n,
+	ss_log("dsound: %d buffer(s) playing again from %s%s\n", n,
+	       seek ? "their saved position" : "where they actually are",
 	       rescued ? " (including ones the snapshot thought were silent)" : "");
 }
 
@@ -1243,8 +1264,6 @@ void dsh_play(void)
 void dsh_seek(void)
 {
 	int i, moved = 0;
-	char v[8];
-	unsigned got;
 
 	if (!g_ready)
 		return;
@@ -1262,13 +1281,14 @@ void dsh_seek(void)
 	 *
 	 * Either DirectSound goes back entirely or it stays entirely, and it cannot
 	 * go back, because its threads never stopped. So it stays, cursors
-	 * included. D3D9SW_DSSEEK=1 restores the old behaviour for comparison. */
-	got = savestate_getenv("D3D9SW_DSSEEK", v, sizeof(v));
-	if (!(got > 0 && got < sizeof(v) && v[0] == '1')) {
-		ss_log("dsound: cursors left where they are - DirectSound's objects "
-		       "stay in the present now, so winding only their play positions "
-		       "back would put the mixer somewhere the ring does not agree "
-		       "with\n");
+	 * included. D3D9SW_DSSEEK=1 restores the old behaviour for comparison, and
+	 * dsh_play reads the same answer so that it cannot quietly contradict this
+	 * one for the buffers the snapshot happens to know about. */
+	if (!dsh_seek_on()) {
+		ss_log("dsound: cursors left where they are, in dsh_play as well as "
+		       "here - DirectSound's objects stay in the present now, so "
+		       "winding only their play positions back would put the mixer "
+		       "somewhere the ring does not agree with\n");
 		return;
 	}
 	EnterCriticalSection(&g_cs);
