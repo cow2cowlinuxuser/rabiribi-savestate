@@ -61,9 +61,10 @@ mkdir -p "$KEEP"
 # A leftover launch*.txt from a crashed earlier sweep would mix into the answer.
 rm -f "$KEEP"/launch*.txt
 
-# Windows launches with steam://rungameid and LaunchOptions=-xaudio2; the
-# client just passes the arg. Linux Steam prompted to confirm -noaudio every
-# time. Same arg as Windows, same steam:// launch as tools/baserun.ps1.
+# Windows LaunchOptions is -xaudio2. This VM has no sound device (no /dev/snd,
+# no Pulse), so that flag dies before d3d11.dll attaches. -noaudio is the
+# playable Proton path. Keep Steam LaunchOptions empty so the Linux client
+# does not prompt; pass -noaudio on the exe line instead of through steam://.
 [ -x "$WRAP" ] && [ -x "$REAPER" ] && [ -x "$SLR" ] && [ -x "$PROTON" ] \
 	|| { echo "steam-launch-wrapper/reaper/proton/SLR missing" >&2; exit 1; }
 export DISPLAY="${DISPLAY:-:1}"
@@ -107,23 +108,6 @@ kill_game() {
 		| xargs -r kill 2>/dev/null || true
 }
 
-# Linux Steam's "Launch Game with custom arguments" window is titled
-# "Rabi-Ribi" (steamwebhelper). The game window is "Rabi-Ribi ver ...".
-# Return is the Continue button. Windows does not show this for -xaudio2.
-dismiss_args_prompt() {
-	command -v xdotool >/dev/null 2>&1 || return 0
-	local id cls
-	for id in $(xdotool search --name '^Rabi-Ribi$' 2>/dev/null); do
-		cls=$(xdotool getwindowclassname "$id" 2>/dev/null || true)
-		case "$cls" in
-		steam|steamwebhelper|Steam)
-			xdotool windowactivate --sync "$id" 2>/dev/null || true
-			xdotool key Return 2>/dev/null || true
-			;;
-		esac
-	done
-}
-
 # A wine process that exists for a second is not a session. The first sweep
 # treated Proton's boot stub as "started" then "exited" and reported 0 of 0
 # modules moved. The module table is in the savestate log, which only exists
@@ -142,7 +126,6 @@ attached() {
 wait_until_attached() {
 	local t=0
 	while [ "$t" -lt "$START_TIMEOUT" ]; do
-		dismiss_args_prompt
 		if attached; then return 0; fi
 		sleep 1
 		t=$((t + 1))
@@ -171,9 +154,12 @@ for i in $(seq 1 "$N"); do
 	printf '\n=== launch %d of %d ===\n' "$i" "$N"
 	rm -f "$LOG"
 	date +%s >"$KEEP/.t0"
-	# Same launch as tools/baserun.ps1. Steam supplies -xaudio2 from
-	# LaunchOptions; Linux may still pop a confirm dialog, which we Return.
-	steam "steam://rungameid/$APPID" >/dev/null 2>&1 &
+	# Not steam://: LaunchOptions in the client is how Linux Steam pops the
+	# confirm dialog, and -xaudio2 is not playable here (no sound device).
+	"$WRAP" -- "$REAPER" SteamLaunch AppId="$APPID" -- \
+		"$SLR" --verb=waitforexitandrun -- \
+		"$PROTON" waitforexitandrun "$GAME/rabiribi.exe" -noaudio \
+		>/dev/null 2>&1 &
 
 	if ! wait_until_attached; then
 		echo "  never started, skipping"
