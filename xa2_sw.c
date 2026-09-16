@@ -227,6 +227,7 @@ static LONGLONG g_qpf;
 static unsigned char *g_chunk;
 static SIZE_T g_chunk_left;
 static unsigned long g_voices, g_submits, g_starved, g_overflow;
+static int g_over_said;
 
 /* Same arena rule as ds_sw: ordinary private read-write memory, captured by the
  * snapshot, not on the wrapper's CRT heap and not excluded. The queue, the
@@ -1132,8 +1133,27 @@ static HRESULT WINAPI S_SubmitSourceBuffer(SwVoice *v, const XA2_BUFFER *b, cons
 		/* Real XAudio2 allows 64 queued buffers and returns an error past
 		 * that; DxLib streams with two or three, so reaching this means
 		 * something is wrong rather than busy. Counted so it cannot happen
-		 * quietly. */
+		 * quietly.
+		 *
+		 * The count alone could not say what was wrong, and sessions have
+		 * ended with 24, 57 and 128 of these. A queue only fills if nothing
+		 * is retiring it, and nothing retires a voice the mixer will not
+		 * touch: voice_playing wants alive, started, kind 0 and a non-empty
+		 * queue, and Stop clears started just as surely as never having
+		 * begun does. Those are different bugs with the same counter, so
+		 * the first one says which it is. */
 		g_overflow++;
+		if (!g_over_said) {
+			g_over_said = 1;
+			ss_log("xa2_sw: voice %08lX refused a buffer, %d already queued "
+			       "- alive %d, started %d, kind %d, rate %d Hz after the "
+			       "ratio, callback %08lX. Nothing retires a voice the mixer "
+			       "skips, so a stopped or never-started one fills to the "
+			       "limit and every submit after that is lost audio\n",
+			       (unsigned long)(UINT_PTR)v, v->n, v->alive, v->started,
+			       v->kind, (int)v->rate_eff,
+			       (unsigned long)(UINT_PTR)v->cb);
+		}
 		LeaveCriticalSection(&g_cs);
 		return E_FAIL;
 	}
