@@ -122,8 +122,11 @@ Needs [zig](https://ziglang.org) as the C compiler.
 
 This is the Linux restore path going forward: Proton Experimental, the Steam
 copy of Rabi-Ribi, and `tools/linux-rabi.sh`. Distro Wine plus a no-game
-harness is a separate Cloud Agent environment; it does not run the game and
-does not finish a freeze save.
+harness is a separate Cloud Agent environment; it does not run the game.
+
+In-session save and restore work under Proton, including room to room in the
+same world. F5 saves, Shift+F5 loads. First launch is language select; later
+launches go straight to the title. Launch always passes `-noaudio`.
 
 ```
 tools/linux-rabi.sh build
@@ -131,11 +134,13 @@ tools/linux-rabi.sh deploy
 tools/linux-rabi.sh launch
 ```
 
-`launch` always passes `-noaudio`. `xrestore` always sets `D3D11SW_GPU=0`.
-The launch line is `steam-launch-wrapper` + reaper + SteamLinuxRuntime; bare
+`xrestore` always sets `D3D11SW_GPU=0`. The launch line is
+`steam-launch-wrapper` + reaper + SteamLinuxRuntime; bare
 `proton waitforexitandrun` exits 53 while Steam holds the app. Native
 DllOverrides in the Proton prefix are what make the game-folder `d3d11.dll`
-win over DXVK.
+win over DXVK. Wine/Proton is detected at save time (`wine_get_version`):
+only game threads are frozen, HeapWalk is skipped, and xa2/gpu park is
+skipped so the helper does not wait on wineserver.
 
 ## Running the harness
 
