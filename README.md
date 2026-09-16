@@ -53,6 +53,15 @@ address-dependent and the game's dynamic allocations do not land at
 reproducible addresses across launches. Both need a save that can be
 deterministically repaired at restore time rather than replayed verbatim.
 
+One concrete cause of the divergence has a name now. Two runs that should have
+allocated identically split at a single `calloc` asking for 0x25 bytes in one and
+0x2E in the other, and that block is a Vorbis vendor string: the game's music was
+not all encoded with the same libVorbis version, so which track loads decides the
+shape of the allocation stream. That makes the divergence game state, reproducible
+given the same route, rather than a seed to be pinned.
+[docs/audio_and_archive.md](docs/audio_and_archive.md) has the archive format, the
+nine tracks responsible, and the `D3D9SW_GHVORBIS` knob that reports them live.
+
 ### Known gaps, measured rather than assumed
 
 - Ribbon sweeps to the player after a restore. Both entities restore to correct
@@ -89,6 +98,10 @@ deterministically repaired at restore time rather than replayed verbatim.
 - `dispprobe.c` — prints what every monitor-size API reports, side by side.
   Built without a DPI manifest on purpose, so it sees the invented coordinates
   the game sees.
+- `tools/` — offline analysis, none of which needs the game running. `kanobi.py`
+  reads the asset archive, `tagdiff.py` and `trdiff.py` compare two allocation
+  traces by block identity rather than by address, `symres.c` turns the
+  `module+RVA` in a fault report into a function and source line.
 - `examples/rabiribi/` — the configuration the game is actually run with.
 
 ## Building

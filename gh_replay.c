@@ -34,6 +34,20 @@
  *     pinned   RtlCreateHeap inside a reservation we choose
  *     bucket   size classes, each from its own fixed-base reservation
  *     all      every strategy in turn, with a comparison at the end
+ *
+ * The above answers "is this allocator deterministic" in one shot. To ask where
+ * a run stops being deterministic, and to ask it across two real sessions
+ * rather than two replays, use the jig instead:
+ *
+ *   gh_replay.exe probe <trace> <strategy> <out.txt> [ops per checkpoint]
+ *   gh_replay.exe compare <a.txt> <b.txt>
+ *
+ * probe is meant to be run once per process - two invocations, or two traces
+ * captured from two game sessions - and compare then reports the first
+ * operation at which the two layouts part company, and how much of the final
+ * live set still sits at the same offset. Everything is relative to each run's
+ * own base, because the base moving while the contents do not is the outcome
+ * that makes a snapshot relocatable.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -48,10 +62,17 @@ typedef struct {
 	char op;
 	unsigned size;
 	unsigned off; /* what the game got, for comparison */
+	/* The block's name, when the trace carries one: the call site as an RVA
+	 * and how many times that site had already asked for that size. Traces
+	 * captured before tagging existed leave both at ~0 and everything here
+	 * falls back to comparing offsets. */
+	unsigned site;
+	unsigned ord;
 } Op;
 
 static Op *g_ops;
 static long g_nops;
+static long g_named;
 static unsigned g_trace_base;
 
 /* ------------------------------------------------------------------ the trace */
@@ -80,14 +101,24 @@ static int load_trace(const char *path)
 			sscanf(line, "# heap %x", &g_trace_base);
 			continue;
 		}
-		if (sscanf(line, "%c %x %x", &op, &size, &off) != 3)
-			continue;
-		if (g_nops >= MAX_OPS)
-			break;
-		g_ops[g_nops].op = op;
-		g_ops[g_nops].size = size;
-		g_ops[g_nops].off = off;
-		g_nops++;
+		{
+			unsigned site = 0xFFFFFFFFu, ord = 0xFFFFFFFFu;
+			int got = sscanf(line, "%c %x %x %x %x", &op, &size, &off,
+					 &site, &ord);
+
+			if (got < 3)
+				continue;
+			if (g_nops >= MAX_OPS)
+				break;
+			g_ops[g_nops].op = op;
+			g_ops[g_nops].size = size;
+			g_ops[g_nops].off = off;
+			g_ops[g_nops].site = got >= 5 ? site : 0xFFFFFFFFu;
+			g_ops[g_nops].ord = got >= 5 ? ord : 0xFFFFFFFFu;
+			g_nops++;
+			if (g_ops[g_nops - 1].site != 0xFFFFFFFFu)
+				g_named++;
+		}
 	}
 	fclose(f);
 	printf("trace: %ld operation(s), recorded against heap base %08X\n", g_nops,
@@ -423,27 +454,134 @@ typedef struct {
 
 /* The live set, so a free can be given the pointer the matching allocation
  * returned. The trace records what the game freed by offset, which is only
- * meaningful against the game's own heap, so the replay pairs them itself: a
- * free takes the most recent live block whose size matches. That is not the
- * game's exact pairing, but it preserves the property that matters - the
- * population of live blocks and their sizes over time. */
+ * meaningful against the game's own heap, so the replay pairs them itself.
+ *
+ * Two ways to pair, and the better one is now usually available. If the trace
+ * carries names, a free takes the block with the matching name, which is the
+ * game's own pairing exactly. Without names it falls back to taking the most
+ * recent live block of the same size - not the game's pairing, but it preserves
+ * the property that matters, the population of live blocks and their sizes over
+ * time. The fallback is what every trace captured before tagging gets. */
 static void *s_live[LIVE_CAP];
 static unsigned s_live_size[LIVE_CAP];
+static unsigned s_live_site[LIVE_CAP];
+static unsigned s_live_ord[LIVE_CAP];
 static long s_nlive;
+static long s_paired_by_name;
 
-static int take_live(unsigned size, void **out)
+static void drop_live(long i, void **out)
+{
+	*out = s_live[i];
+	s_live[i] = s_live[s_nlive - 1];
+	s_live_size[i] = s_live_size[s_nlive - 1];
+	s_live_site[i] = s_live_site[s_nlive - 1];
+	s_live_ord[i] = s_live_ord[s_nlive - 1];
+	s_nlive--;
+}
+
+static int take_live(unsigned size, unsigned site, unsigned ord, void **out)
 {
 	long i;
 
+	if (site != 0xFFFFFFFFu)
+		for (i = s_nlive - 1; i >= 0; i--)
+			if (s_live_site[i] == site && s_live_ord[i] == ord) {
+				drop_live(i, out);
+				s_paired_by_name++;
+				return 1;
+			}
 	for (i = s_nlive - 1; i >= 0; i--)
 		if (s_live_size[i] == size) {
-			*out = s_live[i];
-			s_live[i] = s_live[s_nlive - 1];
-			s_live_size[i] = s_live_size[s_nlive - 1];
-			s_nlive--;
+			drop_live(i, out);
 			return 1;
 		}
 	return 0;
+}
+
+/* ------------------------------------------------------------------- the jig
+ *
+ * The question this exists to answer is not "is the allocator deterministic"
+ * but "how far into a run does it stay deterministic, and what breaks it" -
+ * which needs the layout sampled repeatedly rather than compared once at the
+ * end. A single digest says yes or no. Checkpoints say where.
+ *
+ * The comparison is deliberately between FILES rather than between two replays
+ * inside one process. Running both in one process cannot test the thing that
+ * actually fails in the game: the second run starts in an address space the
+ * first one has already disturbed, so its base is picked under conditions the
+ * real second launch never sees. Two separate invocations, each writing a file,
+ * reproduce the real arrangement - fresh process, fresh address space - and the
+ * compare step then has nothing to do with allocation at all.
+ *
+ * What the offsets are measured FROM matters as much as the offsets. Everything
+ * here is relative to the strategy's own base, because that is the form the
+ * question takes in the game: the heap moved half a megabyte between sessions
+ * while 95% of the blocks inside it did not move at all. A digest of absolute
+ * addresses would report that as total failure and would be answering a
+ * question nobody asked. */
+typedef struct {
+	unsigned off, size;
+	unsigned site, ord; /* ~0 when the trace was captured before tagging */
+} JigBlk;
+
+static JigBlk g_jig[LIVE_CAP];
+static FILE *g_ckpt_f;
+static long g_ckpt_every;
+
+static int jig_cmp(const void *a, const void *b)
+{
+	const JigBlk *x = (const JigBlk *)a, *y = (const JigBlk *)b;
+
+	if (x->off != y->off)
+		return x->off < y->off ? -1 : 1;
+	return x->size < y->size ? -1 : x->size > y->size ? 1 : 0;
+}
+
+/* Sorted, because the live set is an unordered collection and two runs that
+ * agree completely can still hold it in a different order - the array follows
+ * allocation and free order, not address order. Hashing it unsorted would
+ * report a difference that is not one. */
+static long jig_take(uintptr_t base)
+{
+	long i, n = 0;
+
+	for (i = 0; i < s_nlive && n < LIVE_CAP; i++) {
+		g_jig[n].off = (unsigned)((uintptr_t)s_live[i] - base);
+		g_jig[n].size = (unsigned)s_live_size[i];
+		g_jig[n].site = s_live_site[i];
+		g_jig[n].ord = s_live_ord[i];
+		n++;
+	}
+	qsort(g_jig, (size_t)n, sizeof(g_jig[0]), jig_cmp);
+	return n;
+}
+
+static unsigned jig_hash(long n)
+{
+	unsigned h = 2166136261u;
+	long i;
+
+	for (i = 0; i < n; i++) {
+		unsigned v = g_jig[i].off ^ (g_jig[i].size * 16777619u);
+		int b;
+
+		for (b = 0; b < 4; b++) {
+			h ^= (v >> (b * 8)) & 0xFF;
+			h *= 16777619u;
+		}
+	}
+	return h;
+}
+
+static void jig_checkpoint(long at, uintptr_t base)
+{
+	long n = jig_take(base);
+	unsigned long long bytes = 0;
+	long i;
+
+	for (i = 0; i < n; i++)
+		bytes += g_jig[i].size;
+	fprintf(g_ckpt_f, "K %ld %ld %llu %08X\n", at, n, bytes, jig_hash(n));
 }
 
 static int replay(Strategy *st, Result *r)
@@ -477,6 +615,8 @@ static int replay(Strategy *st, Result *r)
 			if (s_nlive < LIVE_CAP) {
 				s_live[s_nlive] = p;
 				s_live_size[s_nlive] = o->size;
+				s_live_site[s_nlive] = o->site;
+				s_live_ord[s_nlive] = o->ord;
 				s_nlive++;
 			}
 			live_bytes += o->size;
@@ -485,7 +625,7 @@ static int replay(Strategy *st, Result *r)
 			r->off[r->n++] = (unsigned)((uintptr_t)p - r->base);
 			break;
 		case 'F':
-			if (take_live(o->size, &p)) {
+			if (take_live(o->size, o->site, o->ord, &p)) {
 				st->release(p);
 				if (live_bytes >= o->size)
 					live_bytes -= o->size;
@@ -496,6 +636,10 @@ static int replay(Strategy *st, Result *r)
 			 * touches the allocator under test. */
 			break;
 		}
+		/* After the operation, not before, so a checkpoint describes a
+		 * settled state rather than one mid-change. */
+		if (g_ckpt_f && g_ckpt_every > 0 && ((i + 1) % g_ckpt_every) == 0)
+			jig_checkpoint(i + 1, r->base);
 	}
 	return 1;
 }
@@ -575,11 +719,230 @@ static void compare_to_trace(Result *r)
 		       100.0 * (double)same / (double)seen);
 }
 
+/* Replay one trace under one strategy and write the layout out, checkpoint by
+ * checkpoint, plus the whole live set at the end. */
+static int cmd_probe(int argc, char **argv)
+{
+	const char *trace = argc > 2 ? argv[2] : "gh_trace.txt";
+	const char *which = argc > 3 ? argv[3] : "pinned";
+	const char *out = argc > 4 ? argv[4] : "jig.txt";
+	long every = argc > 5 ? atol(argv[5]) : 250;
+	Strategy *st = NULL;
+	Result r;
+	long n, i;
+
+	for (i = 0; i < NSTRAT; i++)
+		if (strcmp(which, g_strat[i].name) == 0)
+			st = &g_strat[i];
+	if (!st) {
+		printf("no strategy called \"%s\"\n", which);
+		return 1;
+	}
+	if (!load_trace(trace))
+		return 1;
+	g_ckpt_f = fopen(out, "w");
+	if (!g_ckpt_f) {
+		printf("cannot write %s\n", out);
+		return 1;
+	}
+	g_ckpt_every = every;
+	fprintf(g_ckpt_f, "# jig trace=%s strategy=%s every=%ld\n", trace, which, every);
+	if (!replay(st, &r)) {
+		printf("  could not run\n");
+		fclose(g_ckpt_f);
+		st->done();
+		return 1;
+	}
+	/* Before done(), which destroys the heap the live pointers name. */
+	n = jig_take(r.base);
+	fprintf(g_ckpt_f, "# base %08X served %ld refused %ld live %ld\n",
+		(unsigned)r.base, r.n, r.refused, n);
+	for (i = 0; i < n; i++)
+		fprintf(g_ckpt_f, "L %08X %08X %08X %08X\n", g_jig[i].off,
+			g_jig[i].size, g_jig[i].site, g_jig[i].ord);
+	fclose(g_ckpt_f);
+	g_ckpt_f = NULL;
+	st->done();
+	printf("wrote %s: base %08X, %ld live block(s), checkpoint every %ld op(s)\n",
+	       out, (unsigned)r.base, n, every);
+	printf("  %ld of %ld allocation(s) named; %ld free(s) paired by name "
+	       "rather than by size\n",
+	       g_named, g_nops, s_paired_by_name);
+	printf("\nRun this again - a second process, not a second replay - and compare:\n"
+	       "    gh_replay32.exe compare <first> <second>\n");
+	return 0;
+}
+
+/* ---- comparing two probe files ---- */
+
+#define JIG_CK 4096
+
+typedef struct {
+	long at, n;
+	unsigned hash;
+} Ckpt;
+
+static Ckpt g_ck[2][JIG_CK];
+static long g_nck[2];
+static JigBlk g_lv[2][LIVE_CAP];
+static long g_nlv[2];
+static unsigned g_base[2];
+
+static int jig_read(const char *path, int slot)
+{
+	char line[256];
+	FILE *f = fopen(path, "r");
+
+	if (!f) {
+		printf("cannot read %s\n", path);
+		return 0;
+	}
+	while (fgets(line, sizeof(line), f)) {
+		if (line[0] == 'K' && g_nck[slot] < JIG_CK) {
+			Ckpt *c = &g_ck[slot][g_nck[slot]];
+			unsigned long long bytes;
+
+			if (sscanf(line, "K %ld %ld %llu %X", &c->at, &c->n, &bytes,
+				   &c->hash) == 4)
+				g_nck[slot]++;
+		} else if (line[0] == 'L' && g_nlv[slot] < LIVE_CAP) {
+			JigBlk *b = &g_lv[slot][g_nlv[slot]];
+			int got;
+
+			b->site = b->ord = 0xFFFFFFFFu;
+			got = sscanf(line, "L %X %X %X %X", &b->off, &b->size,
+				     &b->site, &b->ord);
+			if (got >= 2) {
+				if (got < 4)
+					b->site = b->ord = 0xFFFFFFFFu;
+				g_nlv[slot]++;
+			}
+		} else if (line[0] == '#') {
+			unsigned b;
+
+			if (sscanf(line, "# base %X", &b) == 1)
+				g_base[slot] = b;
+		}
+	}
+	fclose(f);
+	return 1;
+}
+
+static int cmd_compare(int argc, char **argv)
+{
+	long i, j, same = 0, big_same = 0, big = 0;
+	long first_bad = -1;
+
+	if (argc < 4) {
+		printf("compare needs two probe files\n");
+		return 1;
+	}
+	memset(g_nck, 0, sizeof(g_nck));
+	memset(g_nlv, 0, sizeof(g_nlv));
+	if (!jig_read(argv[2], 0) || !jig_read(argv[3], 1))
+		return 1;
+
+	printf("base            %08X vs %08X%s\n", g_base[0], g_base[1],
+	       g_base[0] == g_base[1] ? "   SAME" : "   moved");
+	printf("checkpoints     %ld vs %ld\n", g_nck[0], g_nck[1]);
+
+	/* Where they part company, which is the whole point of sampling rather
+	 * than digesting once. A run that diverges at operation 8000 of 8300 is a
+	 * different problem from one that diverges at operation 12. */
+	for (i = 0; i < g_nck[0] && i < g_nck[1]; i++) {
+		if (g_ck[0][i].at != g_ck[1][i].at)
+			break;
+		if (g_ck[0][i].hash != g_ck[1][i].hash) {
+			first_bad = g_ck[0][i].at;
+			printf("first divergence at operation %ld "
+			       "(live %ld vs %ld)\n",
+			       g_ck[0][i].at, g_ck[0][i].n, g_ck[1][i].n);
+			break;
+		}
+	}
+	if (first_bad < 0)
+		printf("every checkpoint agreed - the layout is reproducible "
+		       "for the whole run\n");
+
+	/* Both lists are sorted by offset, so this is a merge rather than a
+	 * search. Size is compared too: an offset that matches while the size
+	 * does not is a different block that happens to start in the same
+	 * place, and counting it as agreement would flatter the result. */
+	for (i = 0, j = 0; i < g_nlv[0] && j < g_nlv[1];) {
+		if (g_lv[0][i].off == g_lv[1][j].off) {
+			if (g_lv[0][i].size == g_lv[1][j].size) {
+				same++;
+				if (g_lv[0][i].size >= 4096)
+					big_same++;
+			}
+			i++;
+			j++;
+		} else if (g_lv[0][i].off < g_lv[1][j].off)
+			i++;
+		else
+			j++;
+	}
+	for (i = 0; i < g_nlv[0]; i++)
+		if (g_lv[0][i].size >= 4096)
+			big++;
+
+	printf("live at the end %ld vs %ld, %ld at the same offset and size (%.1f%%)\n",
+	       g_nlv[0], g_nlv[1], same,
+	       g_nlv[0] ? 100.0 * (double)same / (double)g_nlv[0] : 0.0);
+	printf("of the blocks >= 4 KB: %ld of %ld agree\n", big_same, big);
+
+	/* Everything above counts BINS: a place of a given size that something
+	 * landed in. That is not the same as counting BALLS, and in the game the
+	 * two disagree violently - 74% of bins matched across two sessions while
+	 * under 5% of them held the same block. A run can hand out an identical
+	 * set of addresses and put different blocks in every one of them, and a
+	 * snapshot restored on that basis would put each block back into some
+	 * other block's memory.
+	 *
+	 * So when the traces carry names, the figure below is the one to read.
+	 * The one above is kept because it is what the earlier measurements
+	 * reported, and seeing the two side by side is the point. */
+	{
+		long named = 0, ball = 0;
+
+		for (i = 0; i < g_nlv[0]; i++) {
+			if (g_lv[0][i].site == 0xFFFFFFFFu)
+				continue;
+			named++;
+			for (j = 0; j < g_nlv[1]; j++)
+				if (g_lv[1][j].site == g_lv[0][i].site &&
+				    g_lv[1][j].ord == g_lv[0][i].ord &&
+				    g_lv[1][j].size == g_lv[0][i].size) {
+					if (g_lv[1][j].off == g_lv[0][i].off)
+						ball++;
+					break;
+				}
+		}
+		if (!named)
+			printf("\nNeither trace carries names, so only bins could be "
+			       "compared. Recapture\nwith a build that writes the site "
+			       "and ordinal columns to see block identity.\n");
+		else
+			printf("\nby NAME: %ld of %ld named block(s) came back to the "
+			       "same offset (%.1f%%)\n",
+			       ball, named, 100.0 * (double)ball / (double)named);
+	}
+	printf("\nOffsets are measured from each run's own base, so a moved base with\n"
+	       "agreeing offsets is the result that matters: it means the snapshot is\n"
+	       "relocatable and only the base has to be pinned.\n");
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *path = argc > 1 ? argv[1] : "gh_trace.txt";
 	const char *which = argc > 2 ? argv[2] : "all";
 	int i;
+
+	if (argc > 1 && strcmp(argv[1], "probe") == 0)
+		return cmd_probe(argc, argv);
+	if (argc > 1 && strcmp(argv[1], "compare") == 0)
+		return cmd_compare(argc, argv);
 
 	if (!load_trace(path))
 		return 1;

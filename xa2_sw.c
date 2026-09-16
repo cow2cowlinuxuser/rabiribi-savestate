@@ -307,6 +307,63 @@ static int g_pend_head, g_pend_n;
 static unsigned long g_pend_lost;
 static unsigned long g_pend_full;
 
+/* Dropping the queued entries at the park closes one hole and leaves its twin
+ * open. The ring is ours and can be emptied; the callback pointer each voice
+ * holds is ours too and survives the rewind, but what it points AT is the
+ * game's, and a callback object the game built after the save is, once the heap
+ * is wound back, an address whose contents are now some unrelated older thing.
+ * Nothing is queued at that moment, so cb_drop has nothing to find - the next
+ * notification the mixer raises is the one that posts a fresh entry against the
+ * dead object and calls straight through its first word.
+ *
+ * That is what took the process down: a vtable read of DFD777C1, a value that
+ * is not an address this process could ever have had, called as if it were one.
+ *
+ * There is no way to know from here which voices outlived their callbacks, so
+ * check the object instead of trusting it. A real vtable is committed memory
+ * holding a pointer into committed executable memory, which garbage satisfies
+ * essentially never. The last vtable that passed is remembered so that the
+ * normal case - every voice sharing DxLib's one callback class - costs a single
+ * comparison rather than a pair of VirtualQuery calls per notification. */
+static void const *g_cb_vt_ok;
+static unsigned long g_cb_refused;
+
+static int cb_committed(const void *p, size_t n, int want_code)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	DWORD bad = PAGE_NOACCESS | PAGE_GUARD;
+	DWORD code = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+		     PAGE_EXECUTE_WRITECOPY;
+
+	if (!p)
+		return 0;
+	if (!VirtualQuery(p, &mbi, sizeof(mbi)))
+		return 0;
+	if (mbi.State != MEM_COMMIT || (mbi.Protect & bad))
+		return 0;
+	if (want_code && !(mbi.Protect & code))
+		return 0;
+	return (const char *)p + n <=
+	       (const char *)mbi.BaseAddress + mbi.RegionSize;
+}
+
+static int cb_callable(XA2Callback *c, int slot)
+{
+	const void *fn;
+
+	if (!cb_committed(c, sizeof(void *), 0) || !c->vtbl)
+		return 0;
+	if (!cb_committed(c->vtbl, (size_t)(slot + 1) * sizeof(void *), 0))
+		return 0;
+	fn = (const void *)c->vtbl[slot];
+	if ((const void *)c->vtbl == g_cb_vt_ok)
+		return fn != NULL;
+	if (!cb_committed(fn, 1, 1))
+		return 0;
+	g_cb_vt_ok = (const void *)c->vtbl;
+	return 1;
+}
+
 static void cb_post(XA2Callback *c, int slot, void *ctx)
 {
 	if (!c || !c->vtbl)
@@ -349,6 +406,24 @@ static void cb_flush(void)
 		 * did would unbalance a stdcall stack. OnVoiceProcessingPassStart
 		 * takes a UINT32 rather than a pointer, which is the same single
 		 * four-byte slot, so it rides the same path as the context ones. */
+		/* Checked here rather than only at the post: a rewind can land
+		 * between queueing an entry and draining it, so the object that
+		 * was sound when it went into the ring need not still be. */
+		if (!cb_callable(p.cb, p.slot)) {
+			/* The first one gets a line of its own. The summary counter
+			 * only prints at a park, which puts it minutes away from the
+			 * moment that matters; this lands next to the restore that
+			 * caused it and quotes the word that would have been called,
+			 * so the log says which restore orphaned which object. */
+			if (!g_cb_refused++)
+				ss_log("xa2_sw: refusing to call callback %p slot %d - "
+				       "its vtable reads %p, which is not callable "
+				       "memory. This object did not survive a restore; "
+				       "before this check that call was the crash\n",
+				       (void *)p.cb, p.slot,
+				       (void *)(p.cb ? (void *)p.cb->vtbl : NULL));
+			continue;
+		}
 		if (p.slot == CB_STREAM_END || p.slot == CB_PASS_END)
 			((PFN_CB_VOID)p.cb->vtbl[p.slot])(p.cb);
 		else
@@ -1426,11 +1501,13 @@ void xa2_sw_report(void)
 	 * dry frames is an underrun and not a rounding error. */
 	ss_log("xa2_sw: %lu voice(s), %lu buffer(s) submitted, %lu block(s) mixed, "
 	       "%lu dry frame(s), %lu overflow(s), %lu callback(s) dropped at a park "
-	       "and %lu because the ring was full%s. Every callback ran on the "
-	       "game's own thread\n",
+	       "and %lu because the ring was full%s, %lu refused as no longer "
+	       "callable%s. Every callback ran on the game's own thread\n",
 	       g_voices, g_submits, g_blocks_out, g_starved, g_overflow, g_pend_lost,
 	       g_pend_full,
-	       g_pend_full ? " <<< the second number is audio going quiet" : "");
+	       g_pend_full ? " <<< the second number is audio going quiet" : "",
+	       g_cb_refused,
+	       g_cb_refused ? " <<< each of those would have been a crash" : "");
 	for (i = 0; i < M_MAX; i++)
 		if (g_calls[i])
 			ss_log("  %-22s %lu call(s)\n", g_mname[i], g_calls[i]);

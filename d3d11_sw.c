@@ -1547,7 +1547,7 @@ static void d11_log(const char *fmt, ...)
 }
 
 /* Hot paths: draws, clears, presents, maps and copies. */
-static void d11_trace(const char *fmt, ...)
+static void d11_trace_impl(const char *fmt, ...)
 {
 	va_list ap;
 	if (!trace_on())
@@ -1556,6 +1556,23 @@ static void d11_trace(const char *fmt, ...)
 	d11_vlog(fmt, ap);
 	va_end(ap);
 }
+
+/* The test has to happen before the arguments are built, not after.
+ *
+ * As a plain function the gate lived inside the callee, so every call site
+ * evaluated its whole argument list on every draw and then threw the result
+ * away. That is wasted work on the hottest path in the wrapper, and on the draw
+ * path it was worse than wasted: one of the arguments dereferences a texture's
+ * payload to quote its first texel, and the payload is memory the release
+ * machinery is allowed to hand back to the adapter and decommit. A draw that
+ * sampled a texture released a moment earlier read a reserved-but-uncommitted
+ * page inside the texture arena and took the process down - a crash caused
+ * entirely by preparing a log line nobody had asked for. */
+#define d11_trace(...)                                                                             \
+	do {                                                                                       \
+		if (trace_on())                                                                    \
+			d11_trace_impl(__VA_ARGS__);                                               \
+	} while (0)
 
 /* The log simply stops when the process dies, which leaves no way to tell a
  * crash from an ordinary quit. A vectored handler runs ahead of both Unity's
@@ -6743,6 +6760,42 @@ static int pace_flushes(void)
 	return v;
 }
 
+/* How many frames of lateness to absorb before giving up on catching up.
+ *
+ * The deadline accumulates from a fixed origin, which is what lets it hold a
+ * steady rate through frames of uneven work - a frame that runs long is paid
+ * for by the next one waiting less. That is the right behaviour for jitter and
+ * the wrong behaviour for a stall: after the process is parked for a savestate
+ * the deadline is hundreds of milliseconds in the past, and every frame until
+ * real time catches up presents with no wait at all. The game steps its logic
+ * once per presented frame, so it does not skip that time, it replays it at
+ * speed.
+ *
+ * Past this many frames the time is treated as gone rather than owed. Those
+ * frames are lost either way; the only choice is whether they are lost quietly
+ * or as a burst of fast motion.
+ *
+ * 0 gives up instantly and paces every frame from where it actually started.
+ * A large value restores the old behaviour, which tolerated a full second - so
+ * a 700 ms save never tripped it and a 1000 ms restore only just did, which is
+ * why the speed-up came and went. */
+static int pace_catchup(void)
+{
+	static int v = -1;
+
+	if (v < 0) {
+		char buf[16];
+		unsigned n = savestate_getenv("D3D11SW_PACE_CATCHUP", buf, sizeof(buf));
+		unsigned i;
+		int acc = 0;
+
+		for (i = 0; i < n && buf[i] >= '0' && buf[i] <= '9'; i++)
+			acc = acc * 10 + (buf[i] - '0');
+		v = n ? acc : 2;
+	}
+	return v;
+}
+
 static void present_wait(HWND hwnd, UINT sync)
 {
 	static HRESULT(WINAPI * dwm_flush)(void);
@@ -6813,11 +6866,36 @@ static void present_wait(HWND hwnd, UINT sync)
 	 * covers the refresh rate being misreported, since the deadline is real
 	 * time and does not care what the display claimed. */
 	QueryPerformanceCounter(&now);
-	if (!next.QuadPart || now.QuadPart > next.QuadPart + freq.QuadPart) {
-		next.QuadPart = now.QuadPart; /* first frame, or we fell far behind */
-		g_pace_resets++;
+	{
+		LONGLONG frame = (LONGLONG)(period * (double)(sync ? sync : 1) *
+					    (double)freq.QuadPart);
+		LONGLONG slack = frame * (LONGLONG)pace_catchup();
+
+		if (!next.QuadPart || now.QuadPart > next.QuadPart + slack) {
+			/* Worth naming how far behind, because the two cases that
+			 * land here look identical in a frame counter and are not:
+			 * a few frames means the pacer is being handed work too
+			 * late, while hundreds mean the process was stopped. */
+			if (next.QuadPart) {
+				double late = (double)(now.QuadPart - next.QuadPart) /
+					      (double)freq.QuadPart;
+
+				if (late > 0.05)
+					d11_log("present pacing: %.0f ms behind (%.0f "
+						"frame(s)) - pacing from now instead of "
+						"catching up, which would have run the "
+						"game fast to make the time back",
+						late * 1000.0,
+						frame ? (double)(now.QuadPart -
+								 next.QuadPart) /
+								(double)frame
+						      : 0.0);
+			}
+			next.QuadPart = now.QuadPart;
+			g_pace_resets++;
+		}
+		next.QuadPart += frame;
 	}
-	next.QuadPart += (LONGLONG)(period * sync * (double)freq.QuadPart);
 	for (waited = 0;; waited = 1) {
 		double left;
 		QueryPerformanceCounter(&now);
@@ -10376,7 +10454,13 @@ static void ctx_draw_inner(Sw11Context *c, UINT count, UINT start, INT base, int
 			first_pos[0], first_pos[1], first_pos[2], first_pos[3], pos_reg, uv_reg,
 			col_reg, src_res ? src_res->id : -1, tex.width, tex.height,
 			src_res ? (int)src_res->format : -1,
-			(src_res && src_res->pixels) ? src_res->pixels[0] : 0,
+			/* Not just "has a pointer": a released or retired texture can
+			 * still be carrying the address its payload used to live at,
+			 * and with tracing on that is a page the adapter owns now. */
+			(src_res && src_res->pixels && !src_res->gpu_released &&
+			 !src_res->retired)
+				? src_res->pixels[0]
+				: 0,
 			ntri ? batch[0].a.color : 0, c->layout ? c->layout->n : 0, first_loaded,
 			first_nosem, first_in0[0], first_in0[1], first_in0[2], first_in0[3],
 			st.blend_enable, st.src_blend, st.dst_blend);

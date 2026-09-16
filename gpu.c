@@ -438,6 +438,45 @@ static int monitor_pixels(const char *device, int *w, int *h, int *hz)
 	return 0;
 }
 
+/* How far to shift vertex positions before handing them to the adapter.
+ *
+ * This used to be an unconditional -0.5, on the stated grounds that the
+ * software rasteriser samples pixel centres from integer corners while D3D puts
+ * the centre at +0.5. That premise is wrong in both halves. swrast evaluates
+ * coverage at (i+0.5, j+0.5) - see the orient2d calls that seed each row - which
+ * is the same rule the hardware follows, so the two agree with no adjustment at
+ * all and the shift only moves the geometry off the grid it was aligned to.
+ *
+ * The -0.5 is real, but it belongs to D3D9 and to the application rather than
+ * to the runtime: a D3D9 title applies it to its own vertices so that texel
+ * centres land on pixel centres, which is what d3d9_sw.c's half_pixel_fix
+ * compensates for. Nothing owes it here, because this path serves D3D11, where
+ * the convention already matches.
+ *
+ * Applied to a sprite packed in an atlas, half a pixel is enough to pull a
+ * bilinear tap across the boundary into whatever was packed next to it, which
+ * is the seam. The coverage audit reached this independently and said so: "a
+ * -0.5 would shift every quad half a pixel and would itself manufacture seams."
+ *
+ * The knob exists to put it back for comparison, since the old behaviour was
+ * arrived at by eye and the difference is a single pixel. */
+static float gpu_half_pixel(void)
+{
+	static int v = -1;
+
+	if (v < 0) {
+		char b[16];
+		unsigned n = savestate_getenv("D3D11SW_GPU_HALFPIXEL", b, sizeof(b));
+
+		v = (n && b[0] == '1') ? 1 : 0;
+		gpu_say("gpu: vertex half-pixel shift is %s - the software path and "
+			"the adapter both sample at (i+0.5), so the aligned case is "
+			"no shift (D3D11SW_GPU_HALFPIXEL=1 restores it)",
+			v ? "ON" : "off");
+	}
+	return v ? 0.5f : 0.0f;
+}
+
 /* What the borderless request asked for, so a later frame can check it stuck. */
 static HWND g_bl_hwnd;
 static int g_bl_x, g_bl_y, g_bl_w, g_bl_h;
@@ -1451,13 +1490,8 @@ int gpu_draw(const SwTri *tris, int n, void *texslot, const SwState *st)
 				struct GpuVert *o = &vp[i * 3 + k];
 				uint32_t c = v[k]->color;
 
-				/* Half a pixel left and up. The rasteriser samples
-				 * pixel centres from integer corners; D3D's raster
-				 * rule puts the centre at +0.5, so without this every
-				 * sprite lands half a pixel down and right of where
-				 * the software path puts it. */
-				o->x = v[k]->x - 0.5f;
-				o->y = v[k]->y - 0.5f;
+				o->x = v[k]->x - gpu_half_pixel();
+				o->y = v[k]->y - gpu_half_pixel();
 				o->u = v[k]->u;
 				o->v = v[k]->v;
 				/* D3DCOLOR is 0xAARRGGBB. */

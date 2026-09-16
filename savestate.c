@@ -4387,6 +4387,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_NOTHREAD",        "D3D9SW_RUNAWAY",
 	"D3D9SW_REWIND_TEXTINPUT", "D3D9SW_HELDVETO",
 	"D3D9SW_VTABVETO",	  "D3D9SW_CROSSWORLD",
+	"D3D9SW_SAVE_AT",
 	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
 	"D3D9SW_RECYCLED",	  "D3D9SW_GAMEHEAP",
@@ -10782,6 +10783,208 @@ void savestate_watch_tick(void)
 	}
 }
 
+/* ------------------------------------------------------- the entity array
+ *
+ * D3D9SW_ENTS=1 reports the game's entity table by walking it, rather than by
+ * searching memory for numbers that look like coordinates.
+ *
+ * The layout comes from the Rabi-Ribi speedrunning community's LiveSplit
+ * autosplitter, which has carried per-version offsets for years. For v1.65 a
+ * pointer at image + 0x940EE0 leads to the entity array, and an entity's x and
+ * y sit at +0x0C and +0x10. That matches, exactly, the two floats found here by
+ * scanning for a coordinate pair - the same +0x0C and +0x10 off the same
+ * structure, arrived at from the opposite direction.
+ *
+ * The stride was left as a TODO in that file, so it is derived here instead.
+ * Two artbook timers in the same table are declared at +0x1310 and +0xB2FC,
+ * being the same field on two different entities; the gap between them is
+ * 0x9FEC, which 0x6F4 divides exactly 23 times. The check that settles it is
+ * independent: the first allocation this game ever makes is 176,220 bytes, and
+ * 176,220 is 1780 x 99 exactly. So the array is 99 slots of 0x6F4, and the
+ * block this engine has been tracking at heap offset +0x7F4B8 since the
+ * beginning is the entity table itself.
+ *
+ * Worth having because searching for coordinates finds coordinate-shaped bytes.
+ * An earlier hunt for Ribbon turned up four candidates, three of them in a
+ * DxLib arena that cannot hold entities at all. Walking the array cannot return
+ * a false positive: slot 3 is slot 3.
+ */
+#define SS_ENT_PTR 0x940EE0u  /* image-relative, v1.65 */
+#define SS_ENT_STRIDE 0x6F4u  /* derived, see above */
+#define SS_ENT_COUNT 99	      /* 176220 / 1780, the whole allocation */
+#define SS_ENT_X 0x0Cu
+#define SS_ENT_Y 0x10u
+#define SS_ENT_V165_IMAGE 0x010CE000u
+
+/* Asked before every read here, because the table pointer is null until the
+ * game builds it and this runs at save time, which can be before that. */
+static int ents_readable(const void *p, size_t n)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+
+	if (!p || !VirtualQuery(p, &mbi, sizeof(mbi)))
+		return 0;
+	if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+		return 0;
+	return (uintptr_t)p + n <=
+	       (uintptr_t)mbi.BaseAddress + (uintptr_t)mbi.RegionSize;
+}
+
+static int ents_mode(void)
+{
+	char v[8];
+	DWORD n = ss_getenv("D3D9SW_ENTS", v, sizeof(v));
+
+	return n && v[0] == '1';
+}
+
+/* The offsets are version-specific and wrong on any other build, so the version
+ * is checked rather than assumed. Reading a stale pointer would produce
+ * confident nonsense, which is worse than saying nothing. */
+static int ents_version_ok(uintptr_t base)
+{
+	const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)base;
+	const IMAGE_NT_HEADERS32 *nt;
+
+	if (!base || dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return 0;
+	nt = (const IMAGE_NT_HEADERS32 *)(base + (uintptr_t)dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return 0;
+	return nt->OptionalHeader.SizeOfImage == SS_ENT_V165_IMAGE;
+}
+
+static uintptr_t ents_table(void)
+{
+	uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
+	uintptr_t arr;
+
+	if (!ents_version_ok(base)) {
+		ss_log("entities: this is not the v1.65 build the offsets are for, "
+		       "so the table is not being read\n");
+		return 0;
+	}
+	if (!ents_readable((const void *)(base + SS_ENT_PTR), sizeof(void *)))
+		return 0;
+	arr = *(const uintptr_t *)(base + SS_ENT_PTR);
+	if (!arr || !ents_readable((const void *)arr, SS_ENT_STRIDE * SS_ENT_COUNT)) {
+		ss_log("entities: the table pointer at image+%lX reads %p, which is "
+		       "not a table yet\n",
+		       (unsigned long)SS_ENT_PTR, (void *)arr);
+		return 0;
+	}
+	return arr;
+}
+
+static void ents_report(const char *when)
+{
+	uintptr_t arr;
+	int i, shown = 0;
+
+	if (!ents_mode())
+		return;
+	arr = ents_table();
+	if (!arr)
+		return;
+	ss_log("entities %s: table at %p, %d slot(s) of %lu bytes\n", when,
+	       (void *)arr, SS_ENT_COUNT, (unsigned long)SS_ENT_STRIDE);
+	for (i = 0; i < SS_ENT_COUNT; i++) {
+		const char *e = (const char *)(arr + (uintptr_t)i * SS_ENT_STRIDE);
+		float x = *(const float *)(e + SS_ENT_X);
+		float y = *(const float *)(e + SS_ENT_Y);
+
+		/* Empty slots read as zero, and the map is never that large, so
+		 * this prints what is on the field rather than all 99 rows. */
+		if (x == 0.0f && y == 0.0f)
+			continue;
+		if (x < -100000.0f || x > 100000.0f || y < -100000.0f ||
+		    y > 100000.0f)
+			continue;
+		ss_log("  slot %-3d at %p  x %.2f  y %.2f%s\n", i, (const void *)e,
+		       x, y, i == 0 ? "   <- the player" : "");
+		shown++;
+	}
+	ss_log("entities: %d slot(s) occupied of %d\n", shown, SS_ENT_COUNT);
+}
+
+/* Where she ends up is a consequence; which word moved her is the cause. The
+ * slot is 1780 bytes and only two of them have ever been read here, so keep a
+ * copy of the whole thing at the save and let a later pass name every field
+ * that came back different. A follower chasing a stale target has that target
+ * written down somewhere, and if it is inside her own slot this finds it. */
+static unsigned char g_ent_save[2][SS_ENT_STRIDE];
+static int g_ent_have;
+static const int g_ent_which[2] = { 0, 97 };	/* the player, and Ribbon */
+
+static void ents_snap(void)
+{
+	uintptr_t arr;
+	int k;
+
+	if (!ents_mode())
+		return;
+	arr = ents_table();
+	if (!arr)
+		return;
+	for (k = 0; k < 2; k++)
+		memcpy(g_ent_save[k],
+		       (const void *)(arr + (uintptr_t)g_ent_which[k] * SS_ENT_STRIDE),
+		       SS_ENT_STRIDE);
+	g_ent_have = 1;
+}
+
+/* Most of a 1780 byte slot is not a float, so printing one for every word would
+ * bury the answer in denormals. Hex is always shown; the float only when it
+ * could plausibly be a coordinate. */
+static int ents_sane(float f)
+{
+	return f == f && f > -1.0e9f && f < 1.0e9f;
+}
+
+static void ents_diff(const char *when)
+{
+	uintptr_t arr;
+	int k;
+
+	if (!ents_mode() || !g_ent_have)
+		return;
+	arr = ents_table();
+	if (!arr)
+		return;
+	for (k = 0; k < 2; k++) {
+		const unsigned char *now = (const unsigned char *)
+			(arr + (uintptr_t)g_ent_which[k] * SS_ENT_STRIDE);
+		const unsigned char *then = g_ent_save[k];
+		unsigned off;
+		int moved = 0;
+
+		ss_log("slot %d %s: word(s) that differ from the save\n",
+		       g_ent_which[k], when);
+		for (off = 0; off + 4 <= SS_ENT_STRIDE; off += 4) {
+			unsigned a, b;
+			float fa, fb;
+
+			memcpy(&a, then + off, 4);
+			memcpy(&b, now + off, 4);
+			if (a == b)
+				continue;
+			memcpy(&fa, &a, 4);
+			memcpy(&fb, &b, 4);
+			moved++;
+			if (ents_sane(fa) && ents_sane(fb))
+				ss_log("  +%03lX  was %08lX %.2f  now %08lX %.2f\n",
+				       (unsigned long)off, (unsigned long)a, (double)fa,
+				       (unsigned long)b, (double)fb);
+			else
+				ss_log("  +%03lX  was %08lX  now %08lX\n",
+				       (unsigned long)off, (unsigned long)a,
+				       (unsigned long)b);
+		}
+		if (!moved)
+			ss_log("  none, the slot is word-for-word the save\n");
+	}
+}
+
 static void watch_at_report(const char *when, int live)
 {
 	int k;
@@ -12466,6 +12669,8 @@ static int do_save(int slotno)
 	witness_save(s);
 	cap_record(s);
 	watch_at_report("at the save", 0);
+	ents_report("at the save");
+	ents_snap();
 	watch_trace_arm("save");
 	carry_save();
 	/* Last, because everything above fills fields the description has to carry. */
@@ -13009,6 +13214,8 @@ static void clobber_check(void)
 	ss_log("clobber: %d ms after the restore, checking what came back\n",
 	       clobber_mode());
 	watch_at_report("after the restore settled", 1);
+	ents_report("after the restore settled");
+	ents_diff("after the restore settled");
 	if (nothread_mode())
 		g_nothr_until = GetTickCount() + (DWORD)nothread_mode();
 	der_learn(s, &w);
@@ -14673,6 +14880,11 @@ static int do_load(int slotno)
 	 * onto rewound stacks, and the heap check being the first thing to touch a
 	 * heap that is already broken. These two lines tell those apart for the
 	 * cost of two writes. */
+	/* The write is complete and nothing is running yet, so this is the only
+	 * place that can say what the restore actually put back, as opposed to
+	 * what the game had already done with it by the time anyone looked. */
+	ents_report("right after the write, threads still suspended");
+	ents_diff("right after the write");
 	catch_arm(s);
 	ss_log("  resume: releasing %d thread(s)\n", g_ctl->nids);
 	/* Cursors before the threads, playback after them. See dsh_seek. */
@@ -16867,11 +17079,180 @@ void savestate_soak_arm(void)
  * load itself: the wrapper wraps both in ledger work - register, mark, reap,
  * the retain flush - and a second call site that skipped any of it would be a
  * double free waiting to happen. Returning an action keeps one path. */
+/* D3D9SW_SAVE_AT=N takes one save on frame N and never again.
+ *
+ * The allocation trace is written when a save is taken, so it holds everything
+ * the game asked for between launch and that moment. Two traces therefore only
+ * compare cleanly if both were cut at the same point - and a hand on F5 cannot
+ * hit the same frame twice. The difference is not small: two runs cut by hand
+ * differed by 92 operations and 107 blocks, and every block allocated after the
+ * point where they parted looks unstable whether it is or not.
+ *
+ * Counting frames removes the hand. It says nothing about whether the game did
+ * the same things in between - only that both runs were asked the question at
+ * the same moment, which is the part that was in our power to fix.
+ *
+ * It returns an action rather than saving, for the same reason the soak driver
+ * does: the wrapper wraps a save in ledger work, and a second call site that
+ * skipped any of it would be a double free waiting to happen. */
+#define SS_SAVE_AT_MAX 8
+
+static int g_save_at[SS_SAVE_AT_MAX];
+static int g_save_at_n = -1;
+static int g_save_at_i;
+static long g_save_at_frame;
+
+/* A comma-separated list of frame numbers, ascending. Several cuts rather than
+ * one because the interesting question is no longer "did it reproduce" but "how
+ * far in does it stop reproducing", and one cut per run would mean one data
+ * point per launch. Each cut writes the whole trace so far, so the files nest:
+ * the second contains the first. */
+static void save_at_parse(void)
+{
+	char v[64];
+	DWORD n = ss_getenv("D3D9SW_SAVE_AT", v, sizeof(v));
+	DWORD k;
+	int cur = 0, any = 0;
+
+	g_save_at_n = 0;
+	if (!n || n >= sizeof(v))
+		return;
+	for (k = 0; k <= n; k++) {
+		if (k < n && v[k] >= '0' && v[k] <= '9') {
+			cur = cur * 10 + (v[k] - '0');
+			any = 1;
+		} else {
+			if (any && g_save_at_n < SS_SAVE_AT_MAX)
+				g_save_at[g_save_at_n++] = cur;
+			cur = 0;
+			any = 0;
+		}
+	}
+}
+
+/* -------------------------------------------------------- scripted input
+ *
+ * D3D9SW_KEY_EVERY presses a key on a fixed frame schedule.
+ *
+ * Every determinism result so far has been taken with nothing pressed, which
+ * leaves the obvious question open: allocation follows what the player does,
+ * and a hand cannot press the same key on the same frame twice. So the hand has
+ * to go, the same way it went for the save trigger.
+ *
+ * Injected through SendInput rather than posted to the window, because the game
+ * reads the keyboard through DirectInput and DirectInput does not look at the
+ * window's message queue. An injected event goes through the same kernel input
+ * path a real key does, which is the only path both agree on.
+ *
+ * The scan code is filled in alongside the virtual key. DirectInput deals in
+ * scan codes, and an event carrying only a virtual key is one it may decline to
+ * translate.
+ *
+ * Only while the game is in front: injected input goes to the foreground
+ * window, so pressing keys while the player has alt-tabbed away would type into
+ * whatever they switched to. That check also makes a run non-deterministic if
+ * focus is lost, which is worth knowing rather than hiding - the log line says
+ * how many presses were sent, so two runs that disagree there explain
+ * themselves. */
+static void key_send(WORD vk, int up)
+{
+	INPUT in;
+
+	memset(&in, 0, sizeof(in));
+	in.type = INPUT_KEYBOARD;
+	in.ki.wVk = vk;
+	in.ki.wScan = (WORD)MapVirtualKeyA(vk, 0 /* MAPVK_VK_TO_VSC */);
+	in.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+	SendInput(1, &in, sizeof(in));
+}
+
+static long g_key_sent;
+
+static void key_at_tick(void)
+{
+	static int every = -1, from, hold, vk;
+	static long frame;
+	static int down;
+
+	if (every < 0) {
+		every = soak_knob("D3D9SW_KEY_EVERY", 0);
+		from = soak_knob("D3D9SW_KEY_FROM", 300);
+		hold = soak_knob("D3D9SW_KEY_HOLD", 4);
+		vk = soak_knob("D3D9SW_KEY_VK", 0x5A); /* Z */
+		if (hold < 1)
+			hold = 1;
+		if (every > 0)
+			ss_log("key-at: pressing VK %02X for %d frame(s) every %d "
+			       "frame(s) from frame %d, so both runs receive the "
+			       "same input on the same frames\n",
+			       vk, hold, every, from);
+	}
+	if (every <= 0)
+		return;
+	frame++;
+	if (frame < from)
+		return;
+	{
+		DWORD pid = 0;
+		HWND fg = GetForegroundWindow();
+		long phase;
+
+		if (fg)
+			GetWindowThreadProcessId(fg, &pid);
+		if (pid != GetCurrentProcessId()) {
+			/* Released if it was held, so losing focus mid-press does
+			 * not leave the key stuck down. */
+			if (down) {
+				key_send((WORD)vk, 1);
+				down = 0;
+			}
+			return;
+		}
+		phase = (frame - from) % every;
+		if (phase == 0 && !down) {
+			key_send((WORD)vk, 0);
+			down = 1;
+			g_key_sent++;
+		} else if (down && phase >= hold) {
+			key_send((WORD)vk, 1);
+			down = 0;
+		}
+	}
+}
+
+static int save_at_frame(void)
+{
+	if (g_save_at_n < 0)
+		save_at_parse();
+	if (g_save_at_i >= g_save_at_n)
+		return 0;
+	g_save_at_frame++;
+	if (g_save_at_frame < g_save_at[g_save_at_i])
+		return 0;
+	g_save_at_i++;
+	ss_log("save-at: frame %ld, cut %d of %d - the allocation trace is written "
+	       "here in every session\n",
+	       g_save_at_frame, g_save_at_i, g_save_at_n);
+	return 1;
+}
+
 int savestate_soak_action(void)
 {
 	int survived;
 
-	if (!g_ctl || g_ctl->soak_state == SOAK_OFF || g_ctl->soak_state == SOAK_DONE)
+	/* Ahead of everything, including the control-block check: scripted input
+	 * is about making two runs identical, and a run that skipped its presses
+	 * because a pointer was not ready yet would be a run that silently is
+	 * not comparable. */
+	key_at_tick();
+	if (!g_ctl)
+		return SS_SOAK_NOTHING;
+	/* Ahead of the soak state check, because this is armed by a knob on its
+	 * own and there is no reason to make a measurement run also arm the soak
+	 * ladder to get at it. */
+	if (save_at_frame())
+		return SS_SOAK_SAVE;
+	if (g_ctl->soak_state == SOAK_OFF || g_ctl->soak_state == SOAK_DONE)
 		return SS_SOAK_NOTHING;
 
 	g_ctl->soak_frame++;
