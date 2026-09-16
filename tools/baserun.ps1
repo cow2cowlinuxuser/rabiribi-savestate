@@ -25,6 +25,8 @@ $game = "C:\Program Files (x86)\Steam\steamapps\common\Rabi-Ribi"
 $trace = Join-Path $game "gh_trace.txt"
 $appid = 400910
 $rows = @()
+$keep = Join-Path $PSScriptRoot "..\det\base"
+$null = New-Item -ItemType Directory -Force -Path $keep
 
 if (Get-Process rabiribi -EA SilentlyContinue) {
 	Write-Host "  the game is already running; close it first" -ForegroundColor Red
@@ -63,7 +65,16 @@ for ($i = 1; $i -le $N; $i++) {
 	}
 
 	if (-not (Test-Path $trace)) { Write-Host "  no trace written" -ForegroundColor Yellow; continue }
-	$h = Get-Content $trace -TotalCount 3
+
+	# Kept before parsing, not after. The first sweep deleted each trace at the
+	# top of the loop and read it at the bottom; when the read failed, five
+	# launches' worth of evidence was already gone and the run had to be redone.
+	Copy-Item $trace (Join-Path $keep "launch$i.txt") -Force
+
+	# One string, not three. Get-Content returns an array, and -match against an
+	# array filters it and never populates $Matches - which is exactly how the
+	# first sweep silently produced six empty rows.
+	$h = (Get-Content $trace -TotalCount 3) -join "`n"
 	$heap = if ($h -match 'heap ([0-9A-F]{8})') { $Matches[1] } else { '?' }
 	$img = if ($h -match 'image ([0-9A-F]{8})') { $Matches[1] } else { '?' }
 	$ops = if ($h -match '(\d+) op\(s\)') { $Matches[1] } else { '?' }
