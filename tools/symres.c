@@ -45,7 +45,11 @@ int main(int argc, char **argv)
 	}
 
 	for (i = 2; i < argc; i++) {
-		char buf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(char)];
+		/* ULONG64 rather than char: SYMBOL_INFO wants 8-byte alignment and a
+		 * char array only promises 1, which a UBSan-instrumented build traps
+		 * on before dbghelp ever sees it. */
+		ULONG64 buf[(sizeof(SYMBOL_INFO) + MAX_SYM_NAME + sizeof(ULONG64) - 1) /
+			    sizeof(ULONG64)];
 		SYMBOL_INFO *sym = (SYMBOL_INFO *)buf;
 		IMAGEHLP_LINE64 line;
 		DWORD64 disp = 0;
