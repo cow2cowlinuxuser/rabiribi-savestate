@@ -63,9 +63,24 @@ if ($Collect) {
 		$n = (Get-Content $t | Measure-Object -Line).Lines
 		Write-Host "  gh_trace.txt  $n line(s)"
 	}
+	# The first pair of runs was measured with the pad unpinned, because the
+	# stub read only the first 4 KB of a config whose last line was this knob.
+	# The log said so plainly and nobody was checking, so now the harness checks.
 	$x = Join-Path $dir "xinput_sw.log"
-	if (Test-Path $x) { Get-Content $x | Select-Object -Last 1 | ForEach-Object { Write-Host "  $_" } }
-	else { Write-Host "  no xinput_sw.log - the stub was never loaded, the pad is NOT pinned" -ForegroundColor Yellow }
+	$want = (Get-Content (Join-Path $game 'd3d9_sw.cfg') -EA SilentlyContinue |
+		Where-Object { $_ -match '^D3D9SW_XINPUT=0' }).Count -gt 0
+	if (-not (Test-Path $x)) {
+		Write-Host "  no xinput_sw.log - the stub never loaded, the pad is NOT pinned" -ForegroundColor Red
+	}
+	else {
+		$line = (Get-Content $x | Select-Object -Last 1)
+		$pinned = $line -match 'pinned'
+		Write-Host "  $line"
+		if ($want -and -not $pinned) {
+			Write-Host "  MISMATCH: the config asks for a pinned pad and the stub did not pin it." -ForegroundColor Red
+			Write-Host "  This run is not the experiment you think it is." -ForegroundColor Red
+		}
+	}
 	exit 0
 }
 

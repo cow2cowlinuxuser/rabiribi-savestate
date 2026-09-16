@@ -4408,7 +4408,8 @@ static const char *const g_knobs[] = {
 	"D3D9SW_GHPEEK",	  "D3D9SW_GHVORBIS",
 	"D3D9SW_ENTS",		  "D3D9SW_CLOCKPROBE",
 	"D3D9SW_KEY_EVERY",	  "D3D9SW_KEY_HOLD",
-	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK"
+	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK",
+	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT"
 };
 
 /* Read every knob into the memo before the environment is closed for business.
@@ -17233,6 +17234,52 @@ static void key_at_tick(void)
 	}
 }
 
+/* Quit on a fixed frame, so that two runs are the same length.
+ *
+ * The first comparison pair was ended by hand at different moments. The traces
+ * matched exactly, but one log carried two Vorbis lines the other did not, for
+ * no better reason than that one session had lived long enough to free a
+ * comment header. That difference cost real time to rule out, and a comparison
+ * whose runs end whenever somebody reaches for the window is not a comparison.
+ *
+ * WM_CLOSE rather than a kill: teardown allocates and frees, and a run that
+ * skips its own shutdown is no more comparable than one that overstays it. */
+static BOOL CALLBACK quit_find_window(HWND w, LPARAM lp)
+{
+	DWORD pid = 0;
+
+	GetWindowThreadProcessId(w, &pid);
+	if (pid != GetCurrentProcessId() || !IsWindowVisible(w))
+		return TRUE;
+	*(HWND *)lp = w;
+	return FALSE;
+}
+
+static void quit_at_tick(void)
+{
+	static long at = -1;
+	static long frame;
+	HWND w = NULL;
+
+	if (at < 0) {
+		at = (long)soak_knob("D3D9SW_QUIT_AT", 0);
+		if (at > 0)
+			ss_log("quit-at: this run will close itself at frame %ld, so "
+			       "it is exactly as long as the last one\n",
+			       at);
+	}
+	if (at <= 0 || ++frame != at)
+		return;
+
+	EnumWindows(quit_find_window, (LPARAM)&w);
+	ss_log("quit-at: frame %ld reached, closing %s\n", at,
+	       w ? "the game's window" : "the process, no window was found");
+	if (w)
+		PostMessageA(w, WM_CLOSE, 0, 0);
+	else
+		ExitProcess(0);
+}
+
 static int save_at_frame(void)
 {
 	if (g_save_at_n < 0)
@@ -17258,6 +17305,10 @@ int savestate_soak_action(void)
 	 * because a pointer was not ready yet would be a run that silently is
 	 * not comparable. */
 	key_at_tick();
+	/* Beside the input tick and for the same reason: a run that ends on a
+	 * different frame is not comparable, whether or not the control block
+	 * ever came up. */
+	quit_at_tick();
 	if (!g_ctl)
 		return SS_SOAK_NOTHING;
 	/* Ahead of the soak state check, because this is armed by a knob on its

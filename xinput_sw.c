@@ -56,10 +56,11 @@ static int knob_pinned(void)
 	wchar_t path[MAX_PATH];
 	wchar_t *slash;
 	HANDLE f;
-	char buf[4096];
-	DWORD got = 0;
+	char *buf;
+	DWORD size, got = 0;
 	HMODULE self = NULL;
 	const char *p;
+	int hit = 0;
 
 	if (GetEnvironmentVariableA("D3D9SW_XINPUT", val, sizeof(val)) == 1)
 		return val[0] == '0';
@@ -78,7 +79,23 @@ static int knob_pinned(void)
 			NULL, OPEN_EXISTING, 0, NULL);
 	if (f == INVALID_HANDLE_VALUE)
 		return 0;
-	ReadFile(f, buf, sizeof(buf) - 1, &got, NULL);
+
+	/* The whole file, not a fixed prefix. The first version read 4 KB, and the
+	 * config had grown to 4,799 bytes of mostly comment with this knob appended
+	 * last at offset 4,782 - so the reader never saw it and two careful runs
+	 * were measured with the pad unpinned. A knob that silently reads as its
+	 * default is worse than one that fails loudly. */
+	size = GetFileSize(f, NULL);
+	if (size == INVALID_FILE_SIZE || size > (1u << 20)) {
+		CloseHandle(f);
+		return 0;
+	}
+	buf = (char *)HeapAlloc(GetProcessHeap(), 0, size + 1);
+	if (!buf) {
+		CloseHandle(f);
+		return 0;
+	}
+	ReadFile(f, buf, size, &got, NULL);
 	CloseHandle(f);
 	buf[got] = 0;
 
@@ -87,9 +104,11 @@ static int knob_pinned(void)
 	for (p = buf; (p = strstr(p, "D3D9SW_XINPUT=")) != NULL; p++) {
 		if (p != buf && p[-1] != '\n' && p[-1] != '\r')
 			continue;
-		return p[14] == '0';
+		hit = p[14] == '0';
+		break;
 	}
-	return 0;
+	HeapFree(GetProcessHeap(), 0, buf);
+	return hit;
 }
 
 static void say(const char *what)
