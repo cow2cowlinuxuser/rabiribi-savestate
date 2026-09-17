@@ -14421,6 +14421,11 @@ static int do_load(int slotno)
 				int r;
 
 				seen += size;
+				if (region_excluded((uintptr_t)base, (uintptr_t)size)) {
+					unchecked++;
+					off += size;
+					continue;
+				}
 				/* Same reason the verify pass does this: a region saved
 				 * as PAGE_NOACCESS would fault on being read. */
 				if (!VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old)) {
@@ -14494,7 +14499,29 @@ static int do_load(int slotno)
 			SIZE_T size = (SIZE_T)s->regs[i].size;
 			unsigned long long here = pos;
 			DWORD old;
-			int writable =
+			int writable;
+
+			if (g_reg_off)
+				g_reg_off[i] = pos;
+			/* The restorable-region walk already counted these as
+			 * skipped_excl and, with D3D9SW_EXCLSKIP=1, let the restore
+			 * continue. That walk does not write. This one does, and
+			 * D3D9SW_DIFFWRITE memcmp's the destination before any
+			 * memcpy. Under Wine a live stack or TEB can occupy an
+			 * address that held ordinary private memory at the save, and
+			 * the range is often only partly committed - the 01:47
+			 * Proton fault was memcmp at d3d11.dll+50680 walking into
+			 * FREE page 0C5A5000 inside skipped region 0C592000+fe000.
+			 * Skipping here is the write that the earlier log line
+			 * claimed already happened. The slotfile cursor still
+			 * advances: the snapshot layout does not care that we
+			 * declined the copy. */
+			if (region_excluded((uintptr_t)base, (uintptr_t)size)) {
+				pos += size;
+				continue;
+			}
+
+			writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
 
 			/* Here, and not beside the writeback at the end of the loop,
@@ -14533,8 +14560,6 @@ static int do_load(int slotno)
 			 * are deliberately left alone. */
 			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base);
 
-			if (g_reg_off)
-				g_reg_off[i] = pos;
 			/* Before a byte is written: where memory has already drifted
 			 * from the snapshot, and what it holds there. That is the
 			 * value the restore is about to paint over, and having it is
@@ -14562,7 +14587,11 @@ static int do_load(int slotno)
 				       i, base, (unsigned long long)size);
 			} else if (by_block)
 				blocked++;
-			else if (win_copy(&w, pos, base, size, 0)) {
+			else if (!writable) {
+				ss_log("  region %d at %p cannot be made writable, copy "
+				       "skipped, %llu bytes, err=%lu\n",
+				       i, base, (unsigned long long)size, GetLastError());
+			} else if (win_copy(&w, pos, base, size, 0)) {
 				restored++;
 				/* Only regions we actually wrote are worth asking
 				 * about afterwards. One left in the present was
