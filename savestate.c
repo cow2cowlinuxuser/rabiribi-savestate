@@ -13007,12 +13007,12 @@ done:
 		QueryPerformanceCounter(&e0);
 		resume_all(0);
 		keys_log("after save resume");
-		/* Same leftover as a restore. A KEYUP that arrived while the
-		 * window thread was frozen is delivered to user32 on the next
-		 * present - GetAsyncKeyState heals - but DirectInput8 on Wine
-		 * is raw input and can drop that KEYUP. Left then stays down
-		 * in device_state and the character walks. */
-		keys_unstick(1);
+		/* Do not KEYUP here. GetAsyncKeyState is still the freeze-time
+		 * bitmap, so Left looks held even when the player already
+		 * released it, and a KEYUP of a Left that is actually still
+		 * down desyncs Wine: X11 stays down, user32 goes up, and the
+		 * walk remains live. Later presents poke leftover dinput
+		 * only for keys that user32 now reports up. */
 		g_keys_watch = 5;
 		dsh_play();
 		xa2_sw_resume();
@@ -15346,8 +15346,9 @@ static int do_load(int slotno)
 	 * character off the snapshot. XInput is not this - pads are already
 	 * pinned absent. */
 	keys_log("after resume, before unstick");
-	keys_unstick(1);
-	keys_log("after unstick");
+	/* Not here: a KEYUP of Left while it is still held is why the walk
+	 * stayed live after holding. g_keys_watch pokes dinput on later
+	 * presents, and only for keys user32 says are up. */
 	g_keys_watch = 5;
 	/* After the threads are running again, because the comparison is a read of
 	 * a few hundred megabytes and holding every thread suspended through it
@@ -17810,56 +17811,70 @@ static void keys_log(const char *when)
 	       extleft ? "DOWN" : "up");
 }
 
+static int key_unstick_on(void)
+{
+	char v[8];
+	DWORD n = ss_getenv("D3D9SW_KEY_UNSTICK", v, sizeof(v));
+
+	if (n > 0 && n < sizeof(v) && v[0] == '0')
+		return 0;
+	return 1;
+}
+
 static void keys_unstick(int noisy)
 {
-	static const WORD always[] = {
+	static const WORD move[] = {
 		VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN,
 		'A', 'D', 'W', 'S',
 		VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
 		VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
-		VK_MENU, VK_LMENU, VK_RMENU,
-		VK_SPACE, VK_RETURN, VK_ESCAPE, VK_TAB,
-		VK_F5, VK_F6, VK_F7, VK_F8, VK_F9,
-		'1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
 		VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD8, VK_NUMPAD2,
 		0
 	};
-	char v[8];
-	DWORD nenv;
-	int i, vk, n = 0, listed;
-	unsigned char down[256];
+	int i, held = 0, poked = 0;
 
-	nenv = ss_getenv("D3D9SW_KEY_UNSTICK", v, sizeof(v));
-	if (nenv > 0 && nenv < sizeof(v) && v[0] == '0')
+	if (!key_unstick_on())
 		return;
 
-	memset(down, 0, sizeof(down));
-	for (vk = 8; vk < 256; vk++) {
-		if (GetAsyncKeyState(vk) & 0x8000) {
-			down[vk] = 1;
-			n++;
-		}
-	}
-	for (i = 0; always[i]; i++)
-		key_send(always[i], 1);
-	for (vk = 8; vk < 256; vk++) {
-		if (!down[vk])
+	/* Only keys user32 already reports up. A KEYUP of a Left that is still
+	 * down is what made the walk stay live after holding: X11 kept the
+	 * key, GetAsyncKeyState went up, DirectInput kept walking, and the
+	 * real keyup then had no edge left to deliver. */
+	for (i = 0; move[i]; i++) {
+		if (GetAsyncKeyState(move[i]) & 0x8000) {
+			held++;
 			continue;
-		listed = 0;
-		for (i = 0; always[i]; i++) {
-			if (always[i] == (WORD)vk) {
-				listed = 1;
-				break;
-			}
 		}
-		if (!listed)
-			key_send((WORD)vk, 1);
+		key_send(move[i], 1);
+		poked++;
 	}
-	if (noisy || n)
-		ss_log("  keys: released leftover input after restore (%d virtual "
-		       "key(s) were still down, plus movement/modifiers) so a stuck "
-		       "Left cannot walk the character off the snapshot\n",
-		       n);
+	if (noisy)
+		ss_log("  keys: poked KEYUP on %d idle movement key(s), left %d still "
+		       "held so a held Left stays held\n",
+		       poked, held);
+}
+
+/* Extra KEYUP on the falling edge, every present. DirectInput8 raw input can
+ * miss the real keyup (especially across a freeze) while GetAsyncKeyState
+ * already went up. One synthetic release on that edge is what stops the walk
+ * without touching a key the player is still holding. */
+static void keys_edge_sync(void)
+{
+	static const WORD move[] = { VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, 0 };
+	static unsigned was;
+	unsigned now = 0;
+	int i, down;
+
+	if (!key_unstick_on())
+		return;
+	for (i = 0; move[i]; i++) {
+		down = (GetAsyncKeyState(move[i]) & 0x8000) ? 1 : 0;
+		if (down)
+			now |= 1u << i;
+		else if (was & (1u << i))
+			key_send(move[i], 1);
+	}
+	was = now;
 }
 
 static long g_key_sent;
@@ -18045,10 +18060,9 @@ int savestate_soak_action(void)
 		 * freeze-time bitmap; a few frames later is the truth. */
 		ss_log("  keys watch: %d present(s) after freeze\n", 6 - n);
 		keys_log("on a later present");
-		keys_unstick(0);
+		keys_unstick(n == 5);
 	}
-	if (g_frames_since_load >= 0 && g_frames_since_load < 3)
-		keys_unstick(0);
+	keys_edge_sync();
 	key_at_tick();
 	/* Beside the input tick and for the same reason: a run that ends on a
 	 * different frame is not comparable, whether or not the control block
