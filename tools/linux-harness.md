@@ -9,11 +9,13 @@ question is whether cross-session restore is easier under Proton.
 - Start with `steam-launch-wrapper` and **no extra exe args**
   (`tools/linux-rabi.sh launch`, `tools/baserun.sh`). Extra args, or
   `steam://run/400910//-noaudio`, pop "Launch Game with custom arguments".
-- Keep Steam Launch Options **empty** for that reason. `RABI_NOAUDIO=1` is
-  the opt-in silence and will re-open the dialog on Linux Steam.
+- Steam Launch Options may still be `-noaudio`; Steam then applies it as
+  the official command and does not prompt. The dialog is injected URL
+  args, not the saved Launch Options field.
+- `RABI_NOAUDIO=1` puts `-noaudio` on the wrapper argv and will re-open
+  the dialog on Linux Steam.
 - Windows Launch Options is `-xaudio2`. This VM has no `/dev/snd`; that
-  flag exits before `d3d11.dll` attaches. Default launch leaves audio to
-  Wine's builtin dsound → winepulse.
+  flag exits before `d3d11.dll` attaches.
 
 ## Scripts
 
@@ -21,7 +23,7 @@ question is whether cross-session restore is easier under Proton.
 tools/linux-rabi.sh build     # zig cc -target x86-windows-gnu
 tools/linux-rabi.sh deploy    # DLLs + examples/rabiribi cfgs + native DllOverrides
 tools/linux-rabi.sh status
-tools/linux-rabi.sh launch    # steam://rungameid, LaunchOptions supplies -noaudio
+tools/linux-rabi.sh launch    # wrapper, no extra argv; no custom-args dialog
 tools/linux-rabi.sh xrestore [frame [quit]]
 ./tools/baserun.sh -n 6       # module bases across launches
 ```
