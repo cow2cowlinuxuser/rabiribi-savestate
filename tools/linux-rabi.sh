@@ -19,6 +19,7 @@
 #   tools/linux-rabi.sh status
 #   tools/linux-rabi.sh ps        # pid / window / Steam hold / slot files
 #   tools/linux-rabi.sh launch
+#   tools/linux-rabi.sh cycle [n]  # one title save, then n restores of it
 #   tools/linux-rabi.sh xrestore [frame [quit]]
 #
 # xrestore always sets D3D11SW_GPU=0 (docs/determinism.md: do not restore
@@ -33,6 +34,10 @@ COMPAT="${STEAM_COMPAT_DATA_PATH:-$STEAM_ROOT/steamapps/compatdata/400910}"
 APPID=400910
 OUT="$ROOT/x86"
 DET="$ROOT/det/xrestore"
+# Where cmd_cycle parks the one snapshot it made, to prove the restores after it
+# all came back to that same file. Outside the game folder so the wrapper never
+# sees it as a slot of its own.
+DET_SLOT="${RABI_DET_SLOT:-/tmp/rabi-cycle-slot0.bin}"
 
 # Wine must load the game-folder copies, not DXVK/wined3d. dsound is
 # deliberately absent: our same-folder dsound.dll forwards to the silent
@@ -301,6 +306,122 @@ cmd_launch() {
 	launch_game
 }
 
+# One save on the title screen, then N restores of that one snapshot.
+#
+# This is the thing shift could not do. D3D9SW_LOAD_VK gives load a key of its
+# own, so each press is independent and nothing has to stay held across a second
+# keystroke - which neither Wine's input path nor this VM's X driver managed.
+# The keys come from the deployed cfg rather than being hardcoded, so a cfg that
+# says something else is tested instead of silently ignored.
+#
+# Waits on the wrapper's own log counters, not on a timer: a press that did not
+# register looks exactly like a restore still running otherwise. And it settles
+# between presses, because a load sent while the previous one was still resuming
+# was dropped.
+cmd_cycle() {
+	local want="${1:-2}" cfg="$GAME/d3d9_sw.cfg"
+	local d11="$GAME/d3d11_sw.log" ss="$GAME/d3d9_sw_savestate_rabiribi.txt"
+	local wid savek loadk pid n before
+
+	need_game
+	game_running || die "the game is not running - tools/linux-rabi.sh launch"
+	command -v xdotool >/dev/null 2>&1 || die "xdotool is needed to send the keys"
+	savek=$(sed -n 's/^D3D9SW_SAVE_VK=//p' "$cfg" | tail -1)
+	loadk=$(sed -n 's/^D3D9SW_LOAD_VK=//p' "$cfg" | tail -1)
+	[[ -n "$savek" ]] || die "D3D9SW_SAVE_VK is not set in $cfg"
+	[[ -n "$loadk" ]] || die "D3D9SW_LOAD_VK is not set in $cfg - load would need shift, \
+which does not survive automation"
+	export DISPLAY="${DISPLAY:-:1}"
+	wid=$(xdotool search --name 'Rabi-Ribi ver' | head -1)
+	[[ -n "$wid" ]] || die "no Rabi-Ribi window"
+	pid=$(pgrep -x 'rabiribi.exe')
+	echo "cycle: pid $pid, save on '$savek', load on '$loadk', $want restore(s)"
+
+	# The keys are sent as single characters, which is what the cfg spells them
+	# as. A function key would need the F5 form, so pass it through as written.
+	press() {
+		xdotool windowactivate --sync "$wid"
+		sleep 0.3
+		xdotool keydown --window "$wid" "$1"
+		sleep 0.12
+		xdotool keyup --window "$wid" "$1"
+	}
+	# Counted from the logs, which are the only place that says a save or a load
+	# actually happened rather than that a key was sent. grep -c prints 0 and
+	# exits 1 on no match, so the exit status is discarded rather than defaulted -
+	# an `|| echo 0` here appended a second line and every comparison after it
+	# was a syntax error.
+	count() {
+		local c
+		c=$(grep -ac "$2" "$1" 2>/dev/null) || true
+		echo "${c:-0}"
+	}
+	saves() { count "$d11" 'savestate saved slot'; }
+	# The savestate log, not the wrapper log. The wrapper prints "restored" after
+	# the rewound thread has returned all the way out, so a restore that lands and
+	# then faults on resume never reaches that line - which read as "the key did
+	# not register" for a restore that had in fact happened. This line is written
+	# while the threads are still frozen.
+	loads() { count "$ss" 'load: slot'; }
+	settled() {
+		local what="$1" was="$2" fn="$3" j got died=0
+		for ((j = 0; j < 60; j++)); do
+			game_running || died=1
+			got=$("$fn")
+			if (( got > was )); then
+				echo "  $what: landed after $((j * 500)) ms$(
+					((died)) && echo ", but the process is gone")"
+				((died)) && return 2
+				return 0
+			fi
+			if ((died)); then
+				echo "  $what: THE GAME DIED without logging it"
+				return 2
+			fi
+			sleep 0.5
+		done
+		echo "  $what: never logged - the key did not reach the wrapper"
+		return 1
+	}
+
+	local saves_after_one rc
+	before=$(saves)
+	press "$savek"
+	settled "save" "$before" saves || return $?
+	ls -lh "$GAME"/d3d9sw_slot0.bin | awk '{print "  slot:", $9, $5}'
+	# The one snapshot every restore below has to come back to. Kept so a load
+	# key that turned out to save is caught: that would pass every check below
+	# and prove nothing.
+	saves_after_one=$(saves)
+	cp -f "$GAME/d3d9sw_slot0.bin" "$DET_SLOT" 2>/dev/null || true
+
+	for ((n = 1; n <= want; n++)); do
+		before=$(loads)
+		# Long enough that the previous restore has finished resuming. A press a
+		# fifth of a second after one landed was swallowed.
+		sleep 3
+		press "$loadk"
+		settled "restore $n" "$before" loads
+		rc=$?
+		echo "  after restore $n: pid $(pgrep -x 'rabiribi.exe' || echo GONE)"
+		if ((rc != 0)); then
+			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
+			return $rc
+		fi
+	done
+
+	if (( $(saves) != saves_after_one )); then
+		echo "  WARNING: something saved again during the restores - the later"
+		echo "  loads did not all come back to the same snapshot"
+	elif [[ -f "$DET_SLOT" ]] && ! cmp -s "$DET_SLOT" "$GAME/d3d9sw_slot0.bin"; then
+		echo "  WARNING: the slot file changed under us"
+	else
+		echo "  slot is still the one save, so every restore came back to it"
+	fi
+	echo "cycle: done, $want restore(s) of one save"
+	cmd_ps
+}
+
 wait_for_game() {
 	local t0 now
 	t0=$(date +%s)
@@ -427,7 +548,7 @@ cmd_stop() {
 }
 
 usage() {
-	sed -n '2,25p' "$0"
+	sed -n '2,26p' "$0"
 }
 
 cmd="${1:-}"
@@ -440,6 +561,7 @@ case "$cmd" in
 	on) cmd_on ;;
 	off) cmd_off ;;
 	launch) cmd_launch ;;
+	cycle) cmd_cycle "${1:-2}" ;;
 	stop) cmd_stop ;;
 	xrestore) cmd_xrestore "${1:-1200}" "${2:-1800}" ;;
 	-h|--help|help|"") usage ;;
