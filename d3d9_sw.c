@@ -1594,13 +1594,18 @@ static HRESULT WINAPI Dev_Present(IDirect3DDevice9 *this, const RECT *src, const
 	}
 	fullscreen_reassert(d);
 	/* Rewind hotkeys. Taken after the flush, so no draw is in flight and the
-	 * snapshot sees a quiescent renderer: F5..F8 save, shift+F5..F8 restore. */
+	 * snapshot sees a quiescent renderer. Which key is which is resolved by
+	 * savestate_hotkey, so this backend and the D3D11 one cannot disagree and
+	 * D3D9SW_LOAD_VK reaches both. It also gets this loop off
+	 * GetAsyncKeyState's low bit, which the game consumes first. */
 	{
 		int k;
 		for (k = 0; dev_has_focus(d) && k < SAVESTATE_SLOTS; k++) {
-			if (!(GetAsyncKeyState(VK_F5 + k) & 1))
+			int hk = savestate_hotkey(k);
+
+			if (hk == SS_HOTKEY_NONE)
 				continue;
-			if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+			if (hk == SS_HOTKEY_LOAD) {
 				if (savestate_load(k))
 					sw_trace("savestate: restored slot %d in %.1f ms\n", k,
 						 savestate_last_ms());

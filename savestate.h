@@ -126,6 +126,25 @@ void savestate_probe_census(void);
  * being lost. These track the physical key bit instead. */
 int savestate_key_edge(int vk);
 int savestate_key_held(int vk);
+
+/* What the hotkeys asked for on this frame, for one slot.
+ *
+ * The binding lives here rather than in each wrapper because there are three
+ * of them and they had drifted: d3d11_sw went through savestate_key_edge while
+ * d3d9_sw and gl_sw still read GetAsyncKeyState's low bit directly, which is
+ * the unreliable path the comment above describes. One resolver means one
+ * answer to "which key saves" for every backend and every title.
+ *
+ * Shift is the part that does not survive automation. A modifier has to be
+ * held across a second keystroke, and neither Wine's input path nor a remote
+ * driver reproduces that reliably - the modifier arrives, the key arrives, and
+ * the two are not overlapping by the time anything reads them. A load key of
+ * its own needs no overlap, so D3D9SW_LOAD_VK is what makes an unattended run
+ * able to restore at all. Shift+save remains the default, so nothing changes
+ * for a player who sets nothing. */
+enum { SS_HOTKEY_NONE = 0, SS_HOTKEY_SAVE, SS_HOTKEY_LOAD };
+int savestate_hotkey(int slot);
+
 void savestate_chain_probe(void);
 
 /* Hold every thread still for a while and then let them go, copying nothing.

@@ -7113,13 +7113,14 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	soak_act = savestate_soak_action();
 	for (k = 0; k < SAVESTATE_SLOTS; k++) {
 		int want_load;
+		int hk = savestate_hotkey(k);
 
 		/* Hotkey or soak, but one body below either way. A separate soak
 		 * call site would have to repeat ledger_register, the generation
 		 * bump, ledger_mark and the retain flush, and any one of those
 		 * missed is the retain-and-reap double free. */
-		if (savestate_key_edge(VK_F5 + k))
-			want_load = savestate_key_held(VK_SHIFT);
+		if (hk != SS_HOTKEY_NONE)
+			want_load = (hk == SS_HOTKEY_LOAD);
 		else if (k == 0 && soak_act != SS_SOAK_NOTHING)
 			want_load = (soak_act == SS_SOAK_LOAD) ? 1 : 0;
 		else
