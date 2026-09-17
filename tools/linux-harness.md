@@ -60,6 +60,15 @@ Prefix `DllOverrides` native for `d3d11,dxgi,dsound,xaudio2_9,xinput1_4`
 - Two Continue-clicked baserun launches (2 and 4 of a botched six):
   `logs/linux-proton-baserun-partial.zip`. Same map both times, including
   `rabiribi.exe` at `00400000` (the preferred base Windows never grants).
-- Next experiment, once a local harness can launch without the args
-  dialog: `D3D9SW_SLOTFILE=1`, save in one launch, `D3D9SW_LOAD_AT` in the next.
-  Repeat after a reboot before treating a fixed base as boot-stable.
+- One title save and repeated restores of it: `tools/linux-rabi.sh cycle 3`
+  after `launch`. 10 of 10 sessions, 30 restores, no fault. It needs
+  `D3D9SW_LOAD_VK`: shift plus the save key does not survive this VM's input
+  path, so load simply never fired.
+- That only came clean once the restore stopped rewinding regions inside a
+  heap it had already decided to hold (`D3D9SW_PARTHOLD`, on by default).
+  Before it, 2 of 7 sessions survived; the rest died at `ntdll+50260` writing
+  `7FFFFFF8` / `7FFFFFFF` / `00000004`, a list unlink with one half from the
+  save and one from the present.
+- Next experiment, now that repeated in-session restores hold: `D3D9SW_SLOTFILE=1`,
+  save in one launch, `D3D9SW_LOAD_AT` in the next. Repeat after a reboot
+  before treating a fixed base as boot-stable.
