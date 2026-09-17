@@ -385,7 +385,10 @@ which does not survive automation"
 	# numbers. Do not reach for a screenshot instead: X keeps the last frame a
 	# window drew, so a wedged game photographs as a perfectly good title screen.
 	drawing() {
-		local was="$1" want=$((was + 3)) j
+		# Split, not one `local`: with set -u, referring to a name being
+		# declared by the same local is an unbound variable.
+		local was="$1" j
+		local want=$((was + 3))
 		for ((j = 0; j < 40; j++)); do
 			game_running || { echo "  and then it died"; return 2; }
 			if (( $(presents) >= want )); then
