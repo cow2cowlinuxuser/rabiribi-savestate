@@ -16885,15 +16885,36 @@ static void hotkeys_resolve(void)
 	 * session whether or not anything ever asked for a save. */
 	if (!said && g_ctl) {
 		said = 1;
-		if (g_vk_load)
+		if (g_vk_load) {
 			ss_log("hotkeys: save on %#x, load on %#x - separate keys, so "
 			       "no modifier has to be held across a second press\n",
 			       g_vk_save, g_vk_load);
-		else
+			/* Each base covers SAVESTATE_SLOTS consecutive keys, so two
+			 * bases closer together than that overlap, and load is tested
+			 * first: the key the config calls save-slot-1 would restore
+			 * slot 0 instead. Harmless at one slot and silent at two,
+			 * which is exactly the kind of thing that gets diagnosed as a
+			 * broken restore a year from now. */
+			if (SAVESTATE_SLOTS > 1) {
+				int lo = g_vk_save < g_vk_load ? g_vk_save : g_vk_load;
+				int hi = g_vk_save < g_vk_load ? g_vk_load : g_vk_save;
+
+				if (hi - lo < SAVESTATE_SLOTS)
+					ss_log("  hotkeys: WARNING - %d slot(s) means each "
+					       "base claims %d consecutive keys, and these "
+					       "two are %d apart, so they overlap. Load is "
+					       "tested first, so a save key inside the load "
+					       "range will restore instead. Move them at "
+					       "least %d apart\n",
+					       SAVESTATE_SLOTS, SAVESTATE_SLOTS, hi - lo,
+					       SAVESTATE_SLOTS);
+			}
+		} else {
 			ss_log("hotkeys: save on %#x, load on shift+%#x. Set "
 			       "D3D9SW_LOAD_VK to give load a key of its own, which is "
 			       "what an automated run needs\n",
 			       g_vk_save, g_vk_save);
+		}
 	}
 }
 
