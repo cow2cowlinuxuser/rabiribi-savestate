@@ -2670,6 +2670,23 @@ static void dsound_claim(void)
 
 		if (!GetModuleFileNameA(h, shown, MAX_PATH))
 			lstrcpynA(shown, "(no path)", MAX_PATH);
+		/* The software device is silent by design (see ds_sw.c: "Phase one is
+		 * silent"), so taking the entry point means no sound whatever the
+		 * launch flags say. On Wine that hides the whole Pulse/ALSA/PipeWire
+		 * path, which a native Linux build has to survive anyway. 0 leaves
+		 * Wine's DirectSound in place and lets the mixer actually run. */
+		{
+			char v[8];
+			unsigned got = savestate_getenv("D3D9SW_DSTAKEOVER", v, sizeof(v));
+
+			if (got > 0 && got < sizeof(v) && v[0] == '0') {
+				d11_log("dsound: already loaded from %s, and D3D9SW_DSTAKEOVER=0 "
+					"- leaving its create entry point alone, so the game "
+					"gets the real mixer and we only hook its buffers",
+					shown);
+				return;
+			}
+		}
 		/* Second to the name, so take the entry point instead. Which file won
 		 * stops mattering once DirectSoundCreate8 lands in our code. */
 		took = ds_sw_take_over();

@@ -5189,6 +5189,7 @@ typedef struct THREAD_BASIC_INFO {
 } THREAD_BASIC_INFO;
 
 typedef LONG(NTAPI *PFN_NtQueryThread)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+typedef LONG(NTAPI *PFN_NtQuerySys)(ULONG, PVOID, ULONG, PULONG);
 
 typedef struct Slot Slot;
 
@@ -5235,6 +5236,207 @@ static PVOID start_of(HANDLE thread)
 	if (fn(thread, 9 /* ThreadQuerySetWin32StartAddress */, &addr, sizeof(addr), NULL) < 0)
 		return NULL;
 	return addr;
+}
+
+/* Wine and Proton: ntdll exports this, native Windows does not. */
+static int ss_under_wine(void)
+{
+	static int cached = -1;
+	HMODULE ntdll;
+
+	if (cached >= 0)
+		return cached;
+	ntdll = GetModuleHandleA("ntdll.dll");
+	cached = (ntdll && GetProcAddress(ntdll, "wine_get_version")) ? 1 : 0;
+	return cached;
+}
+
+/* A log line that has to survive the next wineserver call hanging.
+ *
+ * WriteFile of the savestate log has been observed to complete under Proton
+ * (the dsound-quiet line is on disk) and then the helper never writes again.
+ * Flush so the breadcrumb is not sitting in a wineserver write when we freeze. */
+static void ss_phase(const char *fmt, ...)
+{
+	char buf[512];
+	int n;
+	va_list ap;
+	DWORD wrote;
+
+	if (!g_ctl || g_ctl->log == INVALID_HANDLE_VALUE || !g_ctl->log)
+		return;
+	va_start(ap, fmt);
+	n = ss_vfmt(buf, (int)sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (n > 0) {
+		WriteFile(g_ctl->log, buf, (DWORD)n, &wrote, NULL);
+		FlushFileBuffers(g_ctl->log);
+	}
+}
+
+/* KTHREAD_STATE as NtQuerySystemInformation reports it. Ready/Running are
+ * executing user-mode code (or about to); Waiting is a wineserver wait. */
+enum {
+	SS_TS_READY = 1,
+	SS_TS_RUNNING = 2,
+	SS_TS_WAITING = 5,
+	SS_TS_DEFERRED_READY = 7
+};
+
+static int wine_state_runnable(unsigned state)
+{
+	return state == SS_TS_READY || state == SS_TS_RUNNING ||
+	       state == SS_TS_DEFERRED_READY;
+}
+
+/* SystemProcessInformation layout moves between Wine builds. CLIENT_ID is
+ * two HANDLEs (pid, tid) and ThreadState sits 20 bytes after UniqueProcess, so
+ * scanning the blob for those pairs does not depend on the header size. A
+ * missed match leaves the slot at 0, which means "do not freeze the mixer" -
+ * the restore-crashes path, not the helper-hangs path. */
+static void wine_sample_states(unsigned *states, int n)
+{
+	static BYTE buf[1 << 18];
+	static PFN_NtQuerySys fn;
+	ULONG got = 0, off;
+	DWORD pid = GetCurrentProcessId();
+	int i;
+
+	for (i = 0; i < n; i++)
+		states[i] = 0;
+	if (!fn) {
+		HMODULE nt = GetModuleHandleA("ntdll.dll");
+		if (nt)
+			fn = (PFN_NtQuerySys)(void *)GetProcAddress(nt, "NtQuerySystemInformation");
+	}
+	if (!fn || n <= 0)
+		return;
+	if (fn(5 /* SystemProcessInformation */, buf, sizeof(buf), &got) < 0)
+		return;
+	if (got < 24)
+		return;
+	for (off = 0; off + 24 <= got; off += 4) {
+		DWORD p = *(DWORD *)(buf + off);
+		DWORD t, st;
+
+		if (p != pid)
+			continue;
+		t = *(DWORD *)(buf + off + 4);
+		st = *(DWORD *)(buf + off + 20);
+		if (st > 7)
+			continue;
+		for (i = 0; i < n; i++) {
+			if (g_ctl->ids[i] == t)
+				states[i] = st;
+		}
+	}
+}
+
+static int wine_start_in(PVOID start, HMODULE exe, HMODULE self)
+{
+	HMODULE m = NULL;
+
+	if (!start)
+		return 0;
+	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+					GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				(LPCSTR)start, &m) ||
+	    !m)
+		return 0;
+	return m == exe || m == self;
+}
+
+static int wine_audio_start(PVOID start)
+{
+	HMODULE m = NULL;
+	char path[MAX_PATH];
+	const char *name;
+
+	if (!start)
+		return 0;
+	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+					GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				(LPCSTR)start, &m) ||
+	    !m)
+		return 0;
+	if (!GetModuleFileNameA(m, path, sizeof(path)))
+		return 0;
+	name = strrchr(path, '\\');
+	name = name ? name + 1 : path;
+	return !_stricmp(name, "dsound.dll") || !_stricmp(name, "mmdevapi.dll") ||
+	       !_stricmp(name, "audioses.dll") || !_stricmp(name, "audioeng.dll") ||
+	       !_stricmp(name, "avrt.dll") || !_stricmp(name, "wdmaud.drv") ||
+	       !_stricmp(name, "winmm.dll") || !_stricmp(name, "winepulse.drv") ||
+	       !_stricmp(name, "winealsa.drv") || !_stricmp(name, "wineoss.drv") ||
+	       !_stricmp(name, "winecoreaudio.drv") || !_stricmp(name, "winepulse.so") ||
+	       !_strnicmp(name, "winepulse", 9) || !_strnicmp(name, "winealsa", 8);
+}
+
+/* Under Wine, SuspendThread of a thread that is in a wineserver request waits
+ * for that request to finish. wineserver is single-threaded, so freezing the
+ * threads it is serving deadlocks the helper's own next server call - which is
+ * how a save dies after dsh_quiet with the helper in readv and the requester
+ * spinning on busy. Native Windows has no such server, and freezing everyone
+ * is still correct there.
+ *
+ * Game and wrapper threads freeze as before. Pulse/ALSA/PipeWire mixer workers
+ * (dsound, mmdevapi, winepulse, ...) freeze only while they are Running/Ready:
+ * that is user-mode mixing, and SuspendThread is then a local pause. Waiting
+ * means they are already in the server; leave them, the way dinput is left,
+ * so the server can still answer VirtualQuery. Unknown start in the Windows
+ * directory: do not freeze. Pulse stays up the whole time - we never unload
+ * the mixer, we only pause the threads that would write while we copy. */
+static int wine_freeze_this(PVOID start, unsigned state)
+{
+	HMODULE exe, self = NULL;
+	char path[MAX_PATH], windir[MAX_PATH];
+	UINT wlen;
+	const char *name;
+	HMODULE m = NULL;
+
+	if (!start)
+		return 0;
+	exe = GetModuleHandleA(NULL);
+	GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+				   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			   (LPCSTR)&wine_freeze_this, &self);
+	if (wine_start_in(start, exe, self))
+		return 1;
+	if (wine_audio_start(start))
+		return wine_state_runnable(state);
+	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+					GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				(LPCSTR)start, &m) ||
+	    !m)
+		return 0;
+	if (!GetModuleFileNameA(m, path, sizeof(path)))
+		return 0;
+	wlen = GetWindowsDirectoryA(windir, sizeof(windir));
+	if (wlen && _strnicmp(path, windir, wlen) == 0)
+		return 0;
+	name = strrchr(path, '\\');
+	name = name ? name + 1 : path;
+	if (_strnicmp(name, "steam", 5) == 0 || _strnicmp(name, "gameoverlay", 11) == 0)
+		return 0;
+	return 1;
+}
+
+/* waveOutPause and DXGI Present both wait on wineserver. The helper is about
+ * to freeze threads; if it parks first, it never gets that far. Stopping the
+ * game's DirectSound buffers (dsh_quiet) is a short server call and has been
+ * observed to return. Standing the device down entirely is not - Pulse, ALSA
+ * and PipeWire stay loaded, which is what a native Linux build has to survive
+ * too. */
+static void park_audio_gpu(void)
+{
+	if (ss_under_wine()) {
+		ss_phase("  wine: not parking xa2/gpu - waveOutPause and Present wait "
+			 "on wineserver; mixer stays loaded\n");
+		return;
+	}
+	xa2_sw_park();
+	if (g_gpu_park_fn)
+		g_gpu_park_fn(1);
 }
 
 /* Everything the rewind must not touch, rebuilt per operation because the
@@ -6485,6 +6687,21 @@ static void heaps_partition(void)
 
 		if (g_ctl->heap_ours[k])
 			continue;
+		/* Wine's heap header is not a Windows HEAP. Walking the first
+		 * 0x400 bytes as LIST_ENTRY follows random pointers into the game
+		 * runtime and holds tens of megabytes that a silent VM (no Pulse
+		 * mixer, nothing to walk) never held. The restore then rewinds
+		 * the rest of that heap and the two disagree. Mixer heaps are
+		 * already left in the present by owner; skipping the walk keeps
+		 * Pulse loaded without tearing the game's allocator in half. */
+		if (ss_under_wine()) {
+			static int said_wine_infra;
+
+			if (first && !said_wine_infra++)
+				ss_log("    NOTE: Wine heap headers are not Windows HEAP, so the "
+				       "header-list walk that holds outlying blocks is skipped\n");
+			continue;
+		}
 		got = heap_outliers(g_ctl->heap_h[k], &nout);
 		held += got;
 		if (first && nout > before)
@@ -10386,26 +10603,83 @@ static void collect_threads(void)
 	CloseHandle(snap);
 }
 
+static char g_did_suspend[SS_MAX_THREADS];
+
 static void suspend_all(void)
 {
-	int i;
+	int i, froze = 0, skipped = 0, audio_wait = 0, known = 0;
+	int wine = ss_under_wine();
+	unsigned state[SS_MAX_THREADS];
 	/* Also set in blk_lock_all, which runs earlier when block mode is on.
 	 * Repeated here so the paths that freeze without taking the heap locks
 	 * are covered too - a suspended process is no safer to allocate against
 	 * than a locked heap, and for the LFH it is the same hazard. */
 	env_prewarm();
 	g_env_frozen = 1;
+	memset(g_did_suspend, 0, sizeof(g_did_suspend));
+	if (wine)
+		wine_sample_states(state, g_ctl->nids);
 	for (i = 0; i < g_ctl->nids; i++) {
 		HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
 					      THREAD_SET_CONTEXT | THREAD_QUERY_INFORMATION,
 				      FALSE, g_ctl->ids[i]);
-		if (h && SuspendThread(h) == (DWORD)-1) {
+		PVOID start = h ? start_of(h) : NULL;
+		int freeze = h && (!wine || wine_freeze_this(start, wine ? state[i] : 0));
+
+		if (wine && state[i])
+			known++;
+		if (h && freeze && SuspendThread(h) == (DWORD)-1) {
 			CloseHandle(h);
 			h = NULL;
+			freeze = 0;
 		}
 		g_ctl->handles[i] = h;
-		g_ctl->starts[i] = h ? start_of(h) : NULL;
+		g_ctl->starts[i] = start;
+		g_did_suspend[i] = (char)(h && freeze);
+		if (g_did_suspend[i])
+			froze++;
+		else if (h) {
+			skipped++;
+			if (wine && wine_audio_start(start))
+				audio_wait++;
+		}
 	}
+	/* Mixer threads that were Waiting can leave the server now (game threads
+	 * are already frozen; dinput is still running). Catch them in user-mode
+	 * so dsound.dll is not walking rewound objects during the copy. Pulse
+	 * itself is never torn down. */
+	if (wine && audio_wait) {
+		int pass;
+
+		for (pass = 0; pass < 16; pass++) {
+			int still = 0;
+
+			Sleep(1);
+			wine_sample_states(state, g_ctl->nids);
+			for (i = 0; i < g_ctl->nids; i++) {
+				PVOID start = g_ctl->starts[i];
+
+				if (g_did_suspend[i] || !g_ctl->handles[i] || !wine_audio_start(start))
+					continue;
+				if (!wine_state_runnable(state[i])) {
+					still++;
+					continue;
+				}
+				if (SuspendThread(g_ctl->handles[i]) == (DWORD)-1)
+					continue;
+				g_did_suspend[i] = 1;
+				froze++;
+				skipped--;
+			}
+			audio_wait = still;
+			if (!still)
+				break;
+		}
+	}
+	if (wine)
+		ss_phase("  wine: froze %d game/mixer thread(s), left %d wineserver-side "
+			 "thread(s) running (%d audio still waiting, %d/%d states known)\n",
+			 froze, skipped, audio_wait, known, g_ctl->nids);
 }
 
 static void resume_all(int hold_fresh)
@@ -10414,10 +10688,11 @@ static void resume_all(int hold_fresh)
 	for (i = 0; i < g_ctl->nids; i++) {
 		if (!g_ctl->handles[i])
 			continue;
-		if (!(hold_fresh && g_ctl->fresh[i]))
+		if (g_did_suspend[i] && !(hold_fresh && g_ctl->fresh[i]))
 			ResumeThread(g_ctl->handles[i]);
 		CloseHandle(g_ctl->handles[i]);
 		g_ctl->handles[i] = NULL;
+		g_did_suspend[i] = 0;
 	}
 	/* After the threads are running again, so that anything queued behind a
 	 * heap lock wakes into a process that can actually service it. */
@@ -11666,17 +11941,15 @@ int savestate_park(int ms)
 	ss_log("park: holding the whole process still for %d ms, touching no memory\n", ms);
 	dsh_save();
 	dsh_quiet();
-	xa2_sw_park();
-	/* Same reasoning as the two above, and the adapter has the stronger
-	 * claim: suspending threads stops ours, and the GPU is not one of ours. */
-	if (g_gpu_park_fn)
-		g_gpu_park_fn(1);
+	park_audio_gpu();
 	QueryPerformanceCounter(&t0);
 	if (alloc_settle())
 		alloc_ranges_init();
 	collect_threads();
 	suspend_all();
-	{
+	/* Skipped under Wine: resume+resuspend would freeze the wineserver
+	 * waiters that suspend_all just left running on purpose. */
+	if (!ss_under_wine()) {
 		int tries = settle_tries(), n = 0;
 		unsigned who = 0, awho = 0;
 		uintptr_t where = 0, arva = 0;
@@ -12188,11 +12461,9 @@ static int do_save(int slotno)
 	/* Before suspend_all, because the point is to have nothing playing for the
 	 * whole window rather than merely for the copy. */
 	dsh_quiet();
-	xa2_sw_park();
-	/* Same reasoning as the two above, and the adapter has the stronger
-	 * claim: suspending threads stops ours, and the GPU is not one of ours. */
-	if (g_gpu_park_fn)
-		g_gpu_park_fn(1);
+	ss_phase("save: after dsh_quiet%s\n", ss_under_wine() ? " (wine/proton)" : "");
+	park_audio_gpu();
+	ss_phase("save: after audio/gpu park\n");
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t0);
 	g_blk_save_n = 0;
@@ -12201,11 +12472,16 @@ static int do_save(int slotno)
 	if (alloc_settle())
 		alloc_ranges_init();
 	collect_threads();
+	ss_phase("save: collected %d thread(s), suspending\n", g_ctl->nids);
 	suspend_all();
+	ss_phase("save: suspend_all returned\n");
 	/* Let go and look again while anything is inside the JIT. Threads must be
 	 * suspended to read their contexts, so each attempt is a full suspend, and
-	 * the release has to be real - a thread cannot leave the JIT while held. */
-	{
+	 * the release has to be real - a thread cannot leave the JIT while held.
+	 *
+	 * Skipped under Wine: the loop resume+resuspends every thread, including
+	 * the wineserver waiters that suspend_all just left running on purpose. */
+	if (!ss_under_wine()) {
 		int tries = settle_tries(), n = 0;
 		unsigned who = 0, awho = 0;
 		uintptr_t where = 0, arva = 0;
@@ -12240,8 +12516,12 @@ static int do_save(int slotno)
 	 * thread that needs to allocate its way out of the JIT cannot do that
 	 * against locks we are holding, and the settle loop would then spend all
 	 * 24 attempts waiting for something it had itself made impossible. The
-	 * cost is one extra release-and-refreeze. */
-	if (blk_mode() && blk_alloc()) {
+	 * cost is one extra release-and-refreeze.
+	 *
+	 * Wine's ntdll heap is not laid out with Windows segment headers, so
+	 * HeapWalk / the LFH walker either finds nothing or never returns. The
+	 * restore then has to put back whole regions anyway. */
+	if (!ss_under_wine() && blk_mode() && blk_alloc()) {
 		int capped = 0;
 
 		resume_all(0);
@@ -12288,8 +12568,9 @@ static int do_save(int slotno)
 		 * different experiment from the one the config describes, and the only
 		 * evidence was a zero in the middle of the load line. */
 		ss_log("  heap blocks: OFF for this save - D3D9SW_HEAPBLOCKS reads as %d, "
-		       "so the restore will put back whole heap regions instead\n",
-		       blk_mode());
+		       "so the restore will put back whole heap regions instead%s\n",
+		       blk_mode(),
+		       ss_under_wine() ? " (Wine heap is not Windows HEAP)" : "");
 	}
 	QueryPerformanceCounter(&t_susp);
 	build_exclusions();
@@ -13693,7 +13974,7 @@ static int do_load(int slotno)
 	g_blk_ready = 0;
 	g_blk_match_n = 0;
 	{
-		int want = blk_mode() && g_blk_save_n && blk_alloc();
+		int want = !ss_under_wine() && blk_mode() && g_blk_save_n && blk_alloc();
 
 		/* Same reason as at save, and more pressing: here we are the writer,
 		 * putting hundreds of megabytes back into memory the card may still
@@ -13707,7 +13988,7 @@ static int do_load(int slotno)
 		 * nothing left to observe about what the present sounded like. */
 		dsh_mark_present();
 		dsh_quiet();
-		xa2_sw_park();
+		park_audio_gpu();
 		if (want)
 			blk_lock_all();
 		collect_threads();
@@ -17254,10 +17535,20 @@ static int load_at_frame(void)
 
 	if (at < 0) {
 		at = (long)soak_knob("D3D9SW_LOAD_AT", 0);
-		if (at > 0)
+		if (at > 0) {
+			/* This knob exists for the session that restores a file it did
+			 * not write, and such a session takes no save - so nothing else
+			 * reaches ensure_helper, the control block never comes up, and
+			 * the caller's "if (!g_ctl)" returned before this was ever
+			 * called. Three cross-session launches did nothing and wrote no
+			 * savestate log at all, because the block owns the log handle
+			 * too. Standing it up here is what pos_ready does, for the same
+			 * reason and after the same kind of session spent chasing it. */
+			ensure_helper();
 			ss_log("load-at: this run will restore slot 0 at frame %ld, "
 			       "from whatever the last session left in the file\n",
 			       at);
+		}
 	}
 	if (at <= 0 || done || ++frame < at)
 		return 0;
@@ -17322,6 +17613,11 @@ static int save_at_frame(void)
 	if (g_save_at_frame < g_save_at[g_save_at_i])
 		return 0;
 	g_save_at_i++;
+	/* The save that follows would build the control block a frame later, which
+	 * is too late for the line below: ss_log discards anything written before
+	 * the block exists, so an unattended run's own record of where it cut would
+	 * be missing from the log it was cut for. */
+	ensure_helper();
 	ss_log("save-at: frame %ld, cut %d of %d - the allocation trace is written "
 	       "here in every session\n",
 	       g_save_at_frame, g_save_at_i, g_save_at_n);
@@ -17341,8 +17637,6 @@ int savestate_soak_action(void)
 	 * different frame is not comparable, whether or not the control block
 	 * ever came up. */
 	quit_at_tick();
-	if (!g_ctl)
-		return SS_SOAK_NOTHING;
 	/* Ahead of the soak state check, because this is armed by a knob on its
 	 * own and there is no reason to make a measurement run also arm the soak
 	 * ladder to get at it. */
@@ -17352,6 +17646,13 @@ int savestate_soak_action(void)
 	 * before trying to put one back and the ordering is never in doubt. */
 	if (load_at_frame())
 		return SS_SOAK_LOAD;
+	/* Below both triggers, not above them. The soak ladder genuinely needs the
+	 * control block, but the two frame knobs do not - they stand it up
+	 * themselves - and gating them on it meant D3D9SW_LOAD_AT could only fire
+	 * in a session that had already saved, which is precisely the session it
+	 * was not written for. */
+	if (!g_ctl)
+		return SS_SOAK_NOTHING;
 	if (g_ctl->soak_state == SOAK_OFF || g_ctl->soak_state == SOAK_DONE)
 		return SS_SOAK_NOTHING;
 
