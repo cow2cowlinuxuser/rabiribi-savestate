@@ -82,11 +82,12 @@ Prefix `DllOverrides` native for `d3d11,dxgi,dsound,xaudio2_9,xinput1_4`
   is a freeze during ordinary play with no one asking for a savestate.
 - After those two gates, a room walk still stuck Left with **no savestate
   log**, X11 Left up, pads absent. In-game present was **15.1 fps / 66 ms**
-  (raster 29 ms, then our 60 Hz pacer still Sleeps 16 ms). The game polls
-  once per present, on that same thread, so a KEYUP in that window is a
-  timer tick that never ran. One already-sampled walk tick is ~16 ms at
-  60 fps and **66 ms** here — the small leftover motion is that tick, not
-  a tile (there are no sliding tiles). Stock GPU Proton is the A/B.
+  (raster 29 ms, then our 60 Hz pacer still Sleeps 16 ms). That stretch
+  can widen the one-tick leftover, but it is not the stick: on Windows,
+  frames past 400 ms never left Left down. Wine dinput `device_state` is
+  only updated from a raw-input hook on the window thread; wineserver
+  can already have the key up. Stock GPU Proton is still the A/B for
+  whether another Ubuntu’s Wine does the same.
 - That only came clean once the restore stopped rewinding regions inside a
   heap it had already decided to hold (`D3D9SW_PARTHOLD`, on by default).
   Before it, 2 of 7 sessions survived; the rest died at `ntdll+50260` writing
