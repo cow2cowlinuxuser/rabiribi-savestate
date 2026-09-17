@@ -4618,10 +4618,16 @@ static char *ss_frac(char *p, char *end, unsigned long long v, int digits)
  * fell through to the default case and printed a bare '%'.
  *
  * Supports what the 105 call sites between them actually use, which was
- * measured rather than assumed: flags - + 0 and space, a numeric width, a
+ * measured rather than assumed: flags - + 0 # and space, a numeric width, a
  * precision (fraction digits for floats, a truncation limit for strings), the
  * l/ll/h/z length modifiers, and d i u x X p s f %%. Anything else emits a '%'
  * so a mistake shows up in the log instead of being silently dropped.
+ *
+ * `#` is here because the hotkey lines asked for %#x and got the literal text
+ * "%x": the flag fell through to the default case, which emitted a bare '%'
+ * and left the conversion to print as itself. That is the mistake-visible
+ * behaviour working as designed, and the log still could not say which keys it
+ * had resolved, which is the one thing those lines exist to do.
  *
  * No CRT call anywhere in here, and no static storage, so it is safe on a
  * restored thread and inside the suspended window. */
@@ -4633,7 +4639,7 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 		char body[64];
 		const char *s = NULL;
 		int minus = 0, plus = 0, zero = 0, width = 0, prec = -1, lmod = 0;
-		int neg = 0, upper = 0, isstr = 0, blen = -1;
+		int neg = 0, upper = 0, isstr = 0, blen = -1, alt = 0;
 		unsigned base = 10;
 		unsigned long long uv = 0;
 
@@ -4649,6 +4655,8 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 				plus = 1;
 			else if (*fmt == '0')
 				zero = 1;
+			else if (*fmt == '#')
+				alt = 1;
 			else if (*fmt != ' ')
 				break;
 		}
@@ -4781,7 +4789,11 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 					       upper) - body);
 		}
 		{
-			int total = blen + ((neg || plus) ? 1 : 0);
+			/* Only hex has a prefix here - there is no %o - and a zero
+			 * does not get one, same as the CRT: "0x0" would claim a
+			 * radix for a value that reads the same in any of them. */
+			int pfx = (alt && base == 16 && uv) ? 2 : 0;
+			int total = blen + ((neg || plus) ? 1 : 0) + pfx;
 			int pad = width > total ? width - total : 0;
 			int k;
 
@@ -4792,6 +4804,10 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 				*p++ = '-';
 			else if (plus && p < end)
 				*p++ = '+';
+			if (pfx && p < end)
+				*p++ = '0';
+			if (pfx && p < end)
+				*p++ = upper ? 'X' : 'x';
 			/* Zero fill goes AFTER the sign, or -0012 becomes 00-12. */
 			if (!minus && zero)
 				while (pad-- > 0 && p < end)
