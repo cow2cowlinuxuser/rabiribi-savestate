@@ -4390,6 +4390,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_SAVE_AT",
 	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
+	"D3D9SW_PARTHOLD",
 	"D3D9SW_RECYCLED",	  "D3D9SW_GAMEHEAP",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN",
 	"D3D9SW_SLOTFILE",
@@ -13827,9 +13828,58 @@ static int lfh_hold(void)
 	return cached;
 }
 
+/* Set to 0 to put back the old behaviour, which rewound them. */
+static int part_hold(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_PARTHOLD", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+/* A captured region that sits inside a heap we decided to leave in the present.
+ *
+ * The save already reports these - "PARTITION LEAK: n region(s) are inside a
+ * heap we leave in the present but were captured anyway ... The restore will
+ * rewind part of that heap" - and then the restore went ahead and did exactly
+ * that. Rewinding half a heap tears the allocator's own lists: the fault this
+ * produces is a doubly-linked unlink, `mov [edx+4],eax; mov [eax],edx`, writing
+ * through a Flink that came from the past into a list whose other half moved on.
+ * It reads as a wild pointer in ntdll and is not one - both halves are exactly
+ * what they were told to be.
+ *
+ * Measured on Proton at the title screen, one save and two restores of it:
+ * three sessions in four died on the second restore, always that instruction,
+ * always with the process heap at 00150000 in the register set. Naming those two
+ * regions by hand in D3D9SW_SKIPREG made three of three survive, which is what
+ * this does without needing the addresses, since they move every launch.
+ *
+ * Same argument as the LFH bookkeeping above, one level out: the smallest
+ * consistent thing to do with memory belonging to an allocator we are not
+ * rewinding is to leave all of it alone. Segment ownership is inferred by
+ * following pointers out of heap headers, so it misses segments and what it
+ * misses gets captured - the leak is a limit of that inference, not a decision
+ * anyone made. */
+static int part_leaked(uintptr_t base)
+{
+	int hi;
+
+	if (!g_ctl)
+		return 0;
+	hi = heap_index_of(base);
+	return hi >= 0 && !g_ctl->heap_ours[hi];
+}
+
 static int poke_skipped(uintptr_t base)
 {
 	if (lfh_hold() && poke_hit(g_lfh_at, g_lfh_n, base))
+		return 1;
+	if (part_hold() && part_leaked(base))
 		return 1;
 	if (g_skip_auto)
 		return poke_hit(g_revert_at, g_revert_n, base);
@@ -14558,9 +14608,22 @@ static int do_load(int slotno)
 				der_capture(i, base, (size_t)size);
 			if (poke_skipped(s->regs[i].base)) {
 				handskip++;
-				ss_log("  SKIPREG: region %d at %p left in the present by "
-				       "hand, %llu bytes\n",
-				       i, base, (unsigned long long)size);
+				/* Named apart, because one of these is an experiment
+				 * somebody typed and the other is the engine declining
+				 * to tear a heap in half. Reading a PARTHOLD line as a
+				 * leftover SKIPREG entry would send the next person
+				 * looking for a config that does not say that. */
+				if (part_hold() && part_leaked(s->regs[i].base))
+					ss_log("  PARTHOLD: region %d at %p is inside %s, "
+					       "which we leave in the present, so it stays "
+					       "there too - %llu bytes\n",
+					       i, base,
+					       g_ctl->heap_name[heap_index_of(s->regs[i].base)],
+					       (unsigned long long)size);
+				else
+					ss_log("  SKIPREG: region %d at %p left in the "
+					       "present by hand, %llu bytes\n",
+					       i, base, (unsigned long long)size);
 			} else if (by_block)
 				blocked++;
 			else if (win_copy(&w, pos, base, size, 0)) {
