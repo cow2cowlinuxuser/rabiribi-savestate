@@ -70,14 +70,13 @@ Prefix `DllOverrides` native for `d3d11,dxgi,dsound,xaudio2_9,xinput1_4`
   keeps showing the last frame it drew. That last part is why the run waits for
   three `present:` lines and never looks at a screenshot: a wedged game
   photographs as a perfectly good title screen, and a pid proves nothing.
-- A stuck Left after an in-game restore is the keyboard, not the pad.
-  `D3D9SW_XINPUT=0` already pins every XInput slot absent. DirectInput is held
-  in the present while the game's key buffer is rewound, so a Left that was
-  down at save time never sees a KEYUP. `D3D9SW_KEY_UNSTICK=1` injects one
-  after resume (extended scan code, or it releases numpad 4 instead). The
-  cycle script also XTEST-keyups Left/Right/Up/Down after every press, because
-  `xdotool keyup --window` is XSendEvent and Wine can miss it. Linux `xinput`
-  is not installed on this VM and is not required for the release.
+- A stuck Left is the keyboard, not the pad, and it can happen on **save**
+  as well as restore. Proton will not freeze `dinput.dll` (Windows-directory
+  thread, wineserver wait). `GetAsyncKeyState` still shows freeze-time keys
+  at `resume_all` and is clean one present later; Wine dinput8 raw
+  `device_state` is a different store and can keep Left down. `D3D9SW_KEY_UNSTICK=1`
+  now KEYUPs after save and load (extended scan code, or it releases numpad 4).
+  Linux `xinput` is not required; X11 itself was never stuck in these tests.
 - That only came clean once the restore stopped rewinding regions inside a
   heap it had already decided to hold (`D3D9SW_PARTHOLD`, on by default).
   Before it, 2 of 7 sessions survived; the rest died at `ntdll+50260` writing
