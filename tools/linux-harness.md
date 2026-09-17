@@ -22,7 +22,8 @@ question is whether cross-session restore is easier under Proton.
 ```
 tools/linux-rabi.sh build     # zig cc -target x86-windows-gnu
 tools/linux-rabi.sh deploy    # DLLs + examples/rabiribi cfgs + native DllOverrides
-tools/linux-rabi.sh status
+tools/linux-rabi.sh status    # also prints `ps` (pid / window / Steam / slot)
+tools/linux-rabi.sh ps        # one-shot running-state snapshot
 tools/linux-rabi.sh launch    # wrapper, no extra argv; no custom-args dialog
 tools/linux-rabi.sh xrestore [frame [quit]]
 ./tools/baserun.sh -n 6       # module bases across launches

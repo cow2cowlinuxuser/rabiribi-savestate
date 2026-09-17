@@ -17,6 +17,7 @@
 #   tools/linux-rabi.sh build
 #   tools/linux-rabi.sh deploy
 #   tools/linux-rabi.sh status
+#   tools/linux-rabi.sh ps        # pid / window / Steam hold / slot files
 #   tools/linux-rabi.sh launch
 #   tools/linux-rabi.sh xrestore [frame [quit]]
 #
@@ -172,6 +173,43 @@ cmd_status() {
 	fi
 	if [[ -f "$GAME/d3d9_sw_savestate_rabiribi.txt" ]]; then
 		echo "  last savestate log: $(wc -c < "$GAME/d3d9_sw_savestate_rabiribi.txt") bytes"
+	fi
+	cmd_ps
+}
+
+# One snapshot of whether the game is actually alive. Steam can still show
+# Stop after rabiribi.exe and its window are gone; pgrep -x is the truth.
+cmd_ps() {
+	local pid w log
+	echo "=== rabi ps $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+	if pid=$(pgrep -x 'rabiribi.exe' 2>/dev/null); then
+		echo "rabiribi.exe: RUNNING pid=$pid"
+		ps -p "$pid" -o pid,etime,stat,cmd --no-headers || true
+		if [[ -r "/proc/$pid/cmdline" ]]; then
+			echo "cmdline: $(tr '\0' ' ' < "/proc/$pid/cmdline")"
+		fi
+	else
+		echo "rabiribi.exe: NOT RUNNING"
+	fi
+	if command -v xdotool >/dev/null 2>&1; then
+		w=$(DISPLAY="${DISPLAY:-:1}" xdotool search --name 'Rabi-Ribi' getwindowname 2>/dev/null | head -1 || true)
+		if [[ -n "$w" ]]; then
+			echo "window: $w"
+		else
+			echo "window: none"
+		fi
+	fi
+	log="$STEAM_ROOT/logs/console_log.txt"
+	if [[ -f "$log" ]]; then
+		echo "steam 400910 (last):"
+		grep '400910' "$log" | grep -E 'Game process (added|updated|removed)|ExecuteSteamURL|ShowGameArgs' | tail -5 | sed 's/^/  /'
+	fi
+	shopt -s nullglob
+	local slots=("$GAME"/d3d9sw_slot*.bin)
+	if ((${#slots[@]})); then
+		ls -lh "${slots[@]}" | awk '{print "slot:", $9, $5, $6, $7, $8}'
+	else
+		echo "slot: none"
 	fi
 }
 
@@ -389,7 +427,7 @@ cmd_stop() {
 }
 
 usage() {
-	sed -n '2,21p' "$0"
+	sed -n '2,25p' "$0"
 }
 
 cmd="${1:-}"
@@ -398,6 +436,7 @@ case "$cmd" in
 	build) cmd_build ;;
 	deploy) cmd_deploy ;;
 	status) cmd_status ;;
+	ps) cmd_ps ;;
 	on) cmd_on ;;
 	off) cmd_off ;;
 	launch) cmd_launch ;;
