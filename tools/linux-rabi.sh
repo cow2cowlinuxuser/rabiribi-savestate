@@ -372,6 +372,26 @@ which does not survive automation"
 	# not register" for a restore that had in fact happened. This line is written
 	# while the threads are still frozen.
 	loads() { count "$ss" 'load: slot'; }
+	# Frames, which is the only evidence that the restore left something running
+	# rather than merely alive. A restore can land, resume every thread, and leave
+	# the game spinning at 100% of a core presenting nothing - the window stays
+	# up, `ps` still names a pid, no fault is logged, and a screenshot is white.
+	# Counting pid and faults called that a success for a whole batch of runs.
+	# The wrapper prints one of these every two seconds while it is presenting.
+	presents() { count "$d11" '^present: '; }
+	drawing() {
+		local was="$1" j
+		for ((j = 0; j < 24; j++)); do
+			game_running || { echo "  and then it died"; return 2; }
+			if (( $(presents) > was )); then
+				return 0
+			fi
+			sleep 0.5
+		done
+		echo "  STILL NOT PRESENTING 12 s later - the process is up and the" \
+		     "window is there, but no frames are coming out"
+		return 3
+	}
 	settled() {
 		local what="$1" was="$2" fn="$3" j got died=0
 		for ((j = 0; j < 60; j++)); do
@@ -419,6 +439,7 @@ which does not survive automation"
 			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
 			return 2
 		}
+		local frames_before=$(presents)
 		settled "restore $n" "$before" loads
 		rc=$?
 		echo "  after restore $n: pid $(pgrep -x 'rabiribi.exe' || echo GONE)"
@@ -426,6 +447,8 @@ which does not survive automation"
 			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
 			return $rc
 		fi
+		drawing "$frames_before" || return $?
+		echo "  restore $n: still presenting"
 	done
 
 	if (( $(saves) != saves_after_one )); then
