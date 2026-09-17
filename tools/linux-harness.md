@@ -61,11 +61,14 @@ Prefix `DllOverrides` native for `d3d11,dxgi,dsound,xaudio2_9,xinput1_4`
   `logs/linux-proton-baserun-partial.zip`. Same map both times, including
   `rabiribi.exe` at `00400000` (the preferred base Windows never grants).
 - One title save and repeated restores of it: `tools/linux-rabi.sh cycle 3`
-  after `launch`. Two restores hold in 10 of 10 sessions. The third hangs in
-  3 of 5: the process stays up at 100% of a core and stops presenting, which
-  is why the run waits for a `present:` line after each restore instead of
-  trusting a pid. It needs `D3D9SW_LOAD_VK`: shift plus the save key does not
+  after `launch`. It needs `D3D9SW_LOAD_VK`: shift plus the save key does not
   survive this VM's input path, so load simply never fired.
+- Exactly two restores hold. Six sessions in six: restores one and two keep
+  presenting, the third always stops. No crash - the process stays up with one
+  thread at 100% of a core, the wrapper log stops mid-frame, and the window
+  keeps showing the last frame it drew. That last part is why the run waits for
+  three `present:` lines and never looks at a screenshot: a wedged game
+  photographs as a perfectly good title screen, and a pid proves nothing.
 - That only came clean once the restore stopped rewinding regions inside a
   heap it had already decided to hold (`D3D9SW_PARTHOLD`, on by default).
   Before it, 2 of 7 sessions survived; the rest died at `ntdll+50260` writing
