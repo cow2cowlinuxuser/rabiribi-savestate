@@ -17664,6 +17664,11 @@ void savestate_soak_arm(void)
  * the same things in between - only that both runs were asked the question at
  * the same moment, which is the part that was in our power to fix.
  *
+ * 0 or unset means never. The deployed cfg writes SAVE_AT=0 as the off switch,
+ * matching LOAD_AT and QUIT_AT. Parsing 0 as frame zero took a 350 ms save on
+ * the first present of every "just playing" launch and froze the window thread
+ * before anyone asked for a savestate.
+ *
  * It returns an action rather than saving, for the same reason the soak driver
  * does: the wrapper wraps a save in ledger work, and a second call site that
  * skipped any of it would be a double free waiting to happen. */
@@ -17694,7 +17699,9 @@ static void save_at_parse(void)
 			cur = cur * 10 + (v[k] - '0');
 			any = 1;
 		} else {
-			if (any && g_save_at_n < SS_SAVE_AT_MAX)
+			/* 0 is the documented off switch, not "save on the first
+			 * present". LOAD_AT already treats <=0 as never. */
+			if (any && cur > 0 && g_save_at_n < SS_SAVE_AT_MAX)
 				g_save_at[g_save_at_n++] = cur;
 			cur = 0;
 			any = 0;
