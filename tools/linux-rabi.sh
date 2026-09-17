@@ -339,12 +339,21 @@ which does not survive automation"
 
 	# The keys are sent as single characters, which is what the cfg spells them
 	# as. A function key would need the F5 form, so pass it through as written.
+	#
+	# Nothing here is fatal. Under set -e a failing xdotool - which is what a
+	# window that has just gone away looks like - killed the whole cycle silently,
+	# so a process that died between two restores was reported as neither a
+	# restore nor a death.
 	press() {
-		xdotool windowactivate --sync "$wid"
+		if ! xdotool windowactivate --sync "$wid" 2>/dev/null; then
+			echo "  press '$1': the window is gone"
+			return 1
+		fi
 		sleep 0.3
-		xdotool keydown --window "$wid" "$1"
+		xdotool keydown --window "$wid" "$1" 2>/dev/null || return 1
 		sleep 0.12
-		xdotool keyup --window "$wid" "$1"
+		xdotool keyup --window "$wid" "$1" 2>/dev/null || true
+		return 0
 	}
 	# Counted from the logs, which are the only place that says a save or a load
 	# actually happened rather than that a key was sent. grep -c prints 0 and
@@ -386,7 +395,7 @@ which does not survive automation"
 
 	local saves_after_one rc
 	before=$(saves)
-	press "$savek"
+	press "$savek" || die "could not send the save key"
 	settled "save" "$before" saves || return $?
 	ls -lh "$GAME"/d3d9sw_slot0.bin | awk '{print "  slot:", $9, $5}'
 	# The one snapshot every restore below has to come back to. Kept so a load
@@ -400,7 +409,16 @@ which does not survive automation"
 		# Long enough that the previous restore has finished resuming. A press a
 		# fifth of a second after one landed was swallowed.
 		sleep 3
-		press "$loadk"
+		if ! game_running; then
+			echo "  restore $n: the process died before the key was sent," \
+			     "$((n - 1)) restore(s) in"
+			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
+			return 2
+		fi
+		press "$loadk" || {
+			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
+			return 2
+		}
 		settled "restore $n" "$before" loads
 		rc=$?
 		echo "  after restore $n: pid $(pgrep -x 'rabiribi.exe' || echo GONE)"
