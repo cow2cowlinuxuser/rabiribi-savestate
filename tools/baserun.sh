@@ -61,19 +61,17 @@ mkdir -p "$KEEP"
 # A leftover launch*.txt from a crashed earlier sweep would mix into the answer.
 rm -f "$KEEP"/launch*.txt
 
-# Windows LaunchOptions is -xaudio2. This VM has no sound device, so that
-# flag dies before d3d11.dll attaches; -noaudio is the playable Proton path.
-# Put -noaudio in Steam Launch Options and launch with steam://rungameid
-# (same as tools/baserun.ps1). Passing -noaudio on the exe line or as
-# steam://run/400910//-noaudio is what pops "Launch Game with custom
-# arguments" — Steam treats those as injected args, even when they match
-# the saved LaunchOptions.
+# Extra args on the exe line (or steam://run/APPID//args) pop Steam's
+# "Launch Game with custom arguments" dialog. linux-rabi.sh launches with
+# none by default; RABI_NOAUDIO=1 is the opt-in silence. Same here.
+# Match the Wine process by name, not by command line: the launcher chain
+# all carry the exe path as an argument.
 [ -x "$WRAP" ] && [ -x "$REAPER" ] && [ -x "$SLR" ] && [ -x "$PROTON" ] \
 	|| { echo "steam-launch-wrapper/reaper/proton/SLR missing" >&2; exit 1; }
 export DISPLAY="${DISPLAY:-:1}"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_ROOT"
 export STEAM_COMPAT_DATA_PATH="$COMPAT"
-export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-d3d11,dxgi,dsound,xaudio2_9,xinput1_4=n,b}"
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-d3d11,dxgi,xaudio2_9,xinput1_4=n,b}"
 ATTACH="$GAME/d3d11_sw.log"
 
 # The module table is only printed when a save is taken, so the sweep needs one.
@@ -103,12 +101,11 @@ trap restore_cfg EXIT
 # pgrep -f rabiribi.exe also matches steam-launch-wrapper / this script, so a
 # sweep would think the game was still up after QUIT_AT and then pkill itself.
 running() {
-	ps -eo args= | grep -E '[\\]rabiribi\.exe( |$)' | grep -v grep >/dev/null
+	pgrep -x 'rabiribi.exe' >/dev/null 2>&1
 }
 
 kill_game() {
-	ps -eo pid,args= | awk '/[\\]rabiribi\.exe( |$)/ && !/awk/ {print $1}' \
-		| xargs -r kill 2>/dev/null || true
+	pkill -x 'rabiribi.exe' 2>/dev/null || true
 }
 
 # A wine process that exists for a second is not a session. The first sweep
@@ -157,9 +154,13 @@ for i in $(seq 1 "$N"); do
 	printf '\n=== launch %d of %d ===\n' "$i" "$N"
 	rm -f "$LOG"
 	date +%s >"$KEEP/.t0"
-	# Official launch: LaunchOptions supplies -noaudio. Do not append it
-	# here or Steam rewrites this to steam://run/400910//-noaudio and asks.
-	steam "steam://rungameid/$APPID" >/dev/null 2>&1 &
+	# Same line as tools/linux-rabi.sh. No extra argv: that is the dialog.
+	args=()
+	[[ -n "${RABI_NOAUDIO:-}" ]] && args+=(-noaudio)
+	"$WRAP" -- "$REAPER" SteamLaunch AppId="$APPID" -- \
+		"$SLR" --verb=waitforexitandrun -- \
+		"$PROTON" waitforexitandrun "$GAME/rabiribi.exe" "${args[@]}" \
+		>/dev/null 2>&1 &
 
 	if ! wait_until_attached; then
 		echo "  never started, skipping"

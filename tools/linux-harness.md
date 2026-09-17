@@ -6,15 +6,14 @@ question is whether cross-session restore is easier under Proton.
 
 ## Steam launch
 
-- Appid `400910`, Proton Experimental, `-noaudio` in **Steam Launch Options**.
-- Start with `steam://rungameid/400910` only. `tools/baserun.sh` and
-  `tools/linux-rabi.sh launch` do that.
-- Do **not** pass `-noaudio` on the exe line and do **not** use
-  `steam://run/400910//-noaudio`. Steam rewrites that to injected extra
-  args and shows "Launch Game with custom arguments" even when Launch
-  Options already matches. That dialog has no "don't ask again".
+- Start with `steam-launch-wrapper` and **no extra exe args**
+  (`tools/linux-rabi.sh launch`, `tools/baserun.sh`). Extra args, or
+  `steam://run/400910//-noaudio`, pop "Launch Game with custom arguments".
+- Keep Steam Launch Options **empty** for that reason. `RABI_NOAUDIO=1` is
+  the opt-in silence and will re-open the dialog on Linux Steam.
 - Windows Launch Options is `-xaudio2`. This VM has no `/dev/snd`; that
-  flag exits before `d3d11.dll` attaches.
+  flag exits before `d3d11.dll` attaches. Default launch leaves audio to
+  Wine's builtin dsound → winepulse.
 
 ## Scripts
 
