@@ -4410,7 +4410,8 @@ static const char *const g_knobs[] = {
 	"D3D9SW_KEY_EVERY",	  "D3D9SW_KEY_HOLD",
 	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK",
 	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT",
-	"D3D9SW_LOAD_AT"
+	"D3D9SW_LOAD_AT",
+	"D3D9SW_SAVE_VK",	  "D3D9SW_LOAD_VK"
 };
 
 /* Read every knob into the memo before the environment is closed for business.
@@ -16801,6 +16802,119 @@ int savestate_key_edge(int vk)
 int savestate_key_held(int vk)
 {
 	return ours_has_focus() && (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
+}
+
+/* A key name a person can write in the config, turned into a virtual-key code.
+ *
+ * Three forms, because anything looser cannot be read back unambiguously. A
+ * bare "1" is the digit key, not virtual-key 1 - VK_LBUTTON is 1, and a config
+ * that silently bound save to the left mouse button would be a very bad
+ * afternoon. So a single character is always that character's key, a leading
+ * 0x is the code itself for anything without a name, and F followed by digits
+ * is the function row.
+ *
+ * Returns def for anything it does not recognise rather than guessing, and the
+ * caller logs what it resolved, so a typo shows up as "still on F5" in the
+ * session header instead of as a key that does nothing. */
+static int vk_parse(const char *s, int n, int def)
+{
+	int i, v = 0;
+
+	if (n <= 0)
+		return def;
+	if (n == 1) {
+		char c = s[0];
+
+		if (c >= 'a' && c <= 'z')
+			c = (char)(c - 'a' + 'A');
+		/* Digits and letters are their own virtual-key codes; nothing else
+		 * on a US layout is, so punctuation has to go through 0x. */
+		if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z'))
+			return (int)(unsigned char)c;
+		return def;
+	}
+	if (n > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+		for (i = 2; i < n; i++) {
+			char c = s[i];
+
+			if (c >= '0' && c <= '9')
+				v = v * 16 + (c - '0');
+			else if (c >= 'a' && c <= 'f')
+				v = v * 16 + (c - 'a' + 10);
+			else if (c >= 'A' && c <= 'F')
+				v = v * 16 + (c - 'A' + 10);
+			else
+				return def;
+		}
+		return (v > 0 && v < 256) ? v : def;
+	}
+	if (s[0] == 'F' || s[0] == 'f') {
+		for (i = 1; i < n; i++) {
+			if (s[i] < '0' || s[i] > '9')
+				return def;
+			v = v * 10 + (s[i] - '0');
+		}
+		if (v >= 1 && v <= 24)
+			return VK_F1 + v - 1;
+	}
+	return def;
+}
+
+static int g_vk_save, g_vk_load;
+
+/* Resolved once and never re-read. A binding that changed mid-session would
+ * mean the key that saved a slot is not the key that restores it, and the log
+ * would describe a session nobody ran. */
+static void hotkeys_resolve(void)
+{
+	static int done, said;
+	char v[16];
+
+	if (!done) {
+		DWORD n;
+
+		done = 1;
+		n = ss_getenv("D3D9SW_SAVE_VK", v, sizeof(v));
+		g_vk_save = vk_parse(v, (n < sizeof(v)) ? (int)n : 0, VK_F5);
+		n = ss_getenv("D3D9SW_LOAD_VK", v, sizeof(v));
+		g_vk_load = vk_parse(v, (n < sizeof(v)) ? (int)n : 0, 0);
+	}
+	/* Deferred rather than printed above, because this runs every frame from
+	 * the first one and the log does not exist until the control block does.
+	 * Standing the block up from a hotkey poll would allocate it in every
+	 * session whether or not anything ever asked for a save. */
+	if (!said && g_ctl) {
+		said = 1;
+		if (g_vk_load)
+			ss_log("hotkeys: save on %#x, load on %#x - separate keys, so "
+			       "no modifier has to be held across a second press\n",
+			       g_vk_save, g_vk_load);
+		else
+			ss_log("hotkeys: save on %#x, load on shift+%#x. Set "
+			       "D3D9SW_LOAD_VK to give load a key of its own, which is "
+			       "what an automated run needs\n",
+			       g_vk_save, g_vk_save);
+	}
+}
+
+int savestate_hotkey(int slot)
+{
+	hotkeys_resolve();
+	if (slot < 0 || slot >= SAVESTATE_SLOTS)
+		return SS_HOTKEY_NONE;
+	/* Load first. With separate keys the two are different keys and the order
+	 * cannot matter; with one key and a modifier it would, and checking load
+	 * first keeps the two paths reading the same way. */
+	if (g_vk_load) {
+		if (savestate_key_edge(g_vk_load + slot))
+			return SS_HOTKEY_LOAD;
+		if (savestate_key_edge(g_vk_save + slot))
+			return SS_HOTKEY_SAVE;
+		return SS_HOTKEY_NONE;
+	}
+	if (savestate_key_edge(g_vk_save + slot))
+		return savestate_key_held(VK_SHIFT) ? SS_HOTKEY_LOAD : SS_HOTKEY_SAVE;
+	return SS_HOTKEY_NONE;
 }
 
 void savestate_probe_census(void)

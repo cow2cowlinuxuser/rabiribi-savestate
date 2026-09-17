@@ -1510,10 +1510,15 @@ BOOL WINAPI wglSwapBuffers(HDC hdc)
 	size_from_dc(c, &w, &h);
 	ensure_fb(c, w, h);
 	savestate_guard();
+	/* Resolved centrally, so this backend answers to the same keys as the
+	 * others and picks up D3D9SW_LOAD_VK. Also off GetAsyncKeyState's low bit,
+	 * which whoever polls first consumes - here that is usually the game. */
 	for (k = 0; k < SAVESTATE_SLOTS; k++) {
-		if (!(GetAsyncKeyState(VK_F5 + k) & 1))
+		int hk = savestate_hotkey(k);
+
+		if (hk == SS_HOTKEY_NONE)
 			continue;
-		if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+		if (hk == SS_HOTKEY_LOAD) {
 			if (savestate_load(k))
 				gl_log("savestate restored slot %d in %.1f ms", k,
 				       savestate_last_ms());
