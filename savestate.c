@@ -12424,6 +12424,8 @@ static void delta_scan(Slot *s)
 	g_dl_have = 1;
 }
 
+static void keys_log(const char *when);
+
 static int do_save(int slotno)
 {
 	Slot *s = &g_ctl->slots[slotno];
@@ -12494,6 +12496,7 @@ static int do_save(int slotno)
 	ss_phase("save: collected %d thread(s), suspending\n", g_ctl->nids);
 	suspend_all();
 	ss_phase("save: suspend_all returned\n");
+	keys_log("at save, game frozen");
 	/* Let go and look again while anything is inside the JIT. Threads must be
 	 * suspended to read their contexts, so each attempt is a full suspend, and
 	 * the release has to be real - a thread cannot leave the JIT while held.
@@ -14011,6 +14014,7 @@ static void clobber_tick(void)
  * buffer back to save time while DirectInput stays in the present, so a Left
  * that was down then and is up now never generates a KEYUP. Called after
  * resume so the dinput thread, which we leave running, can see the release. */
+static void keys_log(const char *when);
 static void keys_unstick(int noisy);
 
 static int do_load(int slotno)
@@ -15331,7 +15335,9 @@ static int do_load(int slotno)
 	 * may never pick up. Left is the walk key; a leftover down walks the
 	 * character off the snapshot. XInput is not this - pads are already
 	 * pinned absent. */
+	keys_log("after resume, before unstick");
 	keys_unstick(1);
+	keys_log("after unstick");
 	/* After the threads are running again, because the comparison is a read of
 	 * a few hundred megabytes and holding every thread suspended through it
 	 * would charge the restore for a diagnostic. A region the game rewrites in
@@ -17764,6 +17770,35 @@ static void key_send(WORD vk, int up)
  * skipping those would leave the bug in place. A player who restores while
  * actually holding Left re-asserts it on the next poll. Off with
  * D3D9SW_KEY_UNSTICK=0. */
+static void keys_log(const char *when)
+{
+	static const char hex[] = "0123456789ABCDEF";
+	int vk, n = 0, left, extleft;
+	char buf[196];
+	int o = 0;
+
+	buf[0] = 0;
+	for (vk = 8; vk < 256; vk++) {
+		if (!(GetAsyncKeyState(vk) & 0x8000))
+			continue;
+		n++;
+		if (o >= (int)sizeof(buf) - 4)
+			continue;
+		buf[o++] = ' ';
+		buf[o++] = hex[(vk >> 4) & 15];
+		buf[o++] = hex[vk & 15];
+		buf[o] = 0;
+	}
+	left = (GetAsyncKeyState(VK_LEFT) & 0x8000) ? 1 : 0;
+	/* Numpad 4 is the non-extended scan of Left. If only this is down, a
+	 * KEYUP without KEYEVENTF_EXTENDEDKEY "released" the wrong key. */
+	extleft = (GetAsyncKeyState(VK_NUMPAD4) & 0x8000) ? 1 : 0;
+	ss_log("  keys %s: GetAsyncKeyState %d down [%s] Left=%s Numpad4=%s "
+	       "(user32/wineserver, not dinput device_state)\n",
+	       when, n, n ? buf : " none", left ? "DOWN" : "up",
+	       extleft ? "DOWN" : "up");
+}
+
 static void keys_unstick(int noisy)
 {
 	static const WORD always[] = {
