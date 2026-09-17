@@ -1820,6 +1820,7 @@ static volatile LONG g_frames_since_load = -1;
 static volatile LONG g_keys_watch;
 static DWORD g_keys_hitch_until;
 static unsigned g_keys_letgo;
+static int g_keys_idle_said;
 
 /* One fault reports at a time.
  *
@@ -17855,21 +17856,22 @@ static void keys_unstick(int noisy)
 		       poked, held);
 }
 
-/* Extra KEYUP on the falling edge, every present. DirectInput8 raw input can
- * miss the real keyup (especially across a freeze) while GetAsyncKeyState
- * already went up. One synthetic release on that edge is what stops the walk
- * without touching a key the player is still holding.
- *
- * After a hitch it is time-based, not edge-based. The copy takes 200-300 ms,
+/* After a freeze it is time-based, not edge-based. The copy takes 200-300 ms,
  * which is many frames and inside X auto-repeat (500 ms delay, 20 Hz). The
  * window thread is frozen, so it never polls the KEYUP; when it wakes, a
  * queued repeat KEYDOWN can arrive after the release and Left stays live.
  * For one second of real time, keys that went up are remembered and a
- * repeat that puts them down again is KEYUPed. */
+ * repeat that puts them down again is KEYUPed.
+ *
+ * Idle play must not reach SendInput. This used to KEYUP Left on every falling
+ * edge of every present, with no save involved, which is the confounder of
+ * "just playing": the savestate engine was writing the keyboard the game was
+ * trying to read. Hotkeys still poll 1/2/F-keys; they do not inject. */
 static void keys_hitch_begin(void)
 {
 	g_keys_hitch_until = GetTickCount() + 1000;
 	g_keys_letgo = 0;
+	g_keys_idle_said = 0;
 	ss_log("  keys: hitch resync for 1000 ms of real time, so a KEYUP the "
 	       "game could not poll during the freeze is not eaten by auto-repeat\n");
 }
@@ -17880,25 +17882,32 @@ static void keys_edge_sync(void)
 	static unsigned was;
 	static int repeat_log;
 	unsigned now = 0;
-	int i, down, hitch;
+	int i, down;
 
 	if (!key_unstick_on())
 		return;
-	hitch = (int)(GetTickCount() < g_keys_hitch_until);
-	if (!hitch)
+	/* Ordinary presents own the keyboard. Injection is only the 1 s after
+	 * resume_all, when the freeze has already upset polling. */
+	if (GetTickCount() >= g_keys_hitch_until) {
+		if (!g_keys_idle_said && g_ctl) {
+			ss_log("  keys: ordinary play, no SendInput until the next freeze\n");
+			g_keys_idle_said = 1;
+		}
+		was = 0;
 		repeat_log = 0;
+		return;
+	}
 	for (i = 0; move[i]; i++) {
 		down = (GetAsyncKeyState(move[i]) & 0x8000) ? 1 : 0;
 		if (down)
 			now |= 1u << i;
 		else if (was & (1u << i)) {
 			key_send(move[i], 1);
-			if (hitch)
-				g_keys_letgo |= 1u << i;
+			g_keys_letgo |= 1u << i;
 		}
-		if (hitch && !down)
+		if (!down)
 			key_send(move[i], 1);
-		if (hitch && (g_keys_letgo & (1u << i)) && down) {
+		if ((g_keys_letgo & (1u << i)) && down) {
 			key_send(move[i], 1);
 			if (!repeat_log) {
 				ss_log("  keys: Left/arrow went down again inside the hitch "
@@ -18096,6 +18105,8 @@ int savestate_soak_action(void)
 		keys_log("on a later present");
 		keys_unstick(n == 5);
 	}
+	/* No-op on ordinary presents. SendInput only inside the hitch window
+	 * that keys_hitch_begin armed after save/load. */
 	keys_edge_sync();
 	key_at_tick();
 	/* Beside the input tick and for the same reason: a run that ends on a

@@ -72,9 +72,11 @@ Prefix `DllOverrides` native for `d3d11,dxgi,dsound,xaudio2_9,xinput1_4`
   photographs as a perfectly good title screen, and a pid proves nothing.
 - A stuck Left is time-based. The save copy is 200-300 ms, longer than a
   frame, so the game never polls the KEYUP. X auto-repeat can then restick
-  Left. `D3D9SW_KEY_UNSTICK=1` resyncs for 1 s of real time after freeze:
-  KEYUP idle arrows, and KEYUP a Left that was released then goes down
-  again (stale repeat). A key still held stays held.
+  Left. `D3D9SW_KEY_UNSTICK=1` resyncs for 1 s of real time after freeze
+  only: KEYUP idle arrows, and KEYUP a Left that was released then goes
+  down again (stale repeat). A key still held stays held. Ordinary play
+  does not SendInput; an earlier build KEYUPed Left on every falling edge
+  of every present, which is what made "just playing" look stuck.
 - That only came clean once the restore stopped rewinding regions inside a
   heap it had already decided to hold (`D3D9SW_PARTHOLD`, on by default).
   Before it, 2 of 7 sessions survived; the rest died at `ntdll+50260` writing
