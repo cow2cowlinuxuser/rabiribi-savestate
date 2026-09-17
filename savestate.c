@@ -4410,6 +4410,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_ENTS",		  "D3D9SW_CLOCKPROBE",
 	"D3D9SW_KEY_EVERY",	  "D3D9SW_KEY_HOLD",
 	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK",
+	"D3D9SW_KEY_UNSTICK",
 	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT",
 	"D3D9SW_LOAD_AT",
 	"D3D9SW_SAVE_VK",	  "D3D9SW_LOAD_VK"
@@ -14006,6 +14007,12 @@ static void clobber_tick(void)
 		clobber_check();
 }
 
+/* Defined with the scripted-input helpers. A restore puts the game's keyboard
+ * buffer back to save time while DirectInput stays in the present, so a Left
+ * that was down then and is up now never generates a KEYUP. Called after
+ * resume so the dinput thread, which we leave running, can see the release. */
+static void keys_unstick(int noisy);
+
 static int do_load(int slotno)
 {
 	Slot *s = &g_ctl->slots[slotno];
@@ -15319,6 +15326,12 @@ static int do_load(int slotno)
 	dsh_play();
 	xa2_sw_resume();
 	ss_log("  resume: done, all threads runnable\n");
+	/* After resume, not before: DirectInput's worker is one of the threads
+	 * we leave running, and a KEYUP queued while it is frozen is a KEYUP it
+	 * may never pick up. Left is the walk key; a leftover down walks the
+	 * character off the snapshot. XInput is not this - pads are already
+	 * pinned absent. */
+	keys_unstick(1);
 	/* After the threads are running again, because the comparison is a read of
 	 * a few hundred megabytes and holding every thread suspended through it
 	 * would charge the restore for a diagnostic. A region the game rewrites in
@@ -17693,6 +17706,32 @@ static void save_at_parse(void)
  * focus is lost, which is worth knowing rather than hiding - the log line says
  * how many presses were sent, so two runs that disagree there explain
  * themselves. */
+static int vk_extended(WORD vk)
+{
+	switch (vk) {
+	case VK_LEFT:
+	case VK_RIGHT:
+	case VK_UP:
+	case VK_DOWN:
+	case VK_HOME:
+	case VK_END:
+	case VK_INSERT:
+	case VK_DELETE:
+	case VK_PRIOR:
+	case VK_NEXT:
+	case VK_RCONTROL:
+	case VK_RMENU:
+	case VK_NUMLOCK:
+	case VK_DIVIDE:
+	case VK_LWIN:
+	case VK_RWIN:
+	case VK_APPS:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static void key_send(WORD vk, int up)
 {
 	INPUT in;
@@ -17701,8 +17740,80 @@ static void key_send(WORD vk, int up)
 	in.type = INPUT_KEYBOARD;
 	in.ki.wVk = vk;
 	in.ki.wScan = (WORD)MapVirtualKeyA(vk, 0 /* MAPVK_VK_TO_VSC */);
-	in.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+	/* Arrow keys are extended. A KEYUP of Left without this flag is a KEYUP
+	 * of numpad 4, and DirectInput keeps the real Left down. That is exactly
+	 * the stuck walk the in-game test was seeing. */
+	in.ki.dwFlags = (up ? KEYEVENTF_KEYUP : 0) |
+			(vk_extended(vk) ? KEYEVENTF_EXTENDEDKEY : 0);
 	SendInput(1, &in, sizeof(in));
+}
+
+/* DirectInput does not look at the window queue, and a restore puts the game's
+ * copy of the keyboard back to whatever was held at save time. dinput.dll
+ * itself is held in the present on purpose (rewinding it killed a session), so
+ * a key that was down then and is up now never generates a KEYUP - the game
+ * keeps walking. Left is the one that moves the character.
+ *
+ * This is not the XInput pad. D3D9SW_XINPUT=0 already answers
+ * ERROR_DEVICE_NOT_CONNECTED for every slot, so a leftover D-pad cannot be
+ * coming from there. The leftover is the keyboard, plus anything Wine/XTEST
+ * still has down from a scripted keydown whose keyup never arrived.
+ *
+ * Always release, including keys GetAsyncKeyState still reports down: a stuck
+ * X11 Left looks "physically held" even though nobody is holding it, and
+ * skipping those would leave the bug in place. A player who restores while
+ * actually holding Left re-asserts it on the next poll. Off with
+ * D3D9SW_KEY_UNSTICK=0. */
+static void keys_unstick(int noisy)
+{
+	static const WORD always[] = {
+		VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN,
+		'A', 'D', 'W', 'S',
+		VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
+		VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
+		VK_MENU, VK_LMENU, VK_RMENU,
+		VK_SPACE, VK_RETURN, VK_ESCAPE, VK_TAB,
+		VK_F5, VK_F6, VK_F7, VK_F8, VK_F9,
+		'1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+		VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD8, VK_NUMPAD2,
+		0
+	};
+	char v[8];
+	DWORD nenv;
+	int i, vk, n = 0, listed;
+	unsigned char down[256];
+
+	nenv = ss_getenv("D3D9SW_KEY_UNSTICK", v, sizeof(v));
+	if (nenv > 0 && nenv < sizeof(v) && v[0] == '0')
+		return;
+
+	memset(down, 0, sizeof(down));
+	for (vk = 8; vk < 256; vk++) {
+		if (GetAsyncKeyState(vk) & 0x8000) {
+			down[vk] = 1;
+			n++;
+		}
+	}
+	for (i = 0; always[i]; i++)
+		key_send(always[i], 1);
+	for (vk = 8; vk < 256; vk++) {
+		if (!down[vk])
+			continue;
+		listed = 0;
+		for (i = 0; always[i]; i++) {
+			if (always[i] == (WORD)vk) {
+				listed = 1;
+				break;
+			}
+		}
+		if (!listed)
+			key_send((WORD)vk, 1);
+	}
+	if (noisy || n)
+		ss_log("  keys: released leftover input after restore (%d virtual "
+		       "key(s) were still down, plus movement/modifiers) so a stuck "
+		       "Left cannot walk the character off the snapshot\n",
+		       n);
 }
 
 static long g_key_sent;
@@ -17875,6 +17986,12 @@ int savestate_soak_action(void)
 	 * is about making two runs identical, and a run that skipped its presses
 	 * because a pointer was not ready yet would be a run that silently is
 	 * not comparable. */
+	/* And again on the first presents after a restore. The helper already
+	 * released from do_load, but a KEYUP can land before DirectInput has
+	 * re-acquired the device, and the walk key would stick for the rest of
+	 * the session. g_frames_since_load is -1 until the first restore. */
+	if (g_frames_since_load >= 0 && g_frames_since_load < 3)
+		keys_unstick(0);
 	key_at_tick();
 	/* Beside the input tick and for the same reason: a run that ends on a
 	 * different frame is not comparable, whether or not the control block

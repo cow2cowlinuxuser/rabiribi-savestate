@@ -145,7 +145,8 @@ cmd_deploy() {
 	cp -f "$ROOT/examples/rabiribi/d3d9_sw.cfg" "$GAME/d3d9_sw.cfg"
 	# CPU-only restore: software raster, 4 threads on this class of box, pad pinned.
 	set_knobs "$GAME/d3d9_sw.cfg" \
-		D3D11SW_GPU=0 D3D9SW_XINPUT=0 D3D9SW_DIFFWRITE=1 D3D9SW_ENTS=1 \
+		D3D11SW_GPU=0 D3D9SW_XINPUT=0 D3D9SW_KEY_UNSTICK=1 \
+		D3D9SW_DIFFWRITE=1 D3D9SW_ENTS=1 \
 		D3D9SW_SLOTFILE=1 D3D9SW_SAVE_AT=0 D3D9SW_LOAD_AT=0 D3D9SW_QUIT_AT=0
 	set_knobs "$GAME/d3d11_sw.cfg" D3D11SW_GPU=0
 	pin_dll_overrides
@@ -306,6 +307,20 @@ cmd_launch() {
 	launch_game
 }
 
+# XTEST keyup, not --window. DirectInput and Wine ignore XSendEvent for
+# keyboard, and a --window keyup that never arrives leaves the key down in
+# the X keymap. Left is the walk key; a leftover down walks the character
+# off a restore. Not the XInput pad - that is pinned absent.
+unstick_x11() {
+	export DISPLAY="${DISPLAY:-:1}"
+	command -v xdotool >/dev/null 2>&1 || return 0
+	xdotool keyup --clearmodifiers \
+		Left Right Up Down \
+		Shift_L Shift_R Control_L Control_R Alt_L \
+		1 2 Return space \
+		2>/dev/null || true
+}
+
 # One save on the title screen, then N restores of that one snapshot.
 #
 # This is the thing shift could not do. D3D9SW_LOAD_VK gives load a key of its
@@ -336,6 +351,7 @@ which does not survive automation"
 	[[ -n "$wid" ]] || die "no Rabi-Ribi window"
 	pid=$(pgrep -x 'rabiribi.exe')
 	echo "cycle: pid $pid, save on '$savek', load on '$loadk', $want restore(s)"
+	unstick_x11
 
 	# The keys are sent as single characters, which is what the cfg spells them
 	# as. A function key would need the F5 form, so pass it through as written.
@@ -353,6 +369,11 @@ which does not survive automation"
 		xdotool keydown --window "$wid" "$1" 2>/dev/null || return 1
 		sleep 0.12
 		xdotool keyup --window "$wid" "$1" 2>/dev/null || true
+		# --window is XSendEvent. Wine's DirectInput path sees XTEST, so a
+		# window-targeted keyup can leave the key down. Release via XTEST,
+		# including Left, so a leftover walk key cannot outlive the press.
+		xdotool keyup --clearmodifiers "$1" 2>/dev/null || true
+		unstick_x11
 		return 0
 	}
 	# Counted from the logs, which are the only place that says a save or a load
