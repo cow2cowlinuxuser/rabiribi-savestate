@@ -70,12 +70,11 @@ Prefix `DllOverrides` native for `d3d11,dxgi,dsound,xaudio2_9,xinput1_4`
   keeps showing the last frame it drew. That last part is why the run waits for
   three `present:` lines and never looks at a screenshot: a wedged game
   photographs as a perfectly good title screen, and a pid proves nothing.
-- A stuck Left is the keyboard, not the pad. Proton will not freeze
-  `dinput.dll`. `GetAsyncKeyState` is clean one present after resume.
-  Sending KEYUP for Left **while it is still held** was the "stays live
-  after holding" bug: X11 stayed down, user32 went up, the walk continued.
-  `D3D9SW_KEY_UNSTICK=1` now only KEYUPs movement keys user32 already
-  reports up, plus a falling-edge KEYUP so dinput sees the real release.
+- A stuck Left is time-based. The save copy is 200-300 ms, longer than a
+  frame, so the game never polls the KEYUP. X auto-repeat can then restick
+  Left. `D3D9SW_KEY_UNSTICK=1` resyncs for 1 s of real time after freeze:
+  KEYUP idle arrows, and KEYUP a Left that was released then goes down
+  again (stale repeat). A key still held stays held.
 - That only came clean once the restore stopped rewinding regions inside a
   heap it had already decided to hold (`D3D9SW_PARTHOLD`, on by default).
   Before it, 2 of 7 sessions survived; the rest died at `ntdll+50260` writing
