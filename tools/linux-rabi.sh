@@ -379,17 +379,23 @@ which does not survive automation"
 	# Counting pid and faults called that a success for a whole batch of runs.
 	# The wrapper prints one of these every two seconds while it is presenting.
 	presents() { count "$d11" '^present: '; }
+	# Three of those lines, not one. A restore that is about to wedge still
+	# presents for about two seconds first, which is exactly one line, so a
+	# single-line check passed every hung run in the batch that produced these
+	# numbers. Do not reach for a screenshot instead: X keeps the last frame a
+	# window drew, so a wedged game photographs as a perfectly good title screen.
 	drawing() {
-		local was="$1" j
-		for ((j = 0; j < 24; j++)); do
+		local was="$1" want=$((was + 3)) j
+		for ((j = 0; j < 40; j++)); do
 			game_running || { echo "  and then it died"; return 2; }
-			if (( $(presents) > was )); then
+			if (( $(presents) >= want )); then
 				return 0
 			fi
 			sleep 0.5
 		done
-		echo "  STILL NOT PRESENTING 12 s later - the process is up and the" \
-		     "window is there, but no frames are coming out"
+		echo "  NOT PRESENTING - $(( $(presents) - was )) frame report(s) in 20 s" \
+		     "and then nothing. The process is up, one thread is spinning, and the" \
+		     "window is showing the last frame it managed"
 		return 3
 	}
 	settled() {
