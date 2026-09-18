@@ -1818,6 +1818,8 @@ static void cs_keep_hooked(void)
 static volatile LONG g_faults;
 static volatile LONG g_frames_since_load = -1;
 static volatile LONG g_keys_watch;
+static DWORD g_keys_hitch_until;
+static unsigned g_keys_letgo;
 
 /* One fault reports at a time.
  *
@@ -12483,6 +12485,7 @@ static void delta_scan(Slot *s)
 
 static void keys_log(const char *when);
 static void keys_unstick(int noisy);
+static void keys_hitch_begin(void);
 
 static int do_save(int slotno)
 {
@@ -13064,11 +13067,11 @@ done:
 		resume_all(0);
 		keys_log("after save resume");
 		/* Do not KEYUP here. GetAsyncKeyState is still the freeze-time
-		 * bitmap, so Left looks held even when the player already
-		 * released it, and a KEYUP of a Left that is actually still
-		 * down desyncs Wine: X11 stays down, user32 goes up, and the
-		 * walk remains live. Later presents poke leftover dinput
-		 * only for keys that user32 now reports up. */
+		 * bitmap. A 200-300 ms copy is longer than a frame and sits in
+		 * X's auto-repeat window, so the game never polls the real
+		 * KEYUP and a delayed repeat can restick Left. Real-time hitch
+		 * resync on later presents handles that. */
+		keys_hitch_begin();
 		g_keys_watch = 5;
 		dsh_play();
 		xa2_sw_resume();
@@ -15409,9 +15412,7 @@ static int do_load(int slotno)
 	 * character off the snapshot. XInput is not this - pads are already
 	 * pinned absent. */
 	keys_log("after resume, before unstick");
-	/* Not here: a KEYUP of Left while it is still held is why the walk
-	 * stayed live after holding. g_keys_watch pokes dinput on later
-	 * presents, and only for keys user32 says are up. */
+	keys_hitch_begin();
 	g_keys_watch = 5;
 	/* After the threads are running again, because the comparison is a read of
 	 * a few hundred megabytes and holding every thread suspended through it
@@ -17927,22 +17928,55 @@ static void keys_unstick(int noisy)
 /* Extra KEYUP on the falling edge, every present. DirectInput8 raw input can
  * miss the real keyup (especially across a freeze) while GetAsyncKeyState
  * already went up. One synthetic release on that edge is what stops the walk
- * without touching a key the player is still holding. */
+ * without touching a key the player is still holding.
+ *
+ * After a hitch it is time-based, not edge-based. The copy takes 200-300 ms,
+ * which is many frames and inside X auto-repeat (500 ms delay, 20 Hz). The
+ * window thread is frozen, so it never polls the KEYUP; when it wakes, a
+ * queued repeat KEYDOWN can arrive after the release and Left stays live.
+ * For one second of real time, keys that went up are remembered and a
+ * repeat that puts them down again is KEYUPed. */
+static void keys_hitch_begin(void)
+{
+	g_keys_hitch_until = GetTickCount() + 1000;
+	g_keys_letgo = 0;
+	ss_log("  keys: hitch resync for 1000 ms of real time, so a KEYUP the "
+	       "game could not poll during the freeze is not eaten by auto-repeat\n");
+}
+
 static void keys_edge_sync(void)
 {
 	static const WORD move[] = { VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, 0 };
 	static unsigned was;
+	static int repeat_log;
 	unsigned now = 0;
-	int i, down;
+	int i, down, hitch;
 
 	if (!key_unstick_on())
 		return;
+	hitch = (int)(GetTickCount() < g_keys_hitch_until);
+	if (!hitch)
+		repeat_log = 0;
 	for (i = 0; move[i]; i++) {
 		down = (GetAsyncKeyState(move[i]) & 0x8000) ? 1 : 0;
 		if (down)
 			now |= 1u << i;
-		else if (was & (1u << i))
+		else if (was & (1u << i)) {
 			key_send(move[i], 1);
+			if (hitch)
+				g_keys_letgo |= 1u << i;
+		}
+		if (hitch && !down)
+			key_send(move[i], 1);
+		if (hitch && (g_keys_letgo & (1u << i)) && down) {
+			key_send(move[i], 1);
+			if (!repeat_log) {
+				ss_log("  keys: Left/arrow went down again inside the hitch "
+				       "window with no new press - auto-repeat after a freeze "
+				       "the game did not poll, KEYUP injected\n");
+				repeat_log = 1;
+			}
+		}
 	}
 	was = now;
 }
