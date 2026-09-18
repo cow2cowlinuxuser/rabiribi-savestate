@@ -17883,14 +17883,24 @@ static void keys_log(const char *when)
 	       extleft ? "DOWN" : "up");
 }
 
+/* Off unless asked for. The stuck Left was only ever seen on the cloud VM and
+ * under WSL2, both of which are driven by synthesised input - a scripted
+ * XTEST keydown whose keyup never arrives looks exactly like a key someone is
+ * holding. The native laptop does not stick, and there the injected input that
+ * reached the wrapper at all was evemu through uinput, which delivers its own
+ * release. Windows never stuck either, not even at 400 ms frames.
+ *
+ * So this releases keys to work around an input harness, not around Wine, and
+ * it does so by KEYUPing keys GetAsyncKeyState still reports down - which on a
+ * machine that does not have the bug takes the key away from a player who is
+ * genuinely holding it. Wrong default for every host that is not a scripted
+ * VM. D3D9SW_KEY_UNSTICK=1 turns it back on for those. */
 static int key_unstick_on(void)
 {
 	char v[8];
 	DWORD n = ss_getenv("D3D9SW_KEY_UNSTICK", v, sizeof(v));
 
-	if (n > 0 && n < sizeof(v) && v[0] == '0')
-		return 0;
-	return 1;
+	return n > 0 && n < sizeof(v) && v[0] != '0';
 }
 
 static void keys_unstick(int noisy)
