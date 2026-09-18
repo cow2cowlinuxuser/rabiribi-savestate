@@ -10890,6 +10890,78 @@ static int exclskip_mode(void)
 	return cached;
 }
 
+/* Live allocation that contains `base`. Walk sibling VAD runs that share
+ * AllocationBase so coverage is the whole reservation, not one VirtualQuery
+ * slice. A later run in the same allocation can be MEM_RESERVE; it still
+ * belongs to this base. */
+static int live_alloc_extent(uintptr_t base, uintptr_t *alloc_base,
+			     uintptr_t *alloc_end, DWORD *type)
+{
+	MEMORY_BASIC_INFORMATION mbi, q;
+	uintptr_t p, end, next;
+
+	if (VirtualQuery((LPCVOID)base, &mbi, sizeof(mbi)) != sizeof(mbi) ||
+	    mbi.State != MEM_COMMIT)
+		return 0;
+	p = (uintptr_t)mbi.AllocationBase;
+	end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+	while (VirtualQuery((LPCVOID)end, &q, sizeof(q)) == sizeof(q)) {
+		if ((uintptr_t)q.AllocationBase != p)
+			break;
+		next = (uintptr_t)q.BaseAddress + q.RegionSize;
+		if (next <= end)
+			break;
+		end = next;
+	}
+	if (alloc_base)
+		*alloc_base = p;
+	if (alloc_end)
+		*alloc_end = end;
+	if (type)
+		*type = mbi.Type;
+	return 1;
+}
+
+static int region_alloc_mismatch(const Region *r, const MEMORY_BASIC_INFORMATION *mbi)
+{
+	return mbi->Type != r->type ||
+	       (uintptr_t)mbi->AllocationBase != r->alloc_base;
+}
+
+/* If the live allocation still covers the saved range, restore in place even
+ * when AllocationBase moved. Otherwise this is the belongs-elsewhere class:
+ * skip that region and copy the rest, rather than refusing the whole load. */
+static int region_still_ours(const Region *r)
+{
+	uintptr_t live_base = 0, live_end = 0;
+	DWORD type = 0;
+
+	if (!r || !r->size)
+		return 0;
+	if (!live_alloc_extent(r->base, &live_base, &live_end, &type))
+		return 0;
+	if (type == r->type && live_base == r->alloc_base)
+		return 1;
+	return live_base <= r->base && live_end >= r->base + r->size;
+}
+
+/* Write-loop counterpart of the restorable-region skips: live stacks/TEBs,
+ * and belongs-elsewhere ranges the live allocation does not cover. */
+static int region_write_skipped(const Region *r)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+
+	if (!r)
+		return 1;
+	if (region_excluded(r->base, r->size))
+		return 1;
+	if (VirtualQuery((LPCVOID)r->base, &mbi, sizeof(mbi)) == sizeof(mbi) &&
+	    mbi.State == MEM_COMMIT && region_alloc_mismatch(r, &mbi) &&
+	    !region_still_ours(r))
+		return 1;
+	return 0;
+}
+
 #define SS_WATCH_MAX 8
 static uintptr_t g_watch_at[SS_WATCH_MAX];
 static int g_watch_at_n = -1;
@@ -13996,7 +14068,7 @@ static int do_load(int slotno)
 	Window w;
 	unsigned long long pos = 0;
 	int i, j, restored = 0, skipped = 0, tls_done = 0, blocked = 0;
-	int skipped_excl = 0;
+	int skipped_excl = 0, skipped_belong = 0;
 	int handskip = 0, handscrib = 0;
 
 	/* Only when there is nothing in memory, so a session that took its own save
@@ -14242,15 +14314,19 @@ static int do_load(int slotno)
 		 * the same address. */
 		if (VirtualQuery((LPCVOID)base, &mbi, sizeof(mbi)) == sizeof(mbi) &&
 		    mbi.State == MEM_COMMIT) {
-			if (mbi.Type != s->regs[i].type ||
-			    (uintptr_t)mbi.AllocationBase != s->regs[i].alloc_base) {
+			if (region_alloc_mismatch(&s->regs[i], &mbi)) {
 				ss_log("  region %p+%lx now belongs elsewhere: "
 				       "alloc %p vs %p, type %lx vs %lx\n",
 				       (void *)base, (unsigned long)size, mbi.AllocationBase,
 				       (void *)s->regs[i].alloc_base, (unsigned long)mbi.Type,
 				       (unsigned long)s->regs[i].type);
-				skipped++;
-				continue;
+				/* Same belongs-elsewhere class, not a new veto. If the
+				 * live allocation still covers the saved range, restore
+				 * in place; otherwise skip this region and copy the rest. */
+				if (!region_still_ours(&s->regs[i])) {
+					skipped_belong++;
+					continue;
+				}
 			}
 			/* Belongs to us and starts committed, but the run that
 			 * VirtualQuery described may stop short of the region. Only a
@@ -14425,6 +14501,11 @@ static int do_load(int slotno)
 			       "at the save. The restore goes ahead without them\n",
 			       skipped_excl);
 	}
+	if (skipped_belong)
+		ss_log("  %d region(s) skipped because they now belong elsewhere - "
+		       "the live allocation does not cover the saved range, so this "
+		       "slice stays in the present and the rest of the copy runs\n",
+		       skipped_belong);
 	if (skipped) {
 		ss_log("load: refused, %d of %d regions unrestorable\n", skipped, s->nregs);
 		resume_all(0);
@@ -14472,6 +14553,11 @@ static int do_load(int slotno)
 				int r;
 
 				seen += size;
+				if (region_write_skipped(&s->regs[i])) {
+					unchecked++;
+					off += size;
+					continue;
+				}
 				/* Same reason the verify pass does this: a region saved
 				 * as PAGE_NOACCESS would fault on being read. */
 				if (!VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old)) {
@@ -14545,7 +14631,27 @@ static int do_load(int slotno)
 			SIZE_T size = (SIZE_T)s->regs[i].size;
 			unsigned long long here = pos;
 			DWORD old;
-			int writable =
+			int writable;
+
+			if (g_reg_off)
+				g_reg_off[i] = pos;
+			/* The restorable-region walk already counted excluded-now
+			 * stacks/TEBs and uncovered belongs-elsewhere slices as
+			 * skippable and let the restore continue. That walk does
+			 * not write. This one does, and D3D9SW_DIFFWRITE memcmp's
+			 * the destination before any memcpy. Under Wine a live
+			 * stack or TEB can occupy an address that held ordinary
+			 * private memory at the save, and the range is often only
+			 * partly committed. Skipping here is the write that the
+			 * earlier log line claimed already happened. The slotfile
+			 * cursor still advances: the snapshot layout does not care
+			 * that we declined the copy. */
+			if (region_write_skipped(&s->regs[i])) {
+				pos += size;
+				continue;
+			}
+
+			writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
 
 			/* Here, and not beside the writeback at the end of the loop,
@@ -14584,8 +14690,6 @@ static int do_load(int slotno)
 			 * are deliberately left alone. */
 			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base);
 
-			if (g_reg_off)
-				g_reg_off[i] = pos;
 			/* Before a byte is written: where memory has already drifted
 			 * from the snapshot, and what it holds there. That is the
 			 * value the restore is about to paint over, and having it is
@@ -14626,7 +14730,11 @@ static int do_load(int slotno)
 					       i, base, (unsigned long long)size);
 			} else if (by_block)
 				blocked++;
-			else if (win_copy(&w, pos, base, size, 0)) {
+			else if (!writable) {
+				ss_log("  region %d at %p cannot be made writable, copy "
+				       "skipped, %llu bytes, err=%lu\n",
+				       i, base, (unsigned long long)size, GetLastError());
+			} else if (win_copy(&w, pos, base, size, 0)) {
 				restored++;
 				/* Only regions we actually wrote are worth asking
 				 * about afterwards. One left in the present was
