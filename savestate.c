@@ -4390,6 +4390,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_SAVE_AT",
 	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
+	"D3D9SW_PARTHOLD",
 	"D3D9SW_RECYCLED",	  "D3D9SW_GAMEHEAP",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN",
 	"D3D9SW_SLOTFILE",
@@ -10889,6 +10890,78 @@ static int exclskip_mode(void)
 	return cached;
 }
 
+/* Live allocation that contains `base`. Walk sibling VAD runs that share
+ * AllocationBase so coverage is the whole reservation, not one VirtualQuery
+ * slice. A later run in the same allocation can be MEM_RESERVE; it still
+ * belongs to this base. */
+static int live_alloc_extent(uintptr_t base, uintptr_t *alloc_base,
+			     uintptr_t *alloc_end, DWORD *type)
+{
+	MEMORY_BASIC_INFORMATION mbi, q;
+	uintptr_t p, end, next;
+
+	if (VirtualQuery((LPCVOID)base, &mbi, sizeof(mbi)) != sizeof(mbi) ||
+	    mbi.State != MEM_COMMIT)
+		return 0;
+	p = (uintptr_t)mbi.AllocationBase;
+	end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+	while (VirtualQuery((LPCVOID)end, &q, sizeof(q)) == sizeof(q)) {
+		if ((uintptr_t)q.AllocationBase != p)
+			break;
+		next = (uintptr_t)q.BaseAddress + q.RegionSize;
+		if (next <= end)
+			break;
+		end = next;
+	}
+	if (alloc_base)
+		*alloc_base = p;
+	if (alloc_end)
+		*alloc_end = end;
+	if (type)
+		*type = mbi.Type;
+	return 1;
+}
+
+static int region_alloc_mismatch(const Region *r, const MEMORY_BASIC_INFORMATION *mbi)
+{
+	return mbi->Type != r->type ||
+	       (uintptr_t)mbi->AllocationBase != r->alloc_base;
+}
+
+/* If the live allocation still covers the saved range, restore in place even
+ * when AllocationBase moved. Otherwise this is the belongs-elsewhere class:
+ * skip that region and copy the rest, rather than refusing the whole load. */
+static int region_still_ours(const Region *r)
+{
+	uintptr_t live_base = 0, live_end = 0;
+	DWORD type = 0;
+
+	if (!r || !r->size)
+		return 0;
+	if (!live_alloc_extent(r->base, &live_base, &live_end, &type))
+		return 0;
+	if (type == r->type && live_base == r->alloc_base)
+		return 1;
+	return live_base <= r->base && live_end >= r->base + r->size;
+}
+
+/* Write-loop counterpart of the restorable-region skips: live stacks/TEBs,
+ * and belongs-elsewhere ranges the live allocation does not cover. */
+static int region_write_skipped(const Region *r)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+
+	if (!r)
+		return 1;
+	if (region_excluded(r->base, r->size))
+		return 1;
+	if (VirtualQuery((LPCVOID)r->base, &mbi, sizeof(mbi)) == sizeof(mbi) &&
+	    mbi.State == MEM_COMMIT && region_alloc_mismatch(r, &mbi) &&
+	    !region_still_ours(r))
+		return 1;
+	return 0;
+}
+
 #define SS_WATCH_MAX 8
 static uintptr_t g_watch_at[SS_WATCH_MAX];
 static int g_watch_at_n = -1;
@@ -13827,9 +13900,58 @@ static int lfh_hold(void)
 	return cached;
 }
 
+/* Set to 0 to put back the old behaviour, which rewound them. */
+static int part_hold(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_PARTHOLD", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+/* A captured region that sits inside a heap we decided to leave in the present.
+ *
+ * The save already reports these - "PARTITION LEAK: n region(s) are inside a
+ * heap we leave in the present but were captured anyway ... The restore will
+ * rewind part of that heap" - and then the restore went ahead and did exactly
+ * that. Rewinding half a heap tears the allocator's own lists: the fault this
+ * produces is a doubly-linked unlink, `mov [edx+4],eax; mov [eax],edx`, writing
+ * through a Flink that came from the past into a list whose other half moved on.
+ * It reads as a wild pointer in ntdll and is not one - both halves are exactly
+ * what they were told to be.
+ *
+ * Measured on Proton at the title screen, one save and two restores of it:
+ * three sessions in four died on the second restore, always that instruction,
+ * always with the process heap at 00150000 in the register set. Naming those two
+ * regions by hand in D3D9SW_SKIPREG made three of three survive, which is what
+ * this does without needing the addresses, since they move every launch.
+ *
+ * Same argument as the LFH bookkeeping above, one level out: the smallest
+ * consistent thing to do with memory belonging to an allocator we are not
+ * rewinding is to leave all of it alone. Segment ownership is inferred by
+ * following pointers out of heap headers, so it misses segments and what it
+ * misses gets captured - the leak is a limit of that inference, not a decision
+ * anyone made. */
+static int part_leaked(uintptr_t base)
+{
+	int hi;
+
+	if (!g_ctl)
+		return 0;
+	hi = heap_index_of(base);
+	return hi >= 0 && !g_ctl->heap_ours[hi];
+}
+
 static int poke_skipped(uintptr_t base)
 {
 	if (lfh_hold() && poke_hit(g_lfh_at, g_lfh_n, base))
+		return 1;
+	if (part_hold() && part_leaked(base))
 		return 1;
 	if (g_skip_auto)
 		return poke_hit(g_revert_at, g_revert_n, base);
@@ -13946,7 +14068,7 @@ static int do_load(int slotno)
 	Window w;
 	unsigned long long pos = 0;
 	int i, j, restored = 0, skipped = 0, tls_done = 0, blocked = 0;
-	int skipped_excl = 0;
+	int skipped_excl = 0, skipped_belong = 0;
 	int handskip = 0, handscrib = 0;
 
 	/* Only when there is nothing in memory, so a session that took its own save
@@ -14192,15 +14314,19 @@ static int do_load(int slotno)
 		 * the same address. */
 		if (VirtualQuery((LPCVOID)base, &mbi, sizeof(mbi)) == sizeof(mbi) &&
 		    mbi.State == MEM_COMMIT) {
-			if (mbi.Type != s->regs[i].type ||
-			    (uintptr_t)mbi.AllocationBase != s->regs[i].alloc_base) {
+			if (region_alloc_mismatch(&s->regs[i], &mbi)) {
 				ss_log("  region %p+%lx now belongs elsewhere: "
 				       "alloc %p vs %p, type %lx vs %lx\n",
 				       (void *)base, (unsigned long)size, mbi.AllocationBase,
 				       (void *)s->regs[i].alloc_base, (unsigned long)mbi.Type,
 				       (unsigned long)s->regs[i].type);
-				skipped++;
-				continue;
+				/* Same belongs-elsewhere class, not a new veto. If the
+				 * live allocation still covers the saved range, restore
+				 * in place; otherwise skip this region and copy the rest. */
+				if (!region_still_ours(&s->regs[i])) {
+					skipped_belong++;
+					continue;
+				}
 			}
 			/* Belongs to us and starts committed, but the run that
 			 * VirtualQuery described may stop short of the region. Only a
@@ -14375,6 +14501,11 @@ static int do_load(int slotno)
 			       "at the save. The restore goes ahead without them\n",
 			       skipped_excl);
 	}
+	if (skipped_belong)
+		ss_log("  %d region(s) skipped because they now belong elsewhere - "
+		       "the live allocation does not cover the saved range, so this "
+		       "slice stays in the present and the rest of the copy runs\n",
+		       skipped_belong);
 	if (skipped) {
 		ss_log("load: refused, %d of %d regions unrestorable\n", skipped, s->nregs);
 		resume_all(0);
@@ -14422,6 +14553,11 @@ static int do_load(int slotno)
 				int r;
 
 				seen += size;
+				if (region_write_skipped(&s->regs[i])) {
+					unchecked++;
+					off += size;
+					continue;
+				}
 				/* Same reason the verify pass does this: a region saved
 				 * as PAGE_NOACCESS would fault on being read. */
 				if (!VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old)) {
@@ -14495,7 +14631,27 @@ static int do_load(int slotno)
 			SIZE_T size = (SIZE_T)s->regs[i].size;
 			unsigned long long here = pos;
 			DWORD old;
-			int writable =
+			int writable;
+
+			if (g_reg_off)
+				g_reg_off[i] = pos;
+			/* The restorable-region walk already counted excluded-now
+			 * stacks/TEBs and uncovered belongs-elsewhere slices as
+			 * skippable and let the restore continue. That walk does
+			 * not write. This one does, and D3D9SW_DIFFWRITE memcmp's
+			 * the destination before any memcpy. Under Wine a live
+			 * stack or TEB can occupy an address that held ordinary
+			 * private memory at the save, and the range is often only
+			 * partly committed. Skipping here is the write that the
+			 * earlier log line claimed already happened. The slotfile
+			 * cursor still advances: the snapshot layout does not care
+			 * that we declined the copy. */
+			if (region_write_skipped(&s->regs[i])) {
+				pos += size;
+				continue;
+			}
+
+			writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
 
 			/* Here, and not beside the writeback at the end of the loop,
@@ -14534,8 +14690,6 @@ static int do_load(int slotno)
 			 * are deliberately left alone. */
 			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base);
 
-			if (g_reg_off)
-				g_reg_off[i] = pos;
 			/* Before a byte is written: where memory has already drifted
 			 * from the snapshot, and what it holds there. That is the
 			 * value the restore is about to paint over, and having it is
@@ -14558,12 +14712,29 @@ static int do_load(int slotno)
 				der_capture(i, base, (size_t)size);
 			if (poke_skipped(s->regs[i].base)) {
 				handskip++;
-				ss_log("  SKIPREG: region %d at %p left in the present by "
-				       "hand, %llu bytes\n",
-				       i, base, (unsigned long long)size);
+				/* Named apart, because one of these is an experiment
+				 * somebody typed and the other is the engine declining
+				 * to tear a heap in half. Reading a PARTHOLD line as a
+				 * leftover SKIPREG entry would send the next person
+				 * looking for a config that does not say that. */
+				if (part_hold() && part_leaked(s->regs[i].base))
+					ss_log("  PARTHOLD: region %d at %p is inside %s, "
+					       "which we leave in the present, so it stays "
+					       "there too - %llu bytes\n",
+					       i, base,
+					       g_ctl->heap_name[heap_index_of(s->regs[i].base)],
+					       (unsigned long long)size);
+				else
+					ss_log("  SKIPREG: region %d at %p left in the "
+					       "present by hand, %llu bytes\n",
+					       i, base, (unsigned long long)size);
 			} else if (by_block)
 				blocked++;
-			else if (win_copy(&w, pos, base, size, 0)) {
+			else if (!writable) {
+				ss_log("  region %d at %p cannot be made writable, copy "
+				       "skipped, %llu bytes, err=%lu\n",
+				       i, base, (unsigned long long)size, GetLastError());
+			} else if (win_copy(&w, pos, base, size, 0)) {
 				restored++;
 				/* Only regions we actually wrote are worth asking
 				 * about afterwards. One left in the present was
@@ -17523,6 +17694,11 @@ void savestate_soak_arm(void)
  * the same things in between - only that both runs were asked the question at
  * the same moment, which is the part that was in our power to fix.
  *
+ * 0 or unset means never. The deployed cfg writes SAVE_AT=0 as the off switch,
+ * matching LOAD_AT and QUIT_AT. Parsing 0 as frame zero took a 350 ms save on
+ * the first present of every "just playing" launch and froze the window thread
+ * before anyone asked for a savestate.
+ *
  * It returns an action rather than saving, for the same reason the soak driver
  * does: the wrapper wraps a save in ledger work, and a second call site that
  * skipped any of it would be a double free waiting to happen. */
@@ -17553,7 +17729,9 @@ static void save_at_parse(void)
 			cur = cur * 10 + (v[k] - '0');
 			any = 1;
 		} else {
-			if (any && g_save_at_n < SS_SAVE_AT_MAX)
+			/* 0 is the documented off switch, not "save on the first
+			 * present". LOAD_AT already treats <=0 as never. */
+			if (any && cur > 0 && g_save_at_n < SS_SAVE_AT_MAX)
 				g_save_at[g_save_at_n++] = cur;
 			cur = 0;
 			any = 0;
