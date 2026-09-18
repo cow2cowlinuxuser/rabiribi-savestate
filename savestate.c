@@ -1817,6 +1817,7 @@ static void cs_keep_hooked(void)
  * still dies the way it would have. */
 static volatile LONG g_faults;
 static volatile LONG g_frames_since_load = -1;
+static volatile LONG g_keys_watch;
 
 /* One fault reports at a time.
  *
@@ -12481,6 +12482,7 @@ static void delta_scan(Slot *s)
 }
 
 static void keys_log(const char *when);
+static void keys_unstick(int noisy);
 
 static int do_save(int slotno)
 {
@@ -13060,6 +13062,14 @@ done:
 
 		QueryPerformanceCounter(&e0);
 		resume_all(0);
+		keys_log("after save resume");
+		/* Same leftover as a restore. A KEYUP that arrived while the
+		 * window thread was frozen is delivered to user32 on the next
+		 * present - GetAsyncKeyState heals - but DirectInput8 on Wine
+		 * is raw input and can drop that KEYUP. Left then stays down
+		 * in device_state and the character walks. */
+		keys_unstick(1);
+		g_keys_watch = 5;
 		dsh_play();
 		xa2_sw_resume();
 		QueryPerformanceCounter(&e1);
@@ -15401,6 +15411,7 @@ static int do_load(int slotno)
 	keys_log("after resume, before unstick");
 	keys_unstick(1);
 	keys_log("after unstick");
+	g_keys_watch = 5;
 	/* After the threads are running again, because the comparison is a read of
 	 * a few hundred megabytes and holding every thread suspended through it
 	 * would charge the restore for a diagnostic. A region the game rewrites in
@@ -18095,6 +18106,17 @@ int savestate_soak_action(void)
 	 * released from do_load, but a KEYUP can land before DirectInput has
 	 * re-acquired the device, and the walk key would stick for the rest of
 	 * the session. g_frames_since_load is -1 until the first restore. */
+	if (g_keys_watch > 0) {
+		int n = (int)g_keys_watch;
+		g_keys_watch = n - 1;
+		/* Present N after a freeze, so we can tell a KEYUP that was
+		 * queued behind a suspended window thread from a key Wine has
+		 * actually lost. Immediate-after-resume GetAsyncKeyState is the
+		 * freeze-time bitmap; a few frames later is the truth. */
+		ss_log("  keys watch: %d present(s) after freeze\n", 6 - n);
+		keys_log("on a later present");
+		keys_unstick(0);
+	}
 	if (g_frames_since_load >= 0 && g_frames_since_load < 3)
 		keys_unstick(0);
 	key_at_tick();
