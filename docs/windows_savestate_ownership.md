@@ -14,6 +14,7 @@ Related docs (do not duplicate their detail — this file is the map):
 | `crash_histogram.md` (repo root) | 100-run death shape (harness) |
 | `rewind_state_table.md` (repo root) | Future multi-state / undo design (mostly unbuilt) |
 | `README.md` | Current engine claim and known gaps |
+| `docs/frierenserver/` | Proton A→B sittings on the IdeaPad (title lived; in-world needs PARTHOLD; cross-session dies in USER32) |
 
 ---
 
