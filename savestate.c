@@ -1817,6 +1817,10 @@ static void cs_keep_hooked(void)
  * still dies the way it would have. */
 static volatile LONG g_faults;
 static volatile LONG g_frames_since_load = -1;
+static volatile LONG g_keys_watch;
+static DWORD g_keys_hitch_until;
+static unsigned g_keys_letgo;
+static int g_keys_idle_said;
 
 /* One fault reports at a time.
  *
@@ -4390,6 +4394,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_SAVE_AT",
 	"D3D9SW_DSSEEK",
 	"D3D9SW_DECPATCH",	  "D3D9SW_LFHHOLD",
+	"D3D9SW_PARTHOLD",
 	"D3D9SW_RECYCLED",	  "D3D9SW_GAMEHEAP",
 	"D3D9SW_DIFFWRITE",	  "D3D9SW_POS_SPAN",
 	"D3D9SW_SLOTFILE",
@@ -4409,6 +4414,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_ENTS",		  "D3D9SW_CLOCKPROBE",
 	"D3D9SW_KEY_EVERY",	  "D3D9SW_KEY_HOLD",
 	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK",
+	"D3D9SW_KEY_UNSTICK",
 	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT",
 	"D3D9SW_LOAD_AT",
 	"D3D9SW_SAVE_VK",	  "D3D9SW_LOAD_VK"
@@ -4618,10 +4624,16 @@ static char *ss_frac(char *p, char *end, unsigned long long v, int digits)
  * fell through to the default case and printed a bare '%'.
  *
  * Supports what the 105 call sites between them actually use, which was
- * measured rather than assumed: flags - + 0 and space, a numeric width, a
+ * measured rather than assumed: flags - + 0 # and space, a numeric width, a
  * precision (fraction digits for floats, a truncation limit for strings), the
  * l/ll/h/z length modifiers, and d i u x X p s f %%. Anything else emits a '%'
  * so a mistake shows up in the log instead of being silently dropped.
+ *
+ * `#` is here because the hotkey lines asked for %#x and got the literal text
+ * "%x": the flag fell through to the default case, which emitted a bare '%'
+ * and left the conversion to print as itself. That is the mistake-visible
+ * behaviour working as designed, and the log still could not say which keys it
+ * had resolved, which is the one thing those lines exist to do.
  *
  * No CRT call anywhere in here, and no static storage, so it is safe on a
  * restored thread and inside the suspended window. */
@@ -4633,7 +4645,7 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 		char body[64];
 		const char *s = NULL;
 		int minus = 0, plus = 0, zero = 0, width = 0, prec = -1, lmod = 0;
-		int neg = 0, upper = 0, isstr = 0, blen = -1;
+		int neg = 0, upper = 0, isstr = 0, blen = -1, alt = 0;
 		unsigned base = 10;
 		unsigned long long uv = 0;
 
@@ -4649,6 +4661,8 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 				plus = 1;
 			else if (*fmt == '0')
 				zero = 1;
+			else if (*fmt == '#')
+				alt = 1;
 			else if (*fmt != ' ')
 				break;
 		}
@@ -4781,7 +4795,11 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 					       upper) - body);
 		}
 		{
-			int total = blen + ((neg || plus) ? 1 : 0);
+			/* Only hex has a prefix here - there is no %o - and a zero
+			 * does not get one, same as the CRT: "0x0" would claim a
+			 * radix for a value that reads the same in any of them. */
+			int pfx = (alt && base == 16 && uv) ? 2 : 0;
+			int total = blen + ((neg || plus) ? 1 : 0) + pfx;
 			int pad = width > total ? width - total : 0;
 			int k;
 
@@ -4792,6 +4810,10 @@ static int ss_vfmt(char *buf, int cap, const char *fmt, va_list ap)
 				*p++ = '-';
 			else if (plus && p < end)
 				*p++ = '+';
+			if (pfx && p < end)
+				*p++ = '0';
+			if (pfx && p < end)
+				*p++ = upper ? 'X' : 'x';
 			/* Zero fill goes AFTER the sign, or -0012 becomes 00-12. */
 			if (!minus && zero)
 				while (pad-- > 0 && p < end)
@@ -12406,6 +12428,10 @@ static void delta_scan(Slot *s)
 	g_dl_have = 1;
 }
 
+static void keys_log(const char *when);
+static void keys_unstick(int noisy);
+static void keys_hitch_begin(void);
+
 static int do_save(int slotno)
 {
 	Slot *s = &g_ctl->slots[slotno];
@@ -12476,6 +12502,7 @@ static int do_save(int slotno)
 	ss_phase("save: collected %d thread(s), suspending\n", g_ctl->nids);
 	suspend_all();
 	ss_phase("save: suspend_all returned\n");
+	keys_log("at save, game frozen");
 	/* Let go and look again while anything is inside the JIT. Threads must be
 	 * suspended to read their contexts, so each attempt is a full suspend, and
 	 * the release has to be real - a thread cannot leave the JIT while held.
@@ -12983,6 +13010,14 @@ done:
 
 		QueryPerformanceCounter(&e0);
 		resume_all(0);
+		keys_log("after save resume");
+		/* Do not KEYUP here. GetAsyncKeyState is still the freeze-time
+		 * bitmap. A 200-300 ms copy is longer than a frame and sits in
+		 * X's auto-repeat window, so the game never polls the real
+		 * KEYUP and a delayed repeat can restick Left. Real-time hitch
+		 * resync on later presents handles that. */
+		keys_hitch_begin();
+		g_keys_watch = 5;
 		dsh_play();
 		xa2_sw_resume();
 		QueryPerformanceCounter(&e1);
@@ -13827,9 +13862,58 @@ static int lfh_hold(void)
 	return cached;
 }
 
+/* Set to 0 to put back the old behaviour, which rewound them. */
+static int part_hold(void)
+{
+	static int cached = -1;
+
+	if (cached < 0) {
+		char v[8];
+		DWORD n = ss_getenv("D3D9SW_PARTHOLD", v, sizeof(v));
+
+		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+	}
+	return cached;
+}
+
+/* A captured region that sits inside a heap we decided to leave in the present.
+ *
+ * The save already reports these - "PARTITION LEAK: n region(s) are inside a
+ * heap we leave in the present but were captured anyway ... The restore will
+ * rewind part of that heap" - and then the restore went ahead and did exactly
+ * that. Rewinding half a heap tears the allocator's own lists: the fault this
+ * produces is a doubly-linked unlink, `mov [edx+4],eax; mov [eax],edx`, writing
+ * through a Flink that came from the past into a list whose other half moved on.
+ * It reads as a wild pointer in ntdll and is not one - both halves are exactly
+ * what they were told to be.
+ *
+ * Measured on Proton at the title screen, one save and two restores of it:
+ * three sessions in four died on the second restore, always that instruction,
+ * always with the process heap at 00150000 in the register set. Naming those two
+ * regions by hand in D3D9SW_SKIPREG made three of three survive, which is what
+ * this does without needing the addresses, since they move every launch.
+ *
+ * Same argument as the LFH bookkeeping above, one level out: the smallest
+ * consistent thing to do with memory belonging to an allocator we are not
+ * rewinding is to leave all of it alone. Segment ownership is inferred by
+ * following pointers out of heap headers, so it misses segments and what it
+ * misses gets captured - the leak is a limit of that inference, not a decision
+ * anyone made. */
+static int part_leaked(uintptr_t base)
+{
+	int hi;
+
+	if (!g_ctl)
+		return 0;
+	hi = heap_index_of(base);
+	return hi >= 0 && !g_ctl->heap_ours[hi];
+}
+
 static int poke_skipped(uintptr_t base)
 {
 	if (lfh_hold() && poke_hit(g_lfh_at, g_lfh_n, base))
+		return 1;
+	if (part_hold() && part_leaked(base))
 		return 1;
 	if (g_skip_auto)
 		return poke_hit(g_revert_at, g_revert_n, base);
@@ -13939,6 +14023,13 @@ static void clobber_tick(void)
 	if (now.QuadPart >= g_clob_due)
 		clobber_check();
 }
+
+/* Defined with the scripted-input helpers. A restore puts the game's keyboard
+ * buffer back to save time while DirectInput stays in the present, so a Left
+ * that was down then and is up now never generates a KEYUP. Called after
+ * resume so the dinput thread, which we leave running, can see the release. */
+static void keys_log(const char *when);
+static void keys_unstick(int noisy);
 
 static int do_load(int slotno)
 {
@@ -14422,6 +14513,11 @@ static int do_load(int slotno)
 				int r;
 
 				seen += size;
+				if (region_excluded((uintptr_t)base, (uintptr_t)size)) {
+					unchecked++;
+					off += size;
+					continue;
+				}
 				/* Same reason the verify pass does this: a region saved
 				 * as PAGE_NOACCESS would fault on being read. */
 				if (!VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old)) {
@@ -14495,7 +14591,29 @@ static int do_load(int slotno)
 			SIZE_T size = (SIZE_T)s->regs[i].size;
 			unsigned long long here = pos;
 			DWORD old;
-			int writable =
+			int writable;
+
+			if (g_reg_off)
+				g_reg_off[i] = pos;
+			/* The restorable-region walk already counted these as
+			 * skipped_excl and, with D3D9SW_EXCLSKIP=1, let the restore
+			 * continue. That walk does not write. This one does, and
+			 * D3D9SW_DIFFWRITE memcmp's the destination before any
+			 * memcpy. Under Wine a live stack or TEB can occupy an
+			 * address that held ordinary private memory at the save, and
+			 * the range is often only partly committed - the 01:47
+			 * Proton fault was memcmp at d3d11.dll+50680 walking into
+			 * FREE page 0C5A5000 inside skipped region 0C592000+fe000.
+			 * Skipping here is the write that the earlier log line
+			 * claimed already happened. The slotfile cursor still
+			 * advances: the snapshot layout does not care that we
+			 * declined the copy. */
+			if (region_excluded((uintptr_t)base, (uintptr_t)size)) {
+				pos += size;
+				continue;
+			}
+
+			writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
 
 			/* Here, and not beside the writeback at the end of the loop,
@@ -14534,8 +14652,6 @@ static int do_load(int slotno)
 			 * are deliberately left alone. */
 			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base);
 
-			if (g_reg_off)
-				g_reg_off[i] = pos;
 			/* Before a byte is written: where memory has already drifted
 			 * from the snapshot, and what it holds there. That is the
 			 * value the restore is about to paint over, and having it is
@@ -14558,12 +14674,29 @@ static int do_load(int slotno)
 				der_capture(i, base, (size_t)size);
 			if (poke_skipped(s->regs[i].base)) {
 				handskip++;
-				ss_log("  SKIPREG: region %d at %p left in the present by "
-				       "hand, %llu bytes\n",
-				       i, base, (unsigned long long)size);
+				/* Named apart, because one of these is an experiment
+				 * somebody typed and the other is the engine declining
+				 * to tear a heap in half. Reading a PARTHOLD line as a
+				 * leftover SKIPREG entry would send the next person
+				 * looking for a config that does not say that. */
+				if (part_hold() && part_leaked(s->regs[i].base))
+					ss_log("  PARTHOLD: region %d at %p is inside %s, "
+					       "which we leave in the present, so it stays "
+					       "there too - %llu bytes\n",
+					       i, base,
+					       g_ctl->heap_name[heap_index_of(s->regs[i].base)],
+					       (unsigned long long)size);
+				else
+					ss_log("  SKIPREG: region %d at %p left in the "
+					       "present by hand, %llu bytes\n",
+					       i, base, (unsigned long long)size);
 			} else if (by_block)
 				blocked++;
-			else if (win_copy(&w, pos, base, size, 0)) {
+			else if (!writable) {
+				ss_log("  region %d at %p cannot be made writable, copy "
+				       "skipped, %llu bytes, err=%lu\n",
+				       i, base, (unsigned long long)size, GetLastError());
+			} else if (win_copy(&w, pos, base, size, 0)) {
 				restored++;
 				/* Only regions we actually wrote are worth asking
 				 * about afterwards. One left in the present was
@@ -15211,6 +15344,14 @@ static int do_load(int slotno)
 	dsh_play();
 	xa2_sw_resume();
 	ss_log("  resume: done, all threads runnable\n");
+	/* After resume, not before: DirectInput's worker is one of the threads
+	 * we leave running, and a KEYUP queued while it is frozen is a KEYUP it
+	 * may never pick up. Left is the walk key; a leftover down walks the
+	 * character off the snapshot. XInput is not this - pads are already
+	 * pinned absent. */
+	keys_log("after resume, before unstick");
+	keys_hitch_begin();
+	g_keys_watch = 5;
 	/* After the threads are running again, because the comparison is a read of
 	 * a few hundred megabytes and holding every thread suspended through it
 	 * would charge the restore for a diagnostic. A region the game rewrites in
@@ -17523,6 +17664,11 @@ void savestate_soak_arm(void)
  * the same things in between - only that both runs were asked the question at
  * the same moment, which is the part that was in our power to fix.
  *
+ * 0 or unset means never. The deployed cfg writes SAVE_AT=0 as the off switch,
+ * matching LOAD_AT and QUIT_AT. Parsing 0 as frame zero took a 350 ms save on
+ * the first present of every "just playing" launch and froze the window thread
+ * before anyone asked for a savestate.
+ *
  * It returns an action rather than saving, for the same reason the soak driver
  * does: the wrapper wraps a save in ledger work, and a second call site that
  * skipped any of it would be a double free waiting to happen. */
@@ -17553,7 +17699,9 @@ static void save_at_parse(void)
 			cur = cur * 10 + (v[k] - '0');
 			any = 1;
 		} else {
-			if (any && g_save_at_n < SS_SAVE_AT_MAX)
+			/* 0 is the documented off switch, not "save on the first
+			 * present". LOAD_AT already treats <=0 as never. */
+			if (any && cur > 0 && g_save_at_n < SS_SAVE_AT_MAX)
 				g_save_at[g_save_at_n++] = cur;
 			cur = 0;
 			any = 0;
@@ -17585,6 +17733,32 @@ static void save_at_parse(void)
  * focus is lost, which is worth knowing rather than hiding - the log line says
  * how many presses were sent, so two runs that disagree there explain
  * themselves. */
+static int vk_extended(WORD vk)
+{
+	switch (vk) {
+	case VK_LEFT:
+	case VK_RIGHT:
+	case VK_UP:
+	case VK_DOWN:
+	case VK_HOME:
+	case VK_END:
+	case VK_INSERT:
+	case VK_DELETE:
+	case VK_PRIOR:
+	case VK_NEXT:
+	case VK_RCONTROL:
+	case VK_RMENU:
+	case VK_NUMLOCK:
+	case VK_DIVIDE:
+	case VK_LWIN:
+	case VK_RWIN:
+	case VK_APPS:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static void key_send(WORD vk, int up)
 {
 	INPUT in;
@@ -17593,8 +17767,164 @@ static void key_send(WORD vk, int up)
 	in.type = INPUT_KEYBOARD;
 	in.ki.wVk = vk;
 	in.ki.wScan = (WORD)MapVirtualKeyA(vk, 0 /* MAPVK_VK_TO_VSC */);
-	in.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+	/* Arrow keys are extended. A KEYUP of Left without this flag is a KEYUP
+	 * of numpad 4, and DirectInput keeps the real Left down. That is exactly
+	 * the stuck walk the in-game test was seeing. */
+	in.ki.dwFlags = (up ? KEYEVENTF_KEYUP : 0) |
+			(vk_extended(vk) ? KEYEVENTF_EXTENDEDKEY : 0);
 	SendInput(1, &in, sizeof(in));
+}
+
+/* DirectInput does not look at the window queue, and a restore puts the game's
+ * copy of the keyboard back to whatever was held at save time. dinput.dll
+ * itself is held in the present on purpose (rewinding it killed a session), so
+ * a key that was down then and is up now never generates a KEYUP - the game
+ * keeps walking. Left is the one that moves the character.
+ *
+ * This is not the XInput pad. D3D9SW_XINPUT=0 already answers
+ * ERROR_DEVICE_NOT_CONNECTED for every slot, so a leftover D-pad cannot be
+ * coming from there. The leftover is the keyboard, plus anything Wine/XTEST
+ * still has down from a scripted keydown whose keyup never arrived.
+ *
+ * Always release, including keys GetAsyncKeyState still reports down: a stuck
+ * X11 Left looks "physically held" even though nobody is holding it, and
+ * skipping those would leave the bug in place. A player who restores while
+ * actually holding Left re-asserts it on the next poll. Off with
+ * D3D9SW_KEY_UNSTICK=0. */
+static void keys_log(const char *when)
+{
+	static const char hex[] = "0123456789ABCDEF";
+	int vk, n = 0, left, extleft;
+	char buf[196];
+	int o = 0;
+
+	buf[0] = 0;
+	for (vk = 8; vk < 256; vk++) {
+		if (!(GetAsyncKeyState(vk) & 0x8000))
+			continue;
+		n++;
+		if (o >= (int)sizeof(buf) - 4)
+			continue;
+		buf[o++] = ' ';
+		buf[o++] = hex[(vk >> 4) & 15];
+		buf[o++] = hex[vk & 15];
+		buf[o] = 0;
+	}
+	left = (GetAsyncKeyState(VK_LEFT) & 0x8000) ? 1 : 0;
+	/* Numpad 4 is the non-extended scan of Left. If only this is down, a
+	 * KEYUP without KEYEVENTF_EXTENDEDKEY "released" the wrong key. */
+	extleft = (GetAsyncKeyState(VK_NUMPAD4) & 0x8000) ? 1 : 0;
+	ss_log("  keys %s: GetAsyncKeyState %d down [%s] Left=%s Numpad4=%s "
+	       "(user32/wineserver, not dinput device_state)\n",
+	       when, n, n ? buf : " none", left ? "DOWN" : "up",
+	       extleft ? "DOWN" : "up");
+}
+
+static int key_unstick_on(void)
+{
+	char v[8];
+	DWORD n = ss_getenv("D3D9SW_KEY_UNSTICK", v, sizeof(v));
+
+	if (n > 0 && n < sizeof(v) && v[0] == '0')
+		return 0;
+	return 1;
+}
+
+static void keys_unstick(int noisy)
+{
+	static const WORD move[] = {
+		VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN,
+		'A', 'D', 'W', 'S',
+		VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
+		VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
+		VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD8, VK_NUMPAD2,
+		0
+	};
+	int i, held = 0, poked = 0;
+
+	if (!key_unstick_on())
+		return;
+
+	/* Only keys user32 already reports up. A KEYUP of a Left that is still
+	 * down is what made the walk stay live after holding: X11 kept the
+	 * key, GetAsyncKeyState went up, DirectInput kept walking, and the
+	 * real keyup then had no edge left to deliver. */
+	for (i = 0; move[i]; i++) {
+		if (GetAsyncKeyState(move[i]) & 0x8000) {
+			held++;
+			continue;
+		}
+		key_send(move[i], 1);
+		poked++;
+	}
+	if (noisy)
+		ss_log("  keys: poked KEYUP on %d idle movement key(s), left %d still "
+		       "held so a held Left stays held\n",
+		       poked, held);
+}
+
+/* After a freeze it is time-based, not edge-based. The copy takes 200-300 ms,
+ * which is many frames and inside X auto-repeat (500 ms delay, 20 Hz). The
+ * window thread is frozen, so it never polls the KEYUP; when it wakes, a
+ * queued repeat KEYDOWN can arrive after the release and Left stays live.
+ * For one second of real time, keys that went up are remembered and a
+ * repeat that puts them down again is KEYUPed.
+ *
+ * Idle play must not reach SendInput. This used to KEYUP Left on every falling
+ * edge of every present, with no save involved, which is the confounder of
+ * "just playing": the savestate engine was writing the keyboard the game was
+ * trying to read. Hotkeys still poll 1/2/F-keys; they do not inject. */
+static void keys_hitch_begin(void)
+{
+	g_keys_hitch_until = GetTickCount() + 1000;
+	g_keys_letgo = 0;
+	g_keys_idle_said = 0;
+	ss_log("  keys: hitch resync for 1000 ms of real time, so a KEYUP the "
+	       "game could not poll during the freeze is not eaten by auto-repeat\n");
+}
+
+static void keys_edge_sync(void)
+{
+	static const WORD move[] = { VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, 0 };
+	static unsigned was;
+	static int repeat_log;
+	unsigned now = 0;
+	int i, down;
+
+	if (!key_unstick_on())
+		return;
+	/* Ordinary presents own the keyboard. Injection is only the 1 s after
+	 * resume_all, when the freeze has already upset polling. */
+	if (GetTickCount() >= g_keys_hitch_until) {
+		if (!g_keys_idle_said && g_ctl) {
+			ss_log("  keys: ordinary play, no SendInput until the next freeze\n");
+			g_keys_idle_said = 1;
+		}
+		was = 0;
+		repeat_log = 0;
+		return;
+	}
+	for (i = 0; move[i]; i++) {
+		down = (GetAsyncKeyState(move[i]) & 0x8000) ? 1 : 0;
+		if (down)
+			now |= 1u << i;
+		else if (was & (1u << i)) {
+			key_send(move[i], 1);
+			g_keys_letgo |= 1u << i;
+		}
+		if (!down)
+			key_send(move[i], 1);
+		if ((g_keys_letgo & (1u << i)) && down) {
+			key_send(move[i], 1);
+			if (!repeat_log) {
+				ss_log("  keys: Left/arrow went down again inside the hitch "
+				       "window with no new press - auto-repeat after a freeze "
+				       "the game did not poll, KEYUP injected\n");
+				repeat_log = 1;
+			}
+		}
+	}
+	was = now;
 }
 
 static long g_key_sent;
@@ -17767,6 +18097,24 @@ int savestate_soak_action(void)
 	 * is about making two runs identical, and a run that skipped its presses
 	 * because a pointer was not ready yet would be a run that silently is
 	 * not comparable. */
+	/* And again on the first presents after a restore. The helper already
+	 * released from do_load, but a KEYUP can land before DirectInput has
+	 * re-acquired the device, and the walk key would stick for the rest of
+	 * the session. g_frames_since_load is -1 until the first restore. */
+	if (g_keys_watch > 0) {
+		int n = (int)g_keys_watch;
+		g_keys_watch = n - 1;
+		/* Present N after a freeze, so we can tell a KEYUP that was
+		 * queued behind a suspended window thread from a key Wine has
+		 * actually lost. Immediate-after-resume GetAsyncKeyState is the
+		 * freeze-time bitmap; a few frames later is the truth. */
+		ss_log("  keys watch: %d present(s) after freeze\n", 6 - n);
+		keys_log("on a later present");
+		keys_unstick(n == 5);
+	}
+	/* No-op on ordinary presents. SendInput only inside the hitch window
+	 * that keys_hitch_begin armed after save/load. */
+	keys_edge_sync();
 	key_at_tick();
 	/* Beside the input tick and for the same reason: a run that ends on a
 	 * different frame is not comparable, whether or not the control block

@@ -17,7 +17,9 @@
 #   tools/linux-rabi.sh build
 #   tools/linux-rabi.sh deploy
 #   tools/linux-rabi.sh status
+#   tools/linux-rabi.sh ps        # pid / window / Steam hold / slot files
 #   tools/linux-rabi.sh launch
+#   tools/linux-rabi.sh cycle [n]  # one title save, then n restores of it
 #   tools/linux-rabi.sh xrestore [frame [quit]]
 #
 # xrestore always sets D3D11SW_GPU=0 (docs/determinism.md: do not restore
@@ -32,6 +34,10 @@ COMPAT="${STEAM_COMPAT_DATA_PATH:-$STEAM_ROOT/steamapps/compatdata/400910}"
 APPID=400910
 OUT="$ROOT/x86"
 DET="$ROOT/det/xrestore"
+# Where cmd_cycle parks the one snapshot it made, to prove the restores after it
+# all came back to that same file. Outside the game folder so the wrapper never
+# sees it as a slot of its own.
+DET_SLOT="${RABI_DET_SLOT:-/tmp/rabi-cycle-slot0.bin}"
 
 # Wine must load the game-folder copies, not DXVK/wined3d. dsound is
 # deliberately absent: our same-folder dsound.dll forwards to the silent
@@ -139,7 +145,8 @@ cmd_deploy() {
 	cp -f "$ROOT/examples/rabiribi/d3d9_sw.cfg" "$GAME/d3d9_sw.cfg"
 	# CPU-only restore: software raster, 4 threads on this class of box, pad pinned.
 	set_knobs "$GAME/d3d9_sw.cfg" \
-		D3D11SW_GPU=0 D3D9SW_XINPUT=0 D3D9SW_DIFFWRITE=1 D3D9SW_ENTS=1 \
+		D3D11SW_GPU=0 D3D9SW_XINPUT=0 D3D9SW_KEY_UNSTICK=1 \
+		D3D9SW_DIFFWRITE=1 D3D9SW_ENTS=1 \
 		D3D9SW_SLOTFILE=1 D3D9SW_SAVE_AT=0 D3D9SW_LOAD_AT=0 D3D9SW_QUIT_AT=0
 	set_knobs "$GAME/d3d11_sw.cfg" D3D11SW_GPU=0
 	pin_dll_overrides
@@ -172,6 +179,43 @@ cmd_status() {
 	fi
 	if [[ -f "$GAME/d3d9_sw_savestate_rabiribi.txt" ]]; then
 		echo "  last savestate log: $(wc -c < "$GAME/d3d9_sw_savestate_rabiribi.txt") bytes"
+	fi
+	cmd_ps
+}
+
+# One snapshot of whether the game is actually alive. Steam can still show
+# Stop after rabiribi.exe and its window are gone; pgrep -x is the truth.
+cmd_ps() {
+	local pid w log
+	echo "=== rabi ps $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+	if pid=$(pgrep -x 'rabiribi.exe' 2>/dev/null); then
+		echo "rabiribi.exe: RUNNING pid=$pid"
+		ps -p "$pid" -o pid,etime,stat,cmd --no-headers || true
+		if [[ -r "/proc/$pid/cmdline" ]]; then
+			echo "cmdline: $(tr '\0' ' ' < "/proc/$pid/cmdline")"
+		fi
+	else
+		echo "rabiribi.exe: NOT RUNNING"
+	fi
+	if command -v xdotool >/dev/null 2>&1; then
+		w=$(DISPLAY="${DISPLAY:-:1}" xdotool search --name 'Rabi-Ribi' getwindowname 2>/dev/null | head -1 || true)
+		if [[ -n "$w" ]]; then
+			echo "window: $w"
+		else
+			echo "window: none"
+		fi
+	fi
+	log="$STEAM_ROOT/logs/console_log.txt"
+	if [[ -f "$log" ]]; then
+		echo "steam 400910 (last):"
+		grep '400910' "$log" | grep -E 'Game process (added|updated|removed)|ExecuteSteamURL|ShowGameArgs' | tail -5 | sed 's/^/  /'
+	fi
+	shopt -s nullglob
+	local slots=("$GAME"/d3d9sw_slot*.bin)
+	if ((${#slots[@]})); then
+		ls -lh "${slots[@]}" | awk '{print "slot:", $9, $5, $6, $7, $8}'
+	else
+		echo "slot: none"
 	fi
 }
 
@@ -261,6 +305,192 @@ launch_game() {
 cmd_launch() {
 	echo "WINEDLLOVERRIDES=$WINEDLLOVERRIDES"
 	launch_game
+}
+
+# XTEST keyup, not --window. DirectInput and Wine ignore XSendEvent for
+# keyboard, and a --window keyup that never arrives leaves the key down in
+# the X keymap. Left is the walk key; a leftover down walks the character
+# off a restore. Not the XInput pad - that is pinned absent.
+unstick_x11() {
+	export DISPLAY="${DISPLAY:-:1}"
+	command -v xdotool >/dev/null 2>&1 || return 0
+	xdotool keyup --clearmodifiers \
+		Left Right Up Down \
+		Shift_L Shift_R Control_L Control_R Alt_L \
+		1 2 Return space \
+		2>/dev/null || true
+}
+
+# One save on the title screen, then N restores of that one snapshot.
+#
+# This is the thing shift could not do. D3D9SW_LOAD_VK gives load a key of its
+# own, so each press is independent and nothing has to stay held across a second
+# keystroke - which neither Wine's input path nor this VM's X driver managed.
+# The keys come from the deployed cfg rather than being hardcoded, so a cfg that
+# says something else is tested instead of silently ignored.
+#
+# Waits on the wrapper's own log counters, not on a timer: a press that did not
+# register looks exactly like a restore still running otherwise. And it settles
+# between presses, because a load sent while the previous one was still resuming
+# was dropped.
+cmd_cycle() {
+	local want="${1:-2}" cfg="$GAME/d3d9_sw.cfg"
+	local d11="$GAME/d3d11_sw.log" ss="$GAME/d3d9_sw_savestate_rabiribi.txt"
+	local wid savek loadk pid n before
+
+	need_game
+	game_running || die "the game is not running - tools/linux-rabi.sh launch"
+	command -v xdotool >/dev/null 2>&1 || die "xdotool is needed to send the keys"
+	savek=$(sed -n 's/^D3D9SW_SAVE_VK=//p' "$cfg" | tail -1)
+	loadk=$(sed -n 's/^D3D9SW_LOAD_VK=//p' "$cfg" | tail -1)
+	[[ -n "$savek" ]] || die "D3D9SW_SAVE_VK is not set in $cfg"
+	[[ -n "$loadk" ]] || die "D3D9SW_LOAD_VK is not set in $cfg - load would need shift, \
+which does not survive automation"
+	export DISPLAY="${DISPLAY:-:1}"
+	wid=$(xdotool search --name 'Rabi-Ribi ver' | head -1)
+	[[ -n "$wid" ]] || die "no Rabi-Ribi window"
+	pid=$(pgrep -x 'rabiribi.exe')
+	echo "cycle: pid $pid, save on '$savek', load on '$loadk', $want restore(s)"
+	unstick_x11
+
+	# The keys are sent as single characters, which is what the cfg spells them
+	# as. A function key would need the F5 form, so pass it through as written.
+	#
+	# Nothing here is fatal. Under set -e a failing xdotool - which is what a
+	# window that has just gone away looks like - killed the whole cycle silently,
+	# so a process that died between two restores was reported as neither a
+	# restore nor a death.
+	press() {
+		if ! xdotool windowactivate --sync "$wid" 2>/dev/null; then
+			echo "  press '$1': the window is gone"
+			return 1
+		fi
+		sleep 0.3
+		xdotool keydown --window "$wid" "$1" 2>/dev/null || return 1
+		sleep 0.12
+		xdotool keyup --window "$wid" "$1" 2>/dev/null || true
+		# --window is XSendEvent. Wine's DirectInput path sees XTEST, so a
+		# window-targeted keyup can leave the key down. Release via XTEST,
+		# including Left, so a leftover walk key cannot outlive the press.
+		xdotool keyup --clearmodifiers "$1" 2>/dev/null || true
+		unstick_x11
+		return 0
+	}
+	# Counted from the logs, which are the only place that says a save or a load
+	# actually happened rather than that a key was sent. grep -c prints 0 and
+	# exits 1 on no match, so the exit status is discarded rather than defaulted -
+	# an `|| echo 0` here appended a second line and every comparison after it
+	# was a syntax error.
+	count() {
+		local c
+		c=$(grep -ac "$2" "$1" 2>/dev/null) || true
+		echo "${c:-0}"
+	}
+	saves() { count "$d11" 'savestate saved slot'; }
+	# The savestate log, not the wrapper log. The wrapper prints "restored" after
+	# the rewound thread has returned all the way out, so a restore that lands and
+	# then faults on resume never reaches that line - which read as "the key did
+	# not register" for a restore that had in fact happened. This line is written
+	# while the threads are still frozen.
+	loads() { count "$ss" 'load: slot'; }
+	# Frames, which is the only evidence that the restore left something running
+	# rather than merely alive. A restore can land, resume every thread, and leave
+	# the game spinning at 100% of a core presenting nothing - the window stays
+	# up, `ps` still names a pid, no fault is logged, and a screenshot is white.
+	# Counting pid and faults called that a success for a whole batch of runs.
+	# The wrapper prints one of these every two seconds while it is presenting.
+	presents() { count "$d11" '^present: '; }
+	# Three of those lines, not one. A restore that is about to wedge still
+	# presents for about two seconds first, which is exactly one line, so a
+	# single-line check passed every hung run in the batch that produced these
+	# numbers. Do not reach for a screenshot instead: X keeps the last frame a
+	# window drew, so a wedged game photographs as a perfectly good title screen.
+	drawing() {
+		# Split, not one `local`: with set -u, referring to a name being
+		# declared by the same local is an unbound variable.
+		local was="$1" j
+		local want=$((was + 3))
+		for ((j = 0; j < 40; j++)); do
+			game_running || { echo "  and then it died"; return 2; }
+			if (( $(presents) >= want )); then
+				return 0
+			fi
+			sleep 0.5
+		done
+		echo "  NOT PRESENTING - $(( $(presents) - was )) frame report(s) in 20 s" \
+		     "and then nothing. The process is up, one thread is spinning, and the" \
+		     "window is showing the last frame it managed"
+		return 3
+	}
+	settled() {
+		local what="$1" was="$2" fn="$3" j got died=0
+		for ((j = 0; j < 60; j++)); do
+			game_running || died=1
+			got=$("$fn")
+			if (( got > was )); then
+				echo "  $what: landed after $((j * 500)) ms$(
+					((died)) && echo ", but the process is gone")"
+				((died)) && return 2
+				return 0
+			fi
+			if ((died)); then
+				echo "  $what: THE GAME DIED without logging it"
+				return 2
+			fi
+			sleep 0.5
+		done
+		echo "  $what: never logged - the key did not reach the wrapper"
+		return 1
+	}
+
+	local saves_after_one rc
+	before=$(saves)
+	press "$savek" || die "could not send the save key"
+	settled "save" "$before" saves || return $?
+	ls -lh "$GAME"/d3d9sw_slot0.bin | awk '{print "  slot:", $9, $5}'
+	# The one snapshot every restore below has to come back to. Kept so a load
+	# key that turned out to save is caught: that would pass every check below
+	# and prove nothing.
+	saves_after_one=$(saves)
+	cp -f "$GAME/d3d9sw_slot0.bin" "$DET_SLOT" 2>/dev/null || true
+
+	for ((n = 1; n <= want; n++)); do
+		before=$(loads)
+		# Long enough that the previous restore has finished resuming. A press a
+		# fifth of a second after one landed was swallowed.
+		sleep 3
+		if ! game_running; then
+			echo "  restore $n: the process died before the key was sent," \
+			     "$((n - 1)) restore(s) in"
+			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
+			return 2
+		fi
+		press "$loadk" || {
+			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
+			return 2
+		}
+		local frames_before=$(presents)
+		settled "restore $n" "$before" loads
+		rc=$?
+		echo "  after restore $n: pid $(pgrep -x 'rabiribi.exe' || echo GONE)"
+		if ((rc != 0)); then
+			grep -E 'fault: C0000005' "$ss" | tail -1 | sed 's/^/  /'
+			return $rc
+		fi
+		drawing "$frames_before" || return $?
+		echo "  restore $n: still presenting"
+	done
+
+	if (( $(saves) != saves_after_one )); then
+		echo "  WARNING: something saved again during the restores - the later"
+		echo "  loads did not all come back to the same snapshot"
+	elif [[ -f "$DET_SLOT" ]] && ! cmp -s "$DET_SLOT" "$GAME/d3d9sw_slot0.bin"; then
+		echo "  WARNING: the slot file changed under us"
+	else
+		echo "  slot is still the one save, so every restore came back to it"
+	fi
+	echo "cycle: done, $want restore(s) of one save"
+	cmd_ps
 }
 
 wait_for_game() {
@@ -389,7 +619,7 @@ cmd_stop() {
 }
 
 usage() {
-	sed -n '2,21p' "$0"
+	sed -n '2,26p' "$0"
 }
 
 cmd="${1:-}"
@@ -398,9 +628,11 @@ case "$cmd" in
 	build) cmd_build ;;
 	deploy) cmd_deploy ;;
 	status) cmd_status ;;
+	ps) cmd_ps ;;
 	on) cmd_on ;;
 	off) cmd_off ;;
 	launch) cmd_launch ;;
+	cycle) cmd_cycle "${1:-2}" ;;
 	stop) cmd_stop ;;
 	xrestore) cmd_xrestore "${1:-1200}" "${2:-1800}" ;;
 	-h|--help|help|"") usage ;;
