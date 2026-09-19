@@ -33,41 +33,26 @@ process kept going.**
 Same `ucrtbase+25B5C` ← `mmdevapi` stack as **108167** / **114521**.
 Hook logged `mixer/ucrt ExitProcess(3) - parking tid 504` during
 `resume: releasing 49 thread(s)` of load 8. Zero `fault:` lines after
-that. Later pairs log `dead mixer tid 504 already parked - leave` and
-freeze 34 game threads (15 left running, the extra skip is the parked
-mixer). Held hashes stayed UNCHANGED. UniqueThread+4 stayed `9` and
-`wine_take_state` still rejects it (0/49 SPI, 10208 byte query).
+that. Later pairs log `dead mixer tid 504 already parked - leave` (1587
+hits by load 800) and freeze 34 game threads. Held hashes stayed
+UNCHANGED. UniqueThread+4 stayed `9` and `wine_take_state` still rejects
+it (0/49 SPI, 10208 byte query). One `exit:` line the whole sitting.
 
-**3. 96 loads on the first pass, then a dropped KEY_1 — not a process
-death.**
-`stretch-mixer.sh 120` lived loads 1–96 (~6 s cadence). Save 97 timed
-out at 25 s (`wait_sslog timeout pat=save: slot mark=34383`). Process
-still `Ssl` with the window up. sslog had stopped at load-96 clobber:
-no `save: after dsh_quiet`, no new `exit:`. HP was already 0 at load 90
-(beach, NOVICE). After four minutes idle the window showed
-`CONTINUE?`. Activate + KEY_1 then produced save 97 / load 97 immediately.
-The 25 s miss was the death/CONTINUE overlay, not a wineserver stall on
-the parked mixer. 88 pairs had already completed with tid 504 in
-`Sleep(INFINITE)`.
+**3. Dropped KEY_1/KEY_2 during `CONTINUE?` / HP 0 are driver misses.**
+Save 97 (25 s), load 269 (40 s), then many more after pair 540: each
+timed out, process still `Ssl`, retry completed in ~2 s. Twenty-one
+`ok on retry` lines through load 800. Not a mixer death and not a
+wineserver stall on the parked tid. Driver now retries both keys.
 
-**4. CONTINUE YES, then 200, then past it on the same process.**
-KEY_Z on YES returned to Rabi Rabi Beach with HP 114. KEY_1 rewrote slot
-0 in-world (522.1 MB, 173 regions, 49 threads). Pairs 107–200 all
-`resume: done`. Process still alive at the 200 cap. Player had died
-again (`CONTINUE?`). KEY_Z YES a second time (HP 110) and stretch
-resumed from 204 toward 400.
+**4. 800 loads on one process, still alive.**
+Same linux **118091**, ~6 s cadence, 173 regions / 522.1 MB / 49 threads.
+Loads 1–800 all `resume: done`. Zero `fault:`. Load 400 and load 800
+were in-world at Rabi Rabi Beach (HP 50 at 400, HP 22 at 800 — simple
+KEY_LEFT between pairs, the game happens). Artificial caps: 200, then
+400, then 800. Continue script **196930** picked up at 801 toward 1200
+on the same pid. Wrappers left in the game dir. Process not killed.
 
-**5. Load 269 KEY_2 miss was another death-overlay drop, not a hang.**
-Loads 204–268 lived. Save 269 finished (`save: slot` at sslog 94675,
-522.1 MB). KEY_2 did not produce `load: slot` in 40 s. Process still
-`Ssl`, window still in-world, HP 0 on the sand. Six minutes later
-activate + KEY_2 completed load 269 immediately and restored HP 54
-(the slot was taken before the death). Zero `fault:`. One `exit:` (the
-parked mixer). Stretch restarted at 270 toward 400 with a KEY_2 retry
-in the driver. Wrappers left in the game dir. Process not killed.
-
-**275+ loads on linux 118091 is the new TEX_SCALE=1 record** (was 55 on
-linux **108167**). Still stretching at the time of this note.
+**800 loads is the new TEX_SCALE=1 record** (was 55 on linux **108167**).
 
 ## What this is not
 
@@ -77,20 +62,17 @@ growth still not held. UniqueThread+4 `9` still not treated as a waiter.
 
 ## Next mixer lever
 
-Keep stretching **118091** until it dies or the pair count stops growing.
-Dropped KEY_1/KEY_2 during player death is a driver miss, not a mixer
-death. If a later death is a quiet leave with no `exitpath:` / `exit:`
-line, the next door is whatever bypasses both the IAT and those two
-ntdll int3s. `dsh_quiet` / wineserver has not stalled a save through
-275 loads with tid 504 in `Sleep(INFINITE)`.
+Keep stretching **118091** until it dies. Dropped keys are closed as a
+false death. If a later death is a quiet leave with no `exitpath:` /
+`exit:` line, the next door is whatever bypasses both the IAT and those
+two ntdll int3s. `dsh_quiet` / wineserver has not stalled a completed
+save through 800 loads with tid 504 in `Sleep(INFINITE)`.
 
 ## Left on disk
 
 `/home/fernserver/Downloads/frierenserver-gpu-insession/`
-(`sslog-mixer-exitpath.txt`, `shots/exitpath-after-load-200.png` =
-CONTINUE? at the 200 cap, `shots/exitpath-after-load-269.png` = beach
-HP 54 after the KEY_2 retry). Wrappers left in the snap Steam game dir
-(`bdb4ca7`, md5 `9fa2c0794435ac13dfd31d77fa9c7ca1`). Engine commit local
-`bdb4ca7` on `cursor/gpu-insession-restore-bd2d` (this box cannot git
-push). Docs commit local `b98aa45` then this follow-up on
-`cursor/gpu-insession-docs-bd2d`.
+(`sslog-mixer-exitpath.txt`, `shots/exitpath-after-load-400.png`,
+`shots/exitpath-after-load-800.png` = beach still in-world). Wrappers
+left in the snap Steam game dir (`bdb4ca7`, md5
+`9fa2c0794435ac13dfd31d77fa9c7ca1`). Engine commit local `bdb4ca7` on
+`cursor/gpu-insession-restore-bd2d` (this box cannot git push).

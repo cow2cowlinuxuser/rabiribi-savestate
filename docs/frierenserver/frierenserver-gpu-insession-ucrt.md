@@ -48,7 +48,7 @@ not dumped. Cfg still `GPU=3` `TEX_SCALE=1`. Heap-hold unchanged.
 
 Done: see
 [frierenserver-gpu-insession-exitpath.md](frierenserver-gpu-insession-exitpath.md).
-Arming those two ntdll doors at `FREEZE=0` parked tid 504 and lived **275+
+Arming those two ntdll doors at `FREEZE=0` parked tid 504 and lived **800
 loads** on linux **118091**, process still alive.
 
 ## Left on disk
