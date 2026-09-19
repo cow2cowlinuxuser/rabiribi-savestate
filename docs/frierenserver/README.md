@@ -26,6 +26,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [frierenserver-gpu-insession-stretch.md](frierenserver-gpu-insession-stretch.md) | GPU=3 TEX_SCALE=1 stretch: 44 loads lived on 1fa9e71; load 45 ExitProcess from ucrtbase, no exception |
 | [frierenserver-gpu-insession-heaps.md](frierenserver-gpu-insession-heaps.md) | Holding process-heap growth dies load 1; ExitProcess stack is mmdevapi |
 | [frierenserver-gpu-insession-mixer.md](frierenserver-gpu-insession-mixer.md) | Mixer freeze: SPI already 10 KB and still 0/49; unknown-audio freeze + ignore mixer ExitProcess lived 55 loads (new record) |
+| [frierenserver-gpu-insession-ucrt.md](frierenserver-gpu-insession-ucrt.md) | Returning from ucrtbase ExitProcess retries 2146× then C0000005; park sitting died load 9 with no ExitProcess IAT |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
