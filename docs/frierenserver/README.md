@@ -24,6 +24,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [frierenserver-gpu-insession.md](frierenserver-gpu-insession.md) | GPU=3 in-session: unnamed Wine heaps held; three KEY_1/KEY_2 pairs lived on one process |
 | [frierenserver-gpu-insession-noscale.md](frierenserver-gpu-insession-noscale.md) | GPU=3 TEX_SCALE=1: resource-list sanitize; three KEY_1/KEY_2 pairs lived |
 | [frierenserver-gpu-insession-stretch.md](frierenserver-gpu-insession-stretch.md) | GPU=3 TEX_SCALE=1 stretch: 44 loads lived on 1fa9e71; load 45 ExitProcess from ucrtbase, no exception |
+| [frierenserver-gpu-insession-heaps.md](frierenserver-gpu-insession-heaps.md) | Holding process-heap growth dies load 1; ExitProcess stack is mmdevapi |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
