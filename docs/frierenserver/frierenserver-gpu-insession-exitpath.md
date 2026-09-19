@@ -50,9 +50,18 @@ Loads 1–800 all `resume: done`. Zero `fault:`. Load 400 and load 800
 were in-world at Rabi Rabi Beach (HP 50 at 400, HP 22 at 800 — simple
 KEY_LEFT between pairs, the game happens). Artificial caps: 200, then
 400, then 800. Continue script **196930** picked up at 801 toward 1200
-on the same pid. Wrappers left in the game dir. Process not killed.
+on the same pid.
+
+Load 836: save finished, two KEY_2 retries missed (40 s each) while HP
+was 0. Process still `Rsl`. Click-into-client + KEY_2 four minutes later
+completed load 836 immediately and restored HP 22. `windowactivate`
+alone is not enough on this box once Cursor has the pointer. Driver now
+clicks the client before every key. Stretch restarted at 837 toward
+1200 (script **202304**). Wrappers left in the game dir. Process not
+killed.
 
 **800 loads is the new TEX_SCALE=1 record** (was 55 on linux **108167**).
+Still stretching past 836 at the time of this note.
 
 ## What this is not
 
@@ -63,10 +72,11 @@ growth still not held. UniqueThread+4 `9` still not treated as a waiter.
 ## Next mixer lever
 
 Keep stretching **118091** until it dies. Dropped keys are closed as a
-false death. If a later death is a quiet leave with no `exitpath:` /
-`exit:` line, the next door is whatever bypasses both the IAT and those
-two ntdll int3s. `dsh_quiet` / wineserver has not stalled a completed
-save through 800 loads with tid 504 in `Sleep(INFINITE)`.
+false death; click the game client before KEY_1/KEY_2. If a later death
+is a quiet leave with no `exitpath:` / `exit:` line, the next door is
+whatever bypasses both the IAT and those two ntdll int3s. `dsh_quiet` /
+wineserver has not stalled a completed save through 836 loads with tid
+504 in `Sleep(INFINITE)`.
 
 ## Left on disk
 
