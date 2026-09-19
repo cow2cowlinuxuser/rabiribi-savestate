@@ -46,9 +46,10 @@ not dumped. Cfg still `GPU=3` `TEX_SCALE=1`. Heap-hold unchanged.
 
 ## Next mixer lever
 
-Arm `RtlExitUserProcess` / `NtTerminateProcess` (the existing `exitpath_arm`
-int3) even with `FREEZE=0`, and park that thread instead of freezing the
-whole process. Returning from `ExitProcess` is closed.
+Done: see
+[frierenserver-gpu-insession-exitpath.md](frierenserver-gpu-insession-exitpath.md).
+Arming those two ntdll doors at `FREEZE=0` parked tid 504 and lived **275+
+loads** on linux **118091**, process still alive.
 
 ## Left on disk
 
