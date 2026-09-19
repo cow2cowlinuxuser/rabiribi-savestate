@@ -48,8 +48,9 @@ not dumped. Cfg still `GPU=3` `TEX_SCALE=1`. Heap-hold unchanged.
 
 Done: see
 [frierenserver-gpu-insession-exitpath.md](frierenserver-gpu-insession-exitpath.md).
-Arming those two ntdll doors at `FREEZE=0` parked tid 504 and lived **800
-loads** on linux **118091**, process still alive.
+Arming those two ntdll doors at `FREEZE=0` parked tid 504 and lived **845
+loads** on linux **118091**, then the Steam snap scope tore down (quiet
+leave, no second `exit:`).
 
 ## Left on disk
 

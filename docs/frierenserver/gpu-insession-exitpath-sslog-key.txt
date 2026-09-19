@@ -1,0 +1,52 @@
+# exitpath sitting sslog keys (do not dump rabiribi.exe)
+# linux 118091 / windows pid 316 / bdb4ca7 / md5 9fa2c0794435ac13dfd31d77fa9c7ca1
+
+===== session 2026-09-19 13:02:02, pid 316 =====
+  D3D9SW_FREEZE = 0 (from the cfg file)
+exitpath: RtlExitUserProcess at 7BF32180 will park the caller instead of ending the process
+exitpath: NtTerminateProcess at 7BF1D384 will park the caller instead of ending the process
+  wine: thread states 0/49 from 10208 byte SPI (unparsed)
+  wine: SPI pid 316 dword hits 51, tid dword hits 53, head 000001d0 00000003 00000000 00000000 00000000 00000000 00000000 00000000
+  wine: first tid 320 at SPI +6948: 00000140 00000009 00000000 00000000 00000000 00000000 00000000 00000000
+  wine: audio tid 504 state 0 freeze (spi unknown)
+  wine: froze 35 game/mixer thread(s), left 14 wineserver-side thread(s) running (0 audio still waiting, 0/49 states known)
+save: slot 0, 173 regions, 521.4 MB, 49 threads, 34 context(s), 3 file(s)
+
+## load 8 — mixer ExitProcess parked, process kept going
+exit: ExitProcess called from 7B7A5B5C in C:\windows\system32\ucrtbase.dll, 0 frame(s) since the last restore
+      stack 6001F4A4 in S:\steamapps\common\Rabi-Ribi\d3d11.dll
+      stack 7B7A5B5C in C:\windows\system32\ucrtbase.dll
+      stack 7B7F1F8D in C:\windows\system32\ucrtbase.dll
+      stack 7B7C792B in C:\windows\system32\ucrtbase.dll
+      stack 7B7BF81C in C:\windows\system32\ucrtbase.dll
+      stack 7B7A150E in C:\windows\system32\ucrtbase.dll
+      stack 78A987F3 in C:\windows\system32\mmdevapi.dll
+      stack 78A9459D in C:\windows\system32\mmdevapi.dll
+      no exception preceded this, so the process chose to leave
+  wine: mixer/ucrt ExitProcess(3) - parking tid 504
+  resume: done, all threads runnable
+  held hash after the copy, still frozen: VERDICT 4 held heap(s) UNCHANGED across the copy
+
+## later pairs
+  wine: dead mixer tid 504 already parked - leave
+  wine: froze 34 game/mixer thread(s), left 15 wineserver-side thread(s) running (0 audio still waiting, 0/49 states known)
+  0 fault: lines
+  1 exit: line (the parked mixer)
+  96 resume: done on the first stretch-mixer.sh pass
+  save 97: wait_sslog 25s timeout, process still alive, sslog stopped at load-96 clobber
+  retry KEY_1 after idle: save 97 / load 97 completed
+  CONTINUE? overlay at 13:15; KEY_Z YES returned to beach HP 114; in-world KEY_1 resave 522.1 MB
+  continue 107-200: 200 resume: done, 0 fault:, 1 exit: (parked mixer), process still alive
+  load 200: CONTINUE? again; KEY_Z YES HP 110; stretch resumed 204 toward 400 on same pid 118091
+  load 269: save finished, KEY_2 missed 40s while HP 0 on sand; retry KEY_2 restored HP 54
+  continue 270-400: 400 resume: done (driver quote glitch after cap from editing the running script)
+  continue 401-800: 800 resume: done, 0 fault:, 1 exit:, 21 ok-on-retry (save 540/623/626/687/709/744/760/770/776/779/795, load 541/609/612/647/662/680/699/707/781)
+  load 800: in-world beach HP 22, continue 801-1200 started on same pid 118091 (script 196930)
+  load 836: KEY_2 miss x2 while HP 0; click+KEY_2 restored HP 22
+  save 839: KEY_1 stuck, no dsh_quiet; windowraise+release then save/load 839
+  continue 840-845: load 844 ok 15:18:46; save 845 ok; KEY_2 no resume: done in 40s (15:20:19)
+  sslog next write 18:35:11: load: slot + resume: done (845), held hashes UNCHANGED
+  18:35:14 process gone; 18:35:18 snap.steam.steam scope consumed 7h28m CPU and exited
+  845 resume: done, 0 fault:, 1 exit:, wrapper heap 2MB -> 490MB UNCHANGED
+
+

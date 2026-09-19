@@ -23,45 +23,41 @@ Local `bdb4ca7` (md5 `9fa2c0794435ac13dfd31d77fa9c7ca1`) calls
 `D3D9SW_FREEZE=0`. Both doors int3. The VEH parks the caller with
 `Sleep(INFINITE)` and marks the tid dead so `suspend_all` / `resume_all`
 skip it. Do not return from `ExitProcess`. linux **118091** (windows pid
-**316**): both doors armed on save 1:
-
-`exitpath: RtlExitUserProcess at 7BF32180 will park the caller instead of ending the process`
-`exitpath: NtTerminateProcess at 7BF1D384 will park the caller instead of ending the process`
+**316**): both doors armed on save 1.
 
 **2. The mixer `ExitProcess` parked tid 504 around load 8, and the
 process kept going.**
 Same `ucrtbase+25B5C` ← `mmdevapi` stack as **108167** / **114521**.
 Hook logged `mixer/ucrt ExitProcess(3) - parking tid 504` during
-`resume: releasing 49 thread(s)` of load 8. Zero `fault:` lines after
-that. Later pairs log `dead mixer tid 504 already parked - leave` (1587
-hits by load 800) and freeze 34 game threads. Held hashes stayed
-UNCHANGED. UniqueThread+4 stayed `9` and `wine_take_state` still rejects
-it (0/49 SPI, 10208 byte query). One `exit:` line the whole sitting.
+`resume: releasing 49 thread(s)` of load 8. Zero `fault:` lines the
+whole sitting. One `exit:` line (that park). 1677 later pairs logged
+`dead mixer tid 504 already parked - leave`. Held hashes UNCHANGED.
+UniqueThread+4 stayed `9` (still rejected). Wrapper heap grew 2 MB →
+**490 MB** and stayed UNCHANGED across every copy.
 
-**3. Dropped KEY_1/KEY_2 during `CONTINUE?` / HP 0 are driver misses.**
-Save 97 (25 s), load 269 (40 s), then many more after pair 540: each
-timed out, process still `Ssl`, retry completed in ~2 s. Twenty-one
-`ok on retry` lines through load 800. Not a mixer death and not a
-wineserver stall on the parked tid. Driver now retries both keys.
+**3. Dropped KEY_1/KEY_2 are driver misses, not mixer death.**
+Save 97, load 269, load 836, save 839, and 27 `ok on retry` lines.
+`windowactivate` alone is not enough once Cursor has the pointer. A
+stuck KEY_1 (no rising edge) also misses; `windowraise` + release
+KEY_1/KEY_2/KEY_LEFT then press. Load 840 was in-world beach, HP 22.
 
-**4. 800 loads on one process, still alive.**
-Same linux **118091**, ~6 s cadence, 173 regions / 522.1 MB / 49 threads.
-Loads 1–800 all `resume: done`. Zero `fault:`. Load 400 and load 800
-were in-world at Rabi Rabi Beach (HP 50 at 400, HP 22 at 800 — simple
-KEY_LEFT between pairs, the game happens). Artificial caps: 200, then
-400, then 800. Continue script **196930** picked up at 801 toward 1200
-on the same pid.
+**4. 845 loads, then a quiet leave when the Steam snap scope died.**
+Loads 1–844 `resume: done` on schedule (~6–8 s). Save 845 finished
+(522.1 MB, 173 regions, 49 threads). KEY_2 at ~15:19 did not print
+`resume: done` within 40 s (`wait_sslog` mark 297905). sslog next
+grew at **18:35:11**: `load: slot` + `resume: done` (load 845), held
+hashes UNCHANGED, usual process/wrapper heap check FAILED. Two seconds
+later the driver saw no `rabiribi.exe`. systemd:
 
-Load 836: save finished, two KEY_2 retries missed (40 s each) while HP
-was 0. Process still `Rsl`. Click-into-client + KEY_2 four minutes later
-completed load 836 immediately and restored HP 22. `windowactivate`
-alone is not enough on this box once Cursor has the pointer. Driver now
-clicks the client before every key. Stretch restarted at 837 toward
-1200 (script **202304**). Wrappers left in the game dir. Process not
-killed.
+`snap.steam.steam-…scope: Consumed 7h 28.561s CPU time` at 18:35:18.
 
-**800 loads is the new TEX_SCALE=1 record** (was 55 on linux **108167**).
-Still stretching past 836 at the time of this note.
+No second `exit:`, no `fault:`, no OOM in dmesg. The parked mixer int3
+did not fire again. This is Steam/snap tearing the scope down after a
+~3 h stall on load 845, not a return from `ExitProcess`. Continue
+script **204233** (840→1200) was gone with it. Linux **118091** is
+gone. Wrappers left in the game dir.
+
+**845 loads is the TEX_SCALE=1 record** (was 55 on linux **108167**).
 
 ## What this is not
 
@@ -71,18 +67,20 @@ growth still not held. UniqueThread+4 `9` still not treated as a waiter.
 
 ## Next mixer lever
 
-Keep stretching **118091** until it dies. Dropped keys are closed as a
-false death; click the game client before KEY_1/KEY_2. If a later death
-is a quiet leave with no `exitpath:` / `exit:` line, the next door is
-whatever bypasses both the IAT and those two ntdll int3s. `dsh_quiet` /
-wineserver has not stalled a completed save through 836 loads with tid
-504 in `Sleep(INFINITE)`.
+A new same-box sitting on a fresh process (118091 is gone). Load 845
+stalled ~3 h between `save: slot` and `resume: done` with tid 504 in
+`Sleep(INFINITE)` — wineserver vs parked mixer is back on the table
+for that stall, distinct from the Steam scope teardown that followed.
+If the stall repeats, the next door is whatever the restore waits on
+while the mixer is parked (not another ExitProcess IAT). Do not use
+`xdotool --sync` on a possibly dead window (that is how the driver
+sat on load 845 until 18:35).
 
 ## Left on disk
 
 `/home/fernserver/Downloads/frierenserver-gpu-insession/`
-(`sslog-mixer-exitpath.txt`, `shots/exitpath-after-load-400.png`,
-`shots/exitpath-after-load-800.png` = beach still in-world). Wrappers
-left in the snap Steam game dir (`bdb4ca7`, md5
-`9fa2c0794435ac13dfd31d77fa9c7ca1`). Engine commit local `bdb4ca7` on
-`cursor/gpu-insession-restore-bd2d` (this box cannot git push).
+(`logs/sslog-mixer-exitpath.txt` = 298026 lines, linux **118091**;
+`shots/exitpath-after-load-840.png` = beach HP 22). Wrappers left in
+the snap Steam game dir (`bdb4ca7`, md5 `9fa2c0794435ac13dfd31d77fa9c7ca1`).
+Engine commit local `bdb4ca7` on `cursor/gpu-insession-restore-bd2d`
+(this box cannot git push).
