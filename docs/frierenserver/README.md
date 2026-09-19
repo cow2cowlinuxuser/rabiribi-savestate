@@ -20,6 +20,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [user32-ntdll-crosssession.md](user32-ntdll-crosssession.md) | Why that post-copy death is the Windows GDI/USER32 straddle on Wine |
 | [frierenserver-heldhash-meshook.md](frierenserver-heldhash-meshook.md) | Held-heap hash UNCHANGED; MesHook refused and the game still runs; slotfile A→B still dies on a bad function pointer; CONTINUE+pos patch lives |
 | [frierenserver-commit-hold.md](frierenserver-commit-hold.md) | Host commit fill (960 MB) does not pin the region list; two in-session pairs still restore (VERDICT CHANGED) |
+| [frierenserver-commit-hold-gpu.md](frierenserver-commit-hold-gpu.md) | GPU ladder 0→3 under held host fill: GPU=2/3 draw on adapter; in-session restore dies C0000005 on every GPU>0 |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
