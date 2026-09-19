@@ -1,0 +1,64 @@
+  resume: done, all threads runnable
+  heap check: heap 00150000 (, in the the process heap heap at 00150000, which we leave in the present) FAILED validation after the restore
+  heap check: 5 heap(s) after the restore, 1 failed, 5 ever seen, 0.2 ms
+      (set D3D9SW_HEAPWALK=1 to walk this heap and name the first block it cannot parse - off by default because taking a corrupt heap's lock and traversing it has killed this process before)
+  formatting: 0 call(s) through mono so far this session
+census save: mapid 1, 5 heap(s), 0 KB committed
+  heap 00150000       0 KB  0 region(s)  +0 KB
+  heap 0C240000       0 KB  0 region(s)  +0 KB
+  heap 0C010000       0 KB  0 region(s)  +0 KB
+  heap 02070000       0 KB  0 region(s)  +0 KB
+  heap 001D0000       0 KB  0 region(s)  +0 KB
+census save: 0 of 5 heap(s) changed since the previous census
+content save: 0 chunk(s), 0 unchanged, 0 changed, 0 new, 0 gone - 0 MB of 0 MB differs
+fault: C0000005 at 7BF6025B in ntdll.dll+5025B, thread 316, 0 frame(s) since the last restore
+       focus: came to the foreground, 1202677 ms before the fault
+       reaching: WROTE to 3F800004 (no module)
+       that page: base 3F800000, 276824064 bytes, state RESERVED, not committed, protect 00000000, type private
+       the instruction, in plaintext because we are inside the process: 89 42 04 8B 17 89 10 E9 E1 FD FF FF 2E 8D B4 26
+       registers: eax 3F800000 ebx 1EC9A4F8 ecx 1EC90000 edx 3F800000 esi 0C010000 edi 1EC9A500 ebp 017CF47C esp 017CF438
+       writing 3F800004 (reserved but not committed), allocation base 20000000
+       eax=3F800000 reserved only, held in the present
+       ecx=1EC90000 committed, restored from the save, first word 6009FAA8 (a module address, so plausibly a real vtable)
+       edx=3F800000 reserved only, held in the present
+       ebx=1EC9A4F8 committed, restored from the save, first word 3F800000
+       esp=017CF438 committed, restored from the save, first word 00000006
+       ebp=017CF47C committed, restored from the save, first word 017CF4E8
+       esi=0C010000 committed, in the this wrapper's own heap at 0C010000, which we leave in the present, held in the present, first word 00000000 (zeroed)
+       edi=1EC9A500 committed, restored from the save, first word 3F800000
+       frame 0: ebp 017CF47C, returns to 7BF28D49 in ntdll.dll+18D49
+                saved [ebp-C]=0C010078 committed, in the this wrapper's own heap at 0C010000, which we leave in the present, held in the present, first word 01826988
+                saved [ebp-10]=017CF48C committed, restored from the save, first word 017CF498
+       frame 1: ebp 017CF4E8, returns to 6001F7FA in d3d11.dll+1F7FA
+       frame 2: ebp 017CF504, returns to 60017821 in d3d11.dll+17821
+       frame 3: ebp 017CFD50, returns to 60006C67 in d3d11.dll+6C67
+                saved [ebp-10]=0C010600 committed, in the this wrapper's own heap at 0C010000, which we leave in the present, held in the present, first word 6009F840 (a module address, so plausibly a real vtable)
+       frame 4: ebp 017CFD68, returns to 00476754 in rabiribi.exe+76754
+       frame 5: ebp 017CFD7C, returns to 004A3CA4 in rabiribi.exe+A3CA4
+                saved [ebp-C]=0C010600 committed, in the this wrapper's own heap at 0C010000, which we leave in the present, held in the present, first word 6009F840 (a module address, so plausibly a real vtable)
+                saved [ebp-10]=00476754 committed, in neither the save nor the held set, first word CCCCC35D
+       frame 6: ebp 017CFDF4, returns to 0042B00C in rabiribi.exe+2B00C
+       frame 7: ebp 017CFE04, returns to 004964FB in rabiribi.exe+964FB
+                saved [ebp-C]=0042B00C committed, in neither the save nor the held set, first word 5D08C483
+                saved [ebp-10]=017CFE04 committed, restored from the save, first word 017CFE14
+       frame 8: ebp 017CFE14, returns to 004A803B in rabiribi.exe+A803B
+                saved [ebp-C]=004964FB committed, in neither the save nor the held set, first word 8B04C483
+                saved [ebp-10]=017CFE14 committed, restored from the save, first word 017CFE20
+       frame 9: ebp 017CFE20, returns to 0041253C in rabiribi.exe+1253C
+                saved [ebp-8]=004A803B committed, in neither the save nor the held set, first word 3304C483
+                saved [ebp-C]=017CFE20 committed, restored from the save, first word 017CFE2C
+       frame 10: ebp 017CFE2C, returns to 004BA54E in rabiribi.exe+BA54E
+                saved [ebp-8]=0041253C committed, in neither the save nor the held set, first word 3304C483
+                saved [ebp-C]=017CFE2C committed, restored from the save, first word 017CFE68
+       frame 11: ebp 017CFE68, returns to 006BC50B in rabiribi.exe+2BC50B
+                saved [ebp-8]=3F800000 reserved only, held in the present
+                saved [ebp-C]=006BC4F0 committed, in neither the save nor the held set, first word FF10C483
+                saved [ebp-10]=017CFE90 committed, restored from the save, first word 017CFEE0
+       stack-scan GUESS (may be a dead frame) 600515E7  d3d11.dll+515E7
+       stack-scan GUESS (may be a dead frame) 7BF28D49  ntdll.dll+18D49
+       stack-scan GUESS (may be a dead frame) 7B7DAAC0  ucrtbase.dll+5AAC0
+       stack-scan GUESS (may be a dead frame) 7B7BB8BD  ucrtbase.dll+3B8BD
+       stack-scan GUESS (may be a dead frame) 7B7BB8BD  ucrtbase.dll+3B8BD
+       stack-scan GUESS (may be a dead frame) 60019461  d3d11.dll+19461
+       stack-scan GUESS (may be a dead frame) 7B7BB378  ucrtbase.dll+3B378
+       stack-scan GUESS (may be a dead frame) 6001F7FA  d3d11.dll+1F7FA
