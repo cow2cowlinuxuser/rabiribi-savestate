@@ -20,7 +20,10 @@ A 20-minute wake loop on the Project re-queues [GPU in-session restore](bc-be4b3
 - linux **116114** (`aa44a17`): park mixer with `Sleep(INFINITE)` — 9 loads, then quiet leave, **zero** `ExitProcess` IAT hits. `RtlExitUserProcess` int3 was gated on `FREEZE>=2`. UniqueThread+4 `9` is not a waiter.
 - linux **11211**: heap-bound DLL, `FREEZE=0` did not arm exitpath; DxLib bound Wine `XAudio2_8`; first KEY_2 `ExitProcess` from ucrtbase/mmdevapi.
 - linux **14079**: native `xaudio2_8.dll` attached `xa2_sw`; Wine `waveOut` still pulled mmdevapi; first KEY_2 hung (`C000001D`, parked mixer, no `resume: done`).
-- linux **16955**: mix without Wine waveOut. **First restore lived** (`resume: done`, player back). Then `winevulkan+18E57` → `RtlExitUserProcess`; parking tid 524 froze Present. Sitting: [bound-save10-xa2-winevulkan.md](/cursor/stores/bc-8736ebbb-68f2-4433-8098-b515b0106832/docs/frierenserver/bound-save10-xa2-winevulkan.md)
+- linux **16955**: mix without Wine waveOut. **First restore lived** (`resume: done`, player back). Then `winevulkan+18E57` → `RtlExitUserProcess`; parking tid 524 froze Present. Sitting: [bound-save10-xa2-winevulkan.md](frierenserver/bound-save10-xa2-winevulkan.md)
+- linux **20929**: Flush without Present on save **and** load. Save lived. First restore copied then hung at `resume: releasing`. Pid killed.
+- linux **24023**: Flush plus 200 ms drain. First restore hung at `SetThreadContext` `C000001D`. Pid killed. Flush-then-rewind is a dead end.
+- linux **26458**: Flush on save only; do not park winevulkan. **First restore lived**. Adapter `RtlExitUserProcess` allowed to leave; process gone (Present not frozen). MesHook `C000001D` on tid 524 during the real exit. Sitting: [bound-save10-adapter-flush.md](frierenserver/bound-save10-adapter-flush.md)
 
 ## Constraints
 

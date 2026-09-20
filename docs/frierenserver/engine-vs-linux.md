@@ -67,13 +67,14 @@ click the client. Launch is `steam://rungameid/400910` only.
 
 - Confirm the wrapper-heap bound on a **short** sitting: `0C010000`
   should stay near first-save size. linux **11211** died load 1 on Wine
-  `XAudio2_8`. linux **16955** attached native `xa2_sw`, mixed without
-  Wine waveOut, and the **first restore lived** — then winevulkan
-  `RtlExitUserProcess` parked the presenter. Heap not measured across
-  tens of pairs. See
-  [bound-save10-xa2-winevulkan.md](bound-save10-xa2-winevulkan.md).
-- Adapter door: do not park winevulkan's `RtlExitUserProcess` (it
-  freezes Present). Stop the GPU from wanting to leave after resume.
+  `XAudio2_8`. linux **16955** first restore lived then winevulkan
+  parked Present. linux **26458** first restore lived and the presenter
+  was allowed to leave. Heap not measured across tens of pairs. See
+  [bound-save10-adapter-flush.md](bound-save10-adapter-flush.md).
+- Adapter door: do not park winevulkan (closed: 26458 left instead of
+  freezing Present). Do not Flush before rewind (closed: 20929 / 24023
+  wineserver deadlock). Close load-time command buffers without a
+  wineserver Flush on the rewind path.
 - What restore waits on while the mixer is `Sleep(INFINITE)` (load 845
   stall). The stall may have made RSS worse by leaving the leak running;
   it is not the leak.

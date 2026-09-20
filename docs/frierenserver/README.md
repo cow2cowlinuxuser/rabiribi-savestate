@@ -34,6 +34,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [wrapper-heap-bound.md](wrapper-heap-bound.md) | Free post-save retired COM headers; first candidate to keep wrapper heap 0C010000 flat |
 | [bound-save10-xaudio2-8.md](bound-save10-xaudio2-8.md) | Bound sitting died load 1: Wine XAudio2_8/mmdevapi, xa2_sw never attached |
 | [bound-save10-xa2-winevulkan.md](bound-save10-xa2-winevulkan.md) | Native XAudio2_8 attached; skip Wine waveOut; first restore lived; winevulkan ExitProcess parked presenter |
+| [bound-save10-adapter-flush.md](bound-save10-adapter-flush.md) | Do not park winevulkan; Flush-then-rewind deadlocks wineserver; save-only Flush, first restore lived, presenter allowed to leave |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
