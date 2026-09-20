@@ -75,8 +75,15 @@ click the client. Launch is `steam://rungameid/400910` only.
   31417 / 33277). Do not rewind unnamed `001D0000` (closed: 37661
   warning gone). Do not capture held Wine handle pages (closed: 39948
   partition consistent). Do not park the savestate helper (closed:
-  43397 left). Close CBs without putting DXVK into unix calls across
-  freeze remains open. 37661 leftover rewind `0C4E7AC0` / `0C4D71B0`.
+  43397 left). Do not Flush after resume (closed: 45466 helper, 49235
+  Present). Do not skip DXVK between KEY_1 and KEY_2 as the leave
+  (closed: 53818 still parked). Close CBs without DXVK unix across freeze
+  is closed as the leave; snap Steam confinement is the named seam.
+  Unparking the helper (`f04e7e3`) moved the freeze onto dinput tid 492
+  at `resume: releasing` (linux **57984**). 37661 leftover rewind
+  `0C4E7AC0` / `0C4D71B0`. See
+  [bound-save10-cb-unix.md](bound-save10-cb-unix.md),
+  [bound-save10-snap.md](bound-save10-snap.md).
 - What restore waits on while the mixer is `Sleep(INFINITE)` (load 845
   stall). The stall may have made RSS worse by leaving the leak running;
   it is not the leak.

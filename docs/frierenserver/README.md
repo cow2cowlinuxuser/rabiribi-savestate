@@ -38,6 +38,8 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [bound-save10-presenter-idle.md](bound-save10-presenter-idle.md) | Idle handshake cannot ack: Present thread is already in `request()`. Presenter Flush before `request()` is 24023 again |
 | [bound-save10-unnamed-heaps.md](bound-save10-unnamed-heaps.md) | Unnamed heaps held: 001DCA88 warning gone; first restore lived; winevulkan+23434 still left via process-heap 0015D390 |
 | [bound-save10-handlepage.md](bound-save10-handlepage.md) | Every held Wine handle page excluded; partition consistent; helper Sleep parked the waiter; YieldProcessor then process left |
+| [bound-save10-cb-unix.md](bound-save10-cb-unix.md) | Flush after resume (helper 45466, Present 49235) parks helper; skip-DXVK 53818 still parks; title skip 52672 black window |
+| [bound-save10-snap.md](bound-save10-snap.md) | Snap named: unparking helper/lsteamclient holds dxgi; first restore hangs at resume: releasing; mixer parks dinput tid 492 |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.

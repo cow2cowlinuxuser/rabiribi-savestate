@@ -31,6 +31,11 @@ A 20-minute wake loop on the Project re-queues [GPU in-session restore](bc-be4b3
 - linux **37661**: unnamed Wine heaps held. `001DCA88` rewind warning gone. First restore lived, then `winevulkan+23434` ExitProcess walking process-heap `0015D390` (PARTITION LEAK 1.1 MB). Sitting: [bound-save10-unnamed-heaps.md](frierenserver/bound-save10-unnamed-heaps.md).
 - linux **39948**: every held Wine handle page excluded; `partition: consistent`. First restore lived. Helper `Sleep(1)` hit `C000001D` in kernelbase; VEH parked tid 500 (the helper) as mixer. KEY_2 never started load 2. Pid killed.
 - linux **43397**: helper `YieldProcessor`. First restore lived (167 restored, 0 skipped). Process gone during restore 2; no exitpath flushed. Sitting: [bound-save10-handlepage.md](frierenserver/bound-save10-handlepage.md).
+- linux **45466**: Flush after resume on the helper. Flush returned, then helper `C000001D` at `d3d11.dll+29F4B`; VEH parked tid 504. Pid killed.
+- linux **49235**: Flush on the Present thread after `request()`. Flush returned, helper `C000001D` at `+29F42` anyway. Pid killed.
+- linux **52672**: skip-DXVK on the title auto-save before the adapter was up. Black window. Never CONTINUE.
+- linux **53818**: skip DXVK between KEY_1 and KEY_2 (`gpu_is_up()`). First restore lived (167 restored, 0 skipped). Same helper park at `+29F6B`. Ubuntu “Steam is not responding”. Sitting: [bound-save10-cb-unix.md](frierenserver/bound-save10-cb-unix.md). Catt Man: **snap is the problem** — snap confinement turns Wine unix after restore into `C000001D`; parking the helper freezes the snap window.
+- linux **57984**: do not park helper / lsteamclient; hold dxgi. KEY_1 lived (172 regions). Copy lived (player back). Hung at `resume: releasing`; `C000001D` `kernel32+16B40` tid **492** (dinput/win32u); mixer parked that tid. Helper 504 not parked. Sitting: [bound-save10-snap.md](frierenserver/bound-save10-snap.md).
 
 ## Constraints
 
