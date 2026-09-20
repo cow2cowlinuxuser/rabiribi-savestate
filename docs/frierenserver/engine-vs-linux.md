@@ -65,9 +65,13 @@ click the client. Launch is `steam://rungameid/400910` only.
 
 ## Still open
 
-- Bound the held wrapper heap, or the next GPU=3 stretch will lock the
-  UI again.
+- Confirm the wrapper-heap bound on a **short** sitting: `0C010000`
+  should stay near first-save size. The bound is in
+  [wrapper-heap-bound.md](wrapper-heap-bound.md) (free post-save retired
+  COM headers + `HeapCompact`). Do not GPU-stretch this box until that
+  sitting says flat.
 - What restore waits on while the mixer is `Sleep(INFINITE)` (load 845
-  stall).
+  stall). The stall may have made RSS worse by leaving the leak running;
+  it is not the leak.
 - Cross-session. USER32 rewind (intentionally not). Dumping
   `rabiribi.exe` (intentionally not).
