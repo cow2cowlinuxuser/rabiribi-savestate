@@ -16,10 +16,17 @@ alone). Driver: `cadence-save5.sh` **247198**, 24 cycles × 300 s.
 | 2 | 19:46 | 308 | 316 | CONTINUE? | same, 0 fault — idle death, not a bad copy |
 | 3 | 19:51 | 309 | 321 | CONTINUE? | save/restore of overlay; still 0 fault |
 | 4 | 19:56 | 310 | 326 | in-world beach HP 78 | after YES at 19:54; new save did not disrupt |
+| 5 | 20:01 | 311 | 331 | in-world HP 78 | 0 fault |
+| 6 | 20:06 | 312 | 336 | in-world | 0 fault |
+| 7 | 20:11 | 313 | 341 | in-world HP 50 | 0 fault |
+| 8 | 20:16 | 314 | 346 | in-world HP 88 | 0 fault |
+| 9 | 20:21 | 315 | 351 | CONTINUE? | idle death; YES at 20:22:58 → in-world HP 110 |
+| 10 | 20:26 | 316 | 356 | in-world HP 1 | living save after YES |
+| 11 | 20:31 | 317 | 361 | in-world ~347 KB | 0 fault |
+| 12 | 20:36 | 318 | 366 | in-world ~348 KB | 0 fault |
 
-Counts after cycle 4: **save_slot 310**, **resume 326**, **fault 0**.
-Mixer tid 500 still parked from load 8. 49 threads. Slot still 173
-regions / ~523 MB.
+Counts after cycle 12: **save_slot 318**, **resume 366**, **fault 0**.
+Mixer tid 500 still parked. Cadence **247198** still running toward 24.
 
 ## Does a new save at 5 min disrupt session state?
 
