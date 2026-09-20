@@ -65,18 +65,18 @@ click the client. Launch is `steam://rungameid/400910` only.
 
 ## Still open
 
-- Confirm the wrapper-heap bound on a **short** sitting: `0C010000`
-  should stay near first-save size. linux **11211** died load 1 on Wine
-  `XAudio2_8`. linux **16955** first restore lived then winevulkan
-  parked Present. linux **26458** first restore lived and the presenter
-  was allowed to leave. Heap not measured across tens of pairs. See
-  [bound-save10-presenter-idle.md](bound-save10-presenter-idle.md).
+- Confirm the wrapper-heap bound on a **short** sitting: this sitting
+  the wrapper heap was `0BFE0000` (not `0C010000`). Compact stayed
+  1 header / 0.00 MB at first save. Not measured across tens of pairs.
+  See [bound-save10-handlepage.md](bound-save10-handlepage.md).
 - Adapter door: do not park winevulkan (closed: 26458 left). Do not
   Flush before rewind (closed: 20929 / 24023 helper, **35034**
-  presenter). Do not wait for Present after `request()` — that thread
-  is already the waiter (closed: 28336 / 31417 / 33277). Close CBs
-  without putting DXVK into unix calls across freeze, or stop rewinding
-  what `vkEndCommandBuffer` still holds (`001DCA88` on `001D0000`).
+  presenter). Do not wait for Present after `request()` (closed: 28336 /
+  31417 / 33277). Do not rewind unnamed `001D0000` (closed: 37661
+  warning gone). Do not capture held Wine handle pages (closed: 39948
+  partition consistent). Do not park the savestate helper (closed:
+  43397 left). Close CBs without putting DXVK into unix calls across
+  freeze remains open. 37661 leftover rewind `0C4E7AC0` / `0C4D71B0`.
 - What restore waits on while the mixer is `Sleep(INFINITE)` (load 845
   stall). The stall may have made RSS worse by leaving the leak running;
   it is not the leak.

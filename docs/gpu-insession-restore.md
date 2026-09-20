@@ -28,6 +28,9 @@ A 20-minute wake loop on the Project re-queues [GPU in-session restore](bc-be4b3
 - linux **31417**: user-mode wait, QPC every spin. Idle never acked in 5s. `resume: done`, then winevulkan ExitProcess. Process gone.
 - linux **33277**: hold after DwmFlush, idle before xa2 park. Still no ack. Same leave as 26458.
 - linux **35034**: Flush on the Present thread before `request()`. Flush returned, hung at `SetThreadContext` `C000001D` (thread 480). Same as 24023. Sitting: [bound-save10-presenter-idle.md](frierenserver/bound-save10-presenter-idle.md). The Present thread is already spinning in `request()`; a helper idle wait can never see `gpu_frame_end`.
+- linux **37661**: unnamed Wine heaps held. `001DCA88` rewind warning gone. First restore lived, then `winevulkan+23434` ExitProcess walking process-heap `0015D390` (PARTITION LEAK 1.1 MB). Sitting: [bound-save10-unnamed-heaps.md](frierenserver/bound-save10-unnamed-heaps.md).
+- linux **39948**: every held Wine handle page excluded; `partition: consistent`. First restore lived. Helper `Sleep(1)` hit `C000001D` in kernelbase; VEH parked tid 500 (the helper) as mixer. KEY_2 never started load 2. Pid killed.
+- linux **43397**: helper `YieldProcessor`. First restore lived (167 restored, 0 skipped). Process gone during restore 2; no exitpath flushed. Sitting: [bound-save10-handlepage.md](frierenserver/bound-save10-handlepage.md).
 
 ## Constraints
 

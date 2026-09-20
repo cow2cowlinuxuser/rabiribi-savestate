@@ -36,6 +36,8 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [bound-save10-xa2-winevulkan.md](bound-save10-xa2-winevulkan.md) | Native XAudio2_8 attached; skip Wine waveOut; first restore lived; winevulkan ExitProcess parked presenter |
 | [bound-save10-adapter-flush.md](bound-save10-adapter-flush.md) | Do not park winevulkan; Flush-then-rewind deadlocks wineserver; save-only Flush, first restore lived, presenter allowed to leave |
 | [bound-save10-presenter-idle.md](bound-save10-presenter-idle.md) | Idle handshake cannot ack: Present thread is already in `request()`. Presenter Flush before `request()` is 24023 again |
+| [bound-save10-unnamed-heaps.md](bound-save10-unnamed-heaps.md) | Unnamed heaps held: 001DCA88 warning gone; first restore lived; winevulkan+23434 still left via process-heap 0015D390 |
+| [bound-save10-handlepage.md](bound-save10-handlepage.md) | Every held Wine handle page excluded; partition consistent; helper Sleep parked the waiter; YieldProcessor then process left |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
