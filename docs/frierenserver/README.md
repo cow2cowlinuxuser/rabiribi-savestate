@@ -30,6 +30,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [frierenserver-gpu-insession-exitpath.md](frierenserver-gpu-insession-exitpath.md) | Arm RtlExitUserProcess/NtTerminateProcess at FREEZE=0; park mixer; 845 loads on linux 118091 then Steam snap scope died |
 | [stuck-at-208448.md](stuck-at-208448.md) | After 118091/845 Steam snap teardown: new sitting 208448 at 0 saves; waiting KEY_1 / first dsh_quiet |
 | [cadence-save5-208448.md](cadence-save5-208448.md) | One save then five restores every five minutes on linux 208448 |
+| [engine-vs-linux.md](engine-vs-linux.md) | Proton in-session copy is good (845 then 366 loads, 0 fault); Linux limiter is 7.1 Gi RAM / growing wrapper heap, not resume correctness |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
