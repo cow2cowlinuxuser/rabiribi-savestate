@@ -41,6 +41,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [bound-save10-cb-unix.md](bound-save10-cb-unix.md) | Flush after resume (helper 45466, Present 49235) parks helper; skip-DXVK 53818 still parks; title skip 52672 black window |
 | [bound-save10-snap.md](bound-save10-snap.md) | Snap named: unparking helper/lsteamclient holds dxgi; first restore hangs at resume: releasing; mixer parks dinput tid 492 |
 | [bound-save10-dinputunpark.md](bound-save10-dinputunpark.md) | Do not park dinput: restores 1–2 `resume: done`; process heap 00150000 FAILED; load 3 never logs |
+| [bound-save10-heapvalskip.md](bound-save10-heapvalskip.md) | Skip HeapValidate of held Wine heaps; restore 1 hangs at ctx_verify GetThreadContext C000001D tid 376 |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.

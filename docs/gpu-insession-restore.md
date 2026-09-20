@@ -37,6 +37,7 @@ A 20-minute wake loop on the Project re-queues [GPU in-session restore](bc-be4b3
 - linux **53818**: skip DXVK between KEY_1 and KEY_2 (`gpu_is_up()`). First restore lived (167 restored, 0 skipped). Same helper park at `+29F6B`. Ubuntu “Steam is not responding”. Sitting: [bound-save10-cb-unix.md](frierenserver/bound-save10-cb-unix.md). Catt Man: **snap is the problem** — snap confinement turns Wine unix after restore into `C000001D`; parking the helper freezes the snap window.
 - linux **57984**: do not park helper / lsteamclient; hold dxgi. KEY_1 lived (172 regions). Copy lived (player back). Hung at `resume: releasing`; `C000001D` `kernel32+16B40` tid **492** (dinput/win32u); mixer parked that tid. Helper 504 not parked. Sitting: [bound-save10-snap.md](frierenserver/bound-save10-snap.md).
 - linux **61185**: do not mixer-park dinput/win32u. Restores 1 and 2 `resume: done`. Process heap `00150000` FAILED validation after restore 2. Load 3 never logged `load: slot`. Sitting: [bound-save10-dinputunpark.md](frierenserver/bound-save10-dinputunpark.md).
+- linux **64318**: skip `HeapValidate` of held Wine heaps. Restore start skipped 5, 0 failed. Hung in `ctx_verify` `GetThreadContext` tid 376 err `C000001D`. No `load: slot`. Sitting: [bound-save10-heapvalskip.md](frierenserver/bound-save10-heapvalskip.md).
 
 ## Constraints
 
