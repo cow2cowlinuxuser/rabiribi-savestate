@@ -18,6 +18,9 @@ A 20-minute wake loop on the Project re-queues [GPU in-session restore](bc-be4b3
 - linux **108167** (`acda254`): ignoring mixer `ExitProcess` lived **55 loads**, then a third `ExitProcess` from the same `ucrtbase` caller with a short backtrace actually exited.
 - linux **114521** (`4c25cf2`): ignoring every `ucrtbase` `ExitProcess` and returning retried **2146 times**, then `C0000005` in ucrtbase on the mixer tid. Dead before save 7.
 - linux **116114** (`aa44a17`): park mixer with `Sleep(INFINITE)` — 9 loads, then quiet leave, **zero** `ExitProcess` IAT hits. `RtlExitUserProcess` int3 was gated on `FREEZE>=2`. UniqueThread+4 `9` is not a waiter.
+- linux **11211**: heap-bound DLL, `FREEZE=0` did not arm exitpath; DxLib bound Wine `XAudio2_8`; first KEY_2 `ExitProcess` from ucrtbase/mmdevapi.
+- linux **14079**: native `xaudio2_8.dll` attached `xa2_sw`; Wine `waveOut` still pulled mmdevapi; first KEY_2 hung (`C000001D`, parked mixer, no `resume: done`).
+- linux **16955**: mix without Wine waveOut. **First restore lived** (`resume: done`, player back). Then `winevulkan+18E57` → `RtlExitUserProcess`; parking tid 524 froze Present. Sitting: [bound-save10-xa2-winevulkan.md](/cursor/stores/bc-8736ebbb-68f2-4433-8098-b515b0106832/docs/frierenserver/bound-save10-xa2-winevulkan.md)
 
 ## Constraints
 

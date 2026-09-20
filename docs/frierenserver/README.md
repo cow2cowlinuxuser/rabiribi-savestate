@@ -33,6 +33,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [engine-vs-linux.md](engine-vs-linux.md) | Proton in-session copy is good (845 then 366 loads, 0 fault); Linux limiter is 7.1 Gi RAM / growing wrapper heap, not resume correctness |
 | [wrapper-heap-bound.md](wrapper-heap-bound.md) | Free post-save retired COM headers; first candidate to keep wrapper heap 0C010000 flat |
 | [bound-save10-xaudio2-8.md](bound-save10-xaudio2-8.md) | Bound sitting died load 1: Wine XAudio2_8/mmdevapi, xa2_sw never attached |
+| [bound-save10-xa2-winevulkan.md](bound-save10-xa2-winevulkan.md) | Native XAudio2_8 attached; skip Wine waveOut; first restore lived; winevulkan ExitProcess parked presenter |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
