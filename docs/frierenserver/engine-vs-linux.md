@@ -70,11 +70,13 @@ click the client. Launch is `steam://rungameid/400910` only.
   `XAudio2_8`. linux **16955** first restore lived then winevulkan
   parked Present. linux **26458** first restore lived and the presenter
   was allowed to leave. Heap not measured across tens of pairs. See
-  [bound-save10-adapter-flush.md](bound-save10-adapter-flush.md).
-- Adapter door: do not park winevulkan (closed: 26458 left instead of
-  freezing Present). Do not Flush before rewind (closed: 20929 / 24023
-  wineserver deadlock). Close load-time command buffers without a
-  wineserver Flush on the rewind path.
+  [bound-save10-presenter-idle.md](bound-save10-presenter-idle.md).
+- Adapter door: do not park winevulkan (closed: 26458 left). Do not
+  Flush before rewind (closed: 20929 / 24023 helper, **35034**
+  presenter). Do not wait for Present after `request()` — that thread
+  is already the waiter (closed: 28336 / 31417 / 33277). Close CBs
+  without putting DXVK into unix calls across freeze, or stop rewinding
+  what `vkEndCommandBuffer` still holds (`001DCA88` on `001D0000`).
 - What restore waits on while the mixer is `Sleep(INFINITE)` (load 845
   stall). The stall may have made RSS worse by leaving the leak running;
   it is not the leak.

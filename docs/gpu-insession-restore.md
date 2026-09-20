@@ -24,6 +24,10 @@ A 20-minute wake loop on the Project re-queues [GPU in-session restore](bc-be4b3
 - linux **20929**: Flush without Present on save **and** load. Save lived. First restore copied then hung at `resume: releasing`. Pid killed.
 - linux **24023**: Flush plus 200 ms drain. First restore hung at `SetThreadContext` `C000001D`. Pid killed. Flush-then-rewind is a dead end.
 - linux **26458**: Flush on save only; do not park winevulkan. **First restore lived**. Adapter `RtlExitUserProcess` allowed to leave; process gone (Present not frozen). MesHook `C000001D` on tid 524 during the real exit. Sitting: [bound-save10-adapter-flush.md](frierenserver/bound-save10-adapter-flush.md)
+- linux **28336**: idle-after-Present, helper `Sleep(16)`. Idle never acked. Copy lived, hung at `resume: releasing`. Pid killed.
+- linux **31417**: user-mode wait, QPC every spin. Idle never acked in 5s. `resume: done`, then winevulkan ExitProcess. Process gone.
+- linux **33277**: hold after DwmFlush, idle before xa2 park. Still no ack. Same leave as 26458.
+- linux **35034**: Flush on the Present thread before `request()`. Flush returned, hung at `SetThreadContext` `C000001D` (thread 480). Same as 24023. Sitting: [bound-save10-presenter-idle.md](frierenserver/bound-save10-presenter-idle.md). The Present thread is already spinning in `request()`; a helper idle wait can never see `gpu_frame_end`.
 
 ## Constraints
 
