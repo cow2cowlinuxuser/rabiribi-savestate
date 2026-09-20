@@ -42,6 +42,9 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [bound-save10-snap.md](bound-save10-snap.md) | Snap named: unparking helper/lsteamclient holds dxgi; first restore hangs at resume: releasing; mixer parks dinput tid 492 |
 | [bound-save10-dinputunpark.md](bound-save10-dinputunpark.md) | Do not park dinput: restores 1–2 `resume: done`; process heap 00150000 FAILED; load 3 never logs |
 | [bound-save10-heapvalskip.md](bound-save10-heapvalskip.md) | Skip HeapValidate of held Wine heaps; restore 1 hangs at ctx_verify GetThreadContext C000001D tid 376 |
+| [bound-save10-ctxskip.md](bound-save10-ctxskip.md) | Skip ctx_verify under Wine; restore 1 lived; helper YieldProcessor C000001D then process left |
+| [bound-save10-helperswallow.md](bound-save10-helperswallow.md) | Swallow helper C000001D; restore 1 lived; winevulkan RtlExitUserProcess left |
+| [bound-save10-adapterret.md](bound-save10-adapterret.md) | Return ACCESS_DENIED from adapter ExitProcess; silent death before resume: done |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.

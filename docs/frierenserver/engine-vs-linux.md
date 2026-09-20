@@ -85,12 +85,24 @@ click the client. Launch is `steam://rungameid/400910` only.
   `00150000` FAILED validation after restore 2 and load 3 never logged.
   Skipping HeapValidate of held Wine heaps (`70ab98a`) closed that hang;
   linux **64318** died in `ctx_verify` `GetThreadContext` `C000001D` on
-  tid 376 before `load: slot`. 37661 leftover rewind `0C4E7AC0` /
-  `0C4D71B0`. See
+  tid 376 before `load: slot`. Skipping that read-back (`fa881ae`) let
+  linux **67047** finish restore 1 (`resume: done`, 166 restored);
+  helper tid 500 then `C000001D` at `d3d11.dll+2A742` (`YieldProcessor`
+  wait) and, unparked, actually left (`NtTerminateProcess` then
+  `C0000005` at 0). Swallowing that SIGILL (`0d306a4`) let linux
+  **70105** finish restore 1 with zero helper swallows; winevulkan
+  `+25743` then `RtlExitUserProcess` (DXVK `d3d11+251498`, process-heap
+  `0015D348`) and, unparked, left. Returning ACCESS_DENIED from that
+  exitpath (`819594c`) died silent on linux **72186** after
+  `resume_all` / no-Flush, before `resume: done` (`dsh_play` /
+  `xa2_sw_resume`). 37661 leftover rewind `0C4E7AC0` / `0C4D71B0`. See
   [bound-save10-cb-unix.md](bound-save10-cb-unix.md),
   [bound-save10-snap.md](bound-save10-snap.md),
   [bound-save10-dinputunpark.md](bound-save10-dinputunpark.md),
-  [bound-save10-heapvalskip.md](bound-save10-heapvalskip.md).
+  [bound-save10-heapvalskip.md](bound-save10-heapvalskip.md),
+  [bound-save10-ctxskip.md](bound-save10-ctxskip.md),
+  [bound-save10-helperswallow.md](bound-save10-helperswallow.md),
+  [bound-save10-adapterret.md](bound-save10-adapterret.md).
 - What restore waits on while the mixer is `Sleep(INFINITE)` (load 845
   stall). The stall may have made RSS worse by leaving the leak running;
   it is not the leak.

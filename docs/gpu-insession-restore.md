@@ -38,6 +38,9 @@ A 20-minute wake loop on the Project re-queues [GPU in-session restore](bc-be4b3
 - linux **57984**: do not park helper / lsteamclient; hold dxgi. KEY_1 lived (172 regions). Copy lived (player back). Hung at `resume: releasing`; `C000001D` `kernel32+16B40` tid **492** (dinput/win32u); mixer parked that tid. Helper 504 not parked. Sitting: [bound-save10-snap.md](frierenserver/bound-save10-snap.md).
 - linux **61185**: do not mixer-park dinput/win32u. Restores 1 and 2 `resume: done`. Process heap `00150000` FAILED validation after restore 2. Load 3 never logged `load: slot`. Sitting: [bound-save10-dinputunpark.md](frierenserver/bound-save10-dinputunpark.md).
 - linux **64318**: skip `HeapValidate` of held Wine heaps. Restore start skipped 5, 0 failed. Hung in `ctx_verify` `GetThreadContext` tid 376 err `C000001D`. No `load: slot`. Sitting: [bound-save10-heapvalskip.md](frierenserver/bound-save10-heapvalskip.md).
+- linux **67047**: skip `ctx_verify` under Wine. Restore 1 lived (`resume: done`, 166 restored, player back). Helper tid 500 `C000001D` at `d3d11.dll+2A742` (`helper_main` `YieldProcessor`); unparked, `NtTerminateProcess` then `C0000005` at 0. Process gone. Sitting: [bound-save10-ctxskip.md](frierenserver/bound-save10-ctxskip.md).
+- linux **70105**: swallow helper `C000001D`. Restore 1 lived (zero swallows). winevulkan `+25743` `RtlExitUserProcess` (DXVK `d3d11+251498`, process-heap `0015D348`); unparked, process gone. Sitting: [bound-save10-helperswallow.md](frierenserver/bound-save10-helperswallow.md).
+- linux **72186**: return `ACCESS_DENIED` from adapter ExitProcess. Copy lived. Died after `resume_all` / no-Flush, before `resume: done`. No fault, no return log. Sitting: [bound-save10-adapterret.md](frierenserver/bound-save10-adapterret.md).
 
 ## Constraints
 
