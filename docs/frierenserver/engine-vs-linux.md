@@ -80,10 +80,13 @@ click the client. Launch is `steam://rungameid/400910` only.
   (closed: 53818 still parked). Close CBs without DXVK unix across freeze
   is closed as the leave; snap Steam confinement is the named seam.
   Unparking the helper (`f04e7e3`) moved the freeze onto dinput tid 492
-  at `resume: releasing` (linux **57984**). 37661 leftover rewind
-  `0C4E7AC0` / `0C4D71B0`. See
+  at `resume: releasing` (linux **57984**). Unparking dinput (`6be8732`)
+  let restores 1–2 `resume: done` (linux **61185**); process heap
+  `00150000` FAILED validation after restore 2 and load 3 never logged.
+  37661 leftover rewind `0C4E7AC0` / `0C4D71B0`. See
   [bound-save10-cb-unix.md](bound-save10-cb-unix.md),
-  [bound-save10-snap.md](bound-save10-snap.md).
+  [bound-save10-snap.md](bound-save10-snap.md),
+  [bound-save10-dinputunpark.md](bound-save10-dinputunpark.md).
 - What restore waits on while the mixer is `Sleep(INFINITE)` (load 845
   stall). The stall may have made RSS worse by leaving the leak running;
   it is not the leak.
