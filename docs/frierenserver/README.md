@@ -32,6 +32,7 @@ These files were first committed on the laptop clone as `e8bb9e1` (`docs: add fr
 | [cadence-save5-208448.md](cadence-save5-208448.md) | One save then five restores every five minutes on linux 208448 |
 | [engine-vs-linux.md](engine-vs-linux.md) | Proton in-session copy is good (845 then 366 loads, 0 fault); Linux limiter is 7.1 Gi RAM / growing wrapper heap, not resume correctness |
 | [wrapper-heap-bound.md](wrapper-heap-bound.md) | Free post-save retired COM headers; first candidate to keep wrapper heap 0C010000 flat |
+| [bound-save10-xaudio2-8.md](bound-save10-xaudio2-8.md) | Bound sitting died load 1: Wine XAudio2_8/mmdevapi, xa2_sw never attached |
 | [code-vs-game-boundary.md](code-vs-game-boundary.md) | Three agents: wrappers, game, Wine. Wrappers remain the artifact; docs describe the seam |
 
 Related: `docs/windows_savestate_ownership.md`.
