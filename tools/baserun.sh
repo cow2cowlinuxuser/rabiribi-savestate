@@ -44,13 +44,35 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-GAME="${RABI_DIR:-$HOME/.steam/debian-installation/steamapps/common/Rabi-Ribi}"
+STEAM_ROOT="${STEAM_ROOT:-$HOME/.steam/debian-installation}"
+GAME="${RABI_DIR:-$STEAM_ROOT/steamapps/common/Rabi-Ribi}"
 [ -d "$GAME" ] || { echo "no Rabi-Ribi at $GAME - set RABI_DIR" >&2; exit 1; }
+
+PROTON="${RABI_PROTON:-$STEAM_ROOT/steamapps/common/Proton - Experimental/proton}"
+COMPAT="${STEAM_COMPAT_DATA_PATH:-$STEAM_ROOT/steamapps/compatdata/400910}"
+WRAP="$STEAM_ROOT/ubuntu12_32/steam-launch-wrapper"
+REAPER="$STEAM_ROOT/ubuntu12_32/reaper"
+SLR="$STEAM_ROOT/steamapps/common/SteamLinuxRuntime_4/_v2-entry-point"
 
 LOG="$GAME/d3d9_sw_savestate_rabiribi.txt"
 CFG="$GAME/d3d9_sw.cfg"
 KEEP="det/base-linux"
 mkdir -p "$KEEP"
+# A leftover launch*.txt from a crashed earlier sweep would mix into the answer.
+rm -f "$KEEP"/launch*.txt
+
+# Extra args on the exe line (or steam://run/APPID//args) pop Steam's
+# "Launch Game with custom arguments" dialog. linux-rabi.sh launches with
+# none by default; RABI_NOAUDIO=1 is the opt-in silence. Same here.
+# Match the Wine process by name, not by command line: the launcher chain
+# all carry the exe path as an argument.
+[ -x "$WRAP" ] && [ -x "$REAPER" ] && [ -x "$SLR" ] && [ -x "$PROTON" ] \
+	|| { echo "steam-launch-wrapper/reaper/proton/SLR missing" >&2; exit 1; }
+export DISPLAY="${DISPLAY:-:1}"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_ROOT"
+export STEAM_COMPAT_DATA_PATH="$COMPAT"
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-d3d11,dxgi,xaudio2_9,xinput1_4=n,b}"
+ATTACH="$GAME/d3d11_sw.log"
 
 # The module table is only printed when a save is taken, so the sweep needs one.
 # QUIT_AT then ends every launch at the same frame - a run that stops whenever
@@ -75,7 +97,41 @@ restore_cfg() {
 }
 trap restore_cfg EXIT
 
-running() { pgrep -f 'rabiribi\.exe' >/dev/null 2>&1; }
+# Wine's process args look like S:\steamapps\common\Rabi-Ribi\rabiribi.exe.
+# pgrep -f rabiribi.exe also matches steam-launch-wrapper / this script, so a
+# sweep would think the game was still up after QUIT_AT and then pkill itself.
+running() {
+	pgrep -x 'rabiribi.exe' >/dev/null 2>&1
+}
+
+kill_game() {
+	pkill -x 'rabiribi.exe' 2>/dev/null || true
+}
+
+# A wine process that exists for a second is not a session. The first sweep
+# treated Proton's boot stub as "started" then "exited" and reported 0 of 0
+# modules moved. The module table is in the savestate log, which only exists
+# after our d3d11.dll has attached and taken a save.
+attached() {
+	running || return 1
+	[ -f "$ATTACH" ] || return 1
+	[ -f "$KEEP/.t0" ] || return 1
+	local t0 mt
+	t0=$(cat "$KEEP/.t0")
+	mt=$(stat -c %Y "$ATTACH")
+	[ "$mt" -ge "${t0%.*}" ] || return 1
+	grep -q 'process attach' "$ATTACH" 2>/dev/null
+}
+
+wait_until_attached() {
+	local t=0
+	while [ "$t" -lt "$START_TIMEOUT" ]; do
+		if attached; then return 0; fi
+		sleep 1
+		t=$((t + 1))
+	done
+	return 1
+}
 
 wait_for() { # wait_for <seconds> <predicate-true-means-done>
 	local t=0
@@ -97,19 +153,30 @@ cfg_set D3D11SW_GPU 0
 for i in $(seq 1 "$N"); do
 	printf '\n=== launch %d of %d ===\n' "$i" "$N"
 	rm -f "$LOG"
-	steam "steam://rungameid/$APPID" >/dev/null 2>&1 &
+	date +%s >"$KEEP/.t0"
+	# Same line as tools/linux-rabi.sh. No extra argv: that is the dialog.
+	args=()
+	[[ -n "${RABI_NOAUDIO:-}" ]] && args+=(-noaudio)
+	"$WRAP" -- "$REAPER" SteamLaunch AppId="$APPID" -- \
+		"$SLR" --verb=waitforexitandrun -- \
+		"$PROTON" waitforexitandrun "$GAME/rabiribi.exe" "${args[@]}" \
+		>/dev/null 2>&1 &
 
-	if ! wait_for "$START_TIMEOUT" running; then
+	if ! wait_until_attached; then
 		echo "  never started, skipping"
+		kill_game
 		continue
 	fi
-	echo "  started"
+	echo "  started (wrapper attached)"
 
 	if ! wait_for "$RUN_TIMEOUT" not_running; then
 		echo "  did not close itself, ending it"
-		pkill -f 'rabiribi\.exe' || true
+		kill_game
 		sleep 2
 	fi
+	# Let wineserver finish tearing down so the next launch is a real process,
+	# not a half-dead prefix.
+	sleep 5
 
 	# Archived before parsing, not after. The Windows sweep deleted each trace
 	# at the top of the loop and read it at the bottom; when the read failed,

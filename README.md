@@ -102,6 +102,10 @@ nine tracks responsible, and the `D3D9SW_GHVORBIS` knob that reports them live.
   reads the asset archive, `tagdiff.py` and `trdiff.py` compare two allocation
   traces by block identity rather than by address, `symres.c` turns the
   `module+RVA` in a fault report into a function and source line.
+  `linux-rabi.sh` / `xrestore.sh` / `wrapper.sh` are the Linux restore path
+  (Proton + the Steam game, not distro Wine + a no-game harness). They still
+  compile with `zig cc -target x86-windows-gnu`; they do not add a Wine/MinGW
+  toolchain. Proton Launch Options is `-noaudio`; launch with `steam://rungameid`.
 - `examples/rabiribi/` — the configuration the game is actually run with.
 
 ## Building
@@ -113,6 +117,41 @@ Needs [zig](https://ziglang.org) as the C compiler.
 ```
 
 `build.ps1` also deploys to hardcoded local paths for other titles. Trim it.
+
+## Linux (Proton)
+
+This is the Linux restore path going forward: Proton Experimental, the Steam
+copy of Rabi-Ribi, and `tools/linux-rabi.sh`. Distro Wine plus a no-game
+harness is a separate Cloud Agent environment; it does not run the game.
+
+In-session save and restore work under Proton, including room to room in the
+same world. F5 saves, Shift+F5 loads. First launch is language select; later
+launches go straight to the title. Proton Launch Options is `-noaudio`
+(this VM has no `/dev/snd`; Windows uses `-xaudio2`). Launch with
+`steam://rungameid` so Steam supplies that flag itself. Passing it on
+the exe line becomes `steam://run/400910//-noaudio` and the Linux
+client prompts "Launch Game with custom arguments".
+
+```
+tools/linux-rabi.sh build
+tools/linux-rabi.sh deploy
+tools/linux-rabi.sh launch
+```
+
+`xrestore` always sets `D3D11SW_GPU=0`. Native DllOverrides in the Proton
+prefix make the game-folder `d3d11.dll` win over DXVK. Wine/Proton is
+detected at save time (`wine_get_version`): only game threads are frozen,
+HeapWalk is skipped, and xa2/gpu park is skipped so the helper does not
+wait on wineserver.
+
+Operator notes for a local copy of this harness:
+[`tools/linux-harness.md`](tools/linux-harness.md). Module-map sweep is
+`./tools/baserun.sh -n 6`.
+
+A zip of the Proton session logs (savestate + wrapper, not the 471 MB slot
+`.bin`) is in [`logs/linux-proton-room-to-room.zip`](logs/linux-proton-room-to-room.zip).
+Two launches of the module-base sweep (same map, exe at `00400000`) are in
+[`logs/linux-proton-baserun-partial.zip`](logs/linux-proton-baserun-partial.zip).
 
 ## Running the harness
 

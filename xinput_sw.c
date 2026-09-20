@@ -188,7 +188,12 @@ DWORD WINAPI XInputGetState(DWORD idx, XI_STATE *st)
 	if (pinned()) {
 		/* Zeroed rather than left alone: a caller that ignores the return
 		 * value then reads a stale packet number would see motion that
-		 * never happened, which is the opposite of the point. */
+		 * never happened, which is the opposite of the point.
+		 *
+		 * A stuck Left is not this path. When pinned, every pad is absent
+		 * so a D-pad cannot walk the character. The walk key is the
+		 * keyboard, which DirectInput reads and which a restore can leave
+		 * held - that release lives in the savestate engine, not here. */
 		if (st)
 			memset(st, 0, sizeof(*st));
 		return ERROR_DEVICE_NOT_CONNECTED;
