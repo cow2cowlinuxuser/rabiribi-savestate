@@ -74,7 +74,6 @@ typedef struct Held {
 	int rw_wine;
 } Held;
 
-static HANDLE g_engine_heap;
 static HANDLE g_wine_heap;
 static EngineBlock *g_engine;
 static WinePeer *g_wine;
@@ -181,11 +180,14 @@ static DWORD WINAPI presenter_main(LPVOID unused)
 
 static int world_setup(unsigned seed)
 {
-	g_engine_heap = HeapCreate(0, 64 * 1024, 0);
 	g_wine_heap = HeapCreate(HEAP_GROWABLE, 0, 0);
-	if (!g_engine_heap || !g_wine_heap)
+	if (!g_wine_heap)
 		return 0;
-	g_engine = (EngineBlock *)HeapAlloc(g_engine_heap, HEAP_ZERO_MEMORY, sizeof(*g_engine));
+	/* Engine payload is private VirtualAlloc so the snapshot captures it.
+	 * A HeapCreate heap is unnamed under Wine and is held (handle-page
+	 * exclusion) — that is the wine peer, not the payload. */
+	g_engine = (EngineBlock *)VirtualAlloc(NULL, sizeof(*g_engine), MEM_COMMIT | MEM_RESERVE,
+					       PAGE_READWRITE);
 	g_wine = (WinePeer *)HeapAlloc(g_wine_heap, HEAP_ZERO_MEMORY, sizeof(*g_wine));
 	g_seed = (LogicalSeed *)VirtualAlloc(NULL, sizeof(*g_seed), MEM_COMMIT | MEM_RESERVE,
 					     PAGE_READWRITE);
@@ -212,7 +214,7 @@ static void world_teardown(void)
 		g_dxgi = NULL;
 	}
 	if (g_engine) {
-		HeapFree(g_engine_heap, 0, g_engine);
+		VirtualFree(g_engine, 0, MEM_RELEASE);
 		g_engine = NULL;
 	}
 	if (g_wine) {
@@ -223,9 +225,9 @@ static void world_teardown(void)
 		HeapDestroy(g_wine_heap);
 		g_wine_heap = NULL;
 	}
-	if (g_engine_heap) {
-		HeapDestroy(g_engine_heap);
-		g_engine_heap = NULL;
+	if (g_seed) {
+		VirtualFree(g_seed, 0, MEM_RELEASE);
+		g_seed = NULL;
 	}
 }
 
@@ -420,10 +422,14 @@ static int xsession_cmd(const char *cmd, const char *file, unsigned seed)
 		fp = fnv1a(g_seed->pix, sizeof(g_seed->pix));
 		printf("xsession restore: seed=%u pix_fp %s dxgi_gen=%u (recreated)\n",
 		       snap.seed.seed, fp == snap.seed.fp ? "MATCH" : "DIFF", g_dxgi->gen);
-		world_teardown();
-		if (fp == snap.seed.fp && g_dxgi->gen == snap.seed.seed) {
-			printf("PASS: recreate+re-pin from logical seed\n");
-			return 0;
+		{
+			int pass = (fp == snap.seed.fp && g_dxgi->gen == snap.seed.seed);
+
+			world_teardown();
+			if (pass) {
+				printf("PASS: recreate+re-pin from logical seed\n");
+				return 0;
+			}
 		}
 		printf("FAIL\n");
 		return 1;
