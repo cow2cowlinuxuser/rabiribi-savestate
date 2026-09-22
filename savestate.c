@@ -5417,7 +5417,15 @@ static int wine_freeze_this(PVOID start, unsigned state)
 		return 0;
 	name = strrchr(path, '\\');
 	name = name ? name + 1 : path;
-	if (_strnicmp(name, "steam", 5) == 0 || _strnicmp(name, "gameoverlay", 11) == 0)
+	/* Steam overlay, Wine Steam IPC (lsteamclient — prefix "steam" misses it),
+	 * dinput/win32u waiters, and DXVK/winevulkan workers. Parking any of
+	 * those is "Steam is not responding" or a silent leave. The Present
+	 * thread is frozen only because request() already has it in a user-mode
+	 * spin; do not SuspendThread a presenter that is still in Present. */
+	if (_strnicmp(name, "steam", 5) == 0 || _strnicmp(name, "gameoverlay", 11) == 0 ||
+	    !_stricmp(name, "lsteamclient.dll") || _strnicmp(name, "dinput", 6) == 0 ||
+	    !_stricmp(name, "win32u.dll") || !_stricmp(name, "winevulkan.dll") ||
+	    _strnicmp(name, "dxvk", 4) == 0)
 		return 0;
 	return 1;
 }
@@ -6588,6 +6596,16 @@ static void heaps_partition(void)
 		} else {
 			m = heap_claimed_by(h, &votes);
 			who = m >= 0 ? g_ctl->mod_name[m] : "no clear owner";
+			/* Wine has no 0xFFEEFFEE HEAP_SEGMENT, so votes stay 0 and
+			 * ALLHEAPS=2 rewinds the heap. linux 82152 lived when those
+			 * unnamed heaps stayed in the present; linux 26458/31417/
+			 * 33277 died vkEndCommandBuffer after rewinding 001D0000
+			 * under tid 524's 001DCA88. Hold them. Handle-page exclude
+			 * for every held Wine heap is below, after heap_ours is
+			 * final - not only unnamed. */
+			if (ss_under_wine() && m < 0)
+				g_ctl->heap_ours[k] = 0;
+			else
 			/* Mode 2 keeps an unclaimed heap rather than stranding it,
 			 * since the only heaps that must stay behind are the ones
 			 * Windows reaches from data outside the save. */
@@ -6638,6 +6656,18 @@ static void heaps_partition(void)
 				       "combined against 15.81 MB outside them, which is the "
 				       "whole argument for doing this\n");
 		}
+		/* Wine has no HEAP_SEGMENT, so the segment-exclude loop below never
+		 * sees handle pages. linux 82fd84a held unnamed heaps only
+		 * (001DCA88 warning gone) then winevulkan+23434 walked 0015D390
+		 * on process heap 00150000: PARTITION LEAK 1.1 MB still captured
+		 * the process-heap and wrapper-heap handle pages. 82152 lived
+		 * when every held Wine heap's handle page stayed in the present.
+		 * Not the header-list walk (process-heap growth); that killed
+		 * load 1 in rabiribi.exe. Engine payload only. */
+		if (ss_under_wine() && !g_ctl->heap_ours[k])
+			ss_exclude_as("Wine heap left in the present",
+				      (void *)g_ctl->heap_lo[k],
+				      (size_t)(g_ctl->heap_hi[k] - g_ctl->heap_lo[k]));
 		lstrcpynA(g_ctl->heap_name[k], who, sizeof(g_ctl->heap_name[k]));
 		if (first)
 			ss_log("    heap %p %-24s %s (%d vote(s))\n", (void *)h, who,
@@ -9469,11 +9499,34 @@ static void ss_inventory(Slot *s)
 	ss_log("===== end inventory =====\n\n");
 }
 
+/* linux 61185: restore 1 and 2 lived, then HeapValidate of held process
+ * heap 00150000 FAILED after restore 2. Load 3 never logged load: slot —
+ * do_load's first act is heap_check("as the restore begins"), which takes
+ * that heap's lock while Present is in request() and DXVK may be in
+ * RtlAllocateHeap. Wine heap is not Windows HEAP. Do not HEAPWALK it.
+ * Do not hold process-heap growth. Skip HeapValidate for heaps we leave
+ * in the present so the next KEY_2 can start. */
+static int wine_heap_held(HANDLE h)
+{
+	int k;
+
+	if (!ss_under_wine() || !h)
+		return 0;
+	if (h == GetProcessHeap())
+		return 1;
+	if (!g_ctl || g_ctl->nheaps <= 0)
+		return 0;
+	for (k = 0; k < g_ctl->nheaps && k < SS_MAX_HEAPS; k++)
+		if (g_ctl->heap_h[k] == h)
+			return !g_ctl->heap_ours[k];
+	return 0;
+}
+
 static void heap_check(const char *when)
 {
 	HANDLE heaps[SS_MAX_HEAPS], failed[SS_MAX_HEAPS];
 	DWORD n, i;
-	int bad = 0;
+	int bad = 0, skipped = 0;
 	LARGE_INTEGER freq, t0, t1;
 
 	if (!heapcheck_mode() || !g_ctl)
@@ -9487,6 +9540,10 @@ static void heap_check(const char *when)
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&t0);
 	for (i = 0; i < n; i++) {
+		if (wine_heap_held(heaps[i])) {
+			skipped++;
+			continue;
+		}
 		if (HeapValidate(heaps[i], 0, NULL))
 			continue;
 		if (bad < SS_MAX_HEAPS)
@@ -9502,8 +9559,8 @@ static void heap_check(const char *when)
 	 * each time the log looked exactly like a healthy run. A number that tracks
 	 * the live count upward is the evidence that silence means "nothing was
 	 * lost" rather than "there was nothing to lose". */
-	ss_log("  heap check: %u heap(s) %s, %d failed, %d ever seen, %.1f ms\n",
-	       (unsigned)n, when, bad, g_seen ? g_seen->n : -1,
+	ss_log("  heap check: %u heap(s) %s, %d failed, %d skipped (held Wine), %d ever seen, %.1f ms\n",
+	       (unsigned)n, when, bad, skipped, g_seen ? g_seen->n : -1,
 	       (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)freq.QuadPart);
 	/* Deliberately after the summary. The walk can be fatal, and a fatal
 	 * diagnostic that also destroys the line saying how many heaps failed
@@ -15352,8 +15409,12 @@ static DWORD WINAPI helper_main(LPVOID param)
 		LONG req;
 		LARGE_INTEGER h0, h1, hf;
 
+		/* linux 39948: after a living first restore, helper Sleep(1)
+		 * hit C000001D in kernelbase (wineserver). VEH then parked tid
+		 * 500 - this thread, not xa2 - as mixer, so KEY_2 could not
+		 * start load 2. YieldProcessor is local, like request(). */
 		while ((req = InterlockedExchange(&g_ctl->request, REQ_NONE)) == REQ_NONE)
-			Sleep(1);
+			YieldProcessor();
 		QueryPerformanceCounter(&h0);
 		g_ctl->result = (req == REQ_SAVE) ? do_save((int)g_ctl->slot)
 						  : do_load((int)g_ctl->slot);
@@ -15686,7 +15747,13 @@ int savestate_load(int slot)
 {
 	/* Nothing after the request. The calling thread is rewound into the save
 	 * and never arrives back here - see the note beside the diff report in
-	 * do_load, which is where post-restore reporting has to live. */
+	 * do_load, which is where post-restore reporting has to live.
+	 *
+	 * Do not Flush here. linux 35034: presenter Flush then request() hung
+	 * SetThreadContext C000001D, same as helper Flush (24023). The Present
+	 * thread is about to spin in request(); it will not Present. Snapshot
+	 * copy is taken from Present after swrast_flush, so software CBs are
+	 * idle. Do not vkEndCommandBuffer unix-wait on the rewind path. */
 	if (g_ctl)
 		g_ctl->diff_same = g_ctl->diff_wrote = 0;
 	return request(REQ_LOAD, slot);

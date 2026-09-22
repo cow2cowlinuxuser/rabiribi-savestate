@@ -28,6 +28,10 @@ Write-Host "built ss_harness.exe (savestate engine, no game)"
 # outside the game itself, which is the worst place to find one.
 & $zig cc @warn -target x86-windows-gnu -o ss_harness32.exe ss_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c -luser32 -lwinmm
 
+# Harness-positive save/copy/restore rules against the real engine, no game.
+& $zig cc @warn -target x86-windows-gnu -o port_harness32.exe port_harness.c savestate.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c -luser32 -lwinmm
+if ($LASTEXITCODE -eq 0) { "built port_harness32.exe (engine port sitting, no game)" }
+
 # A DirectSound streaming loop with no game attached, to find out whether the
 # negative-length copy is a property of the arrangement or of how this game
 # uses it. 32-bit to match the title.

@@ -7015,6 +7015,8 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 	d11_trace("Present #%d %ux%u hwnd=%p bbwrites=%u nrt=%d cbmaps=%ld bufmaps=%ld",
 		s->bb ? s->bb->id : -1, s->bb ? s->bb->width : 0, s->bb ? s->bb->height : 0,
 		s->hwnd, g_bb_writes, g_frame_nrt, g_cb_maps, g_buf_maps);
+	/* Software CBs close here. Copy from this Present only after idle;
+	 * never freeze the presenter mid-record, never End a dead encoder. */
 	swrast_flush();
 	{
 		int i, best = -1;
@@ -7141,6 +7143,10 @@ static HRESULT WINAPI Swap_Present(IDXGISwapChain1 *this, UINT sync, UINT flags)
 			 * of one. */
 			if (savestate_last_was_restore()) {
 				ledger_reap();
+				/* Behavior: recreate GPU DXGI from the live HWND.
+				 * Software swapchain COM lives on the held wrapper
+				 * heap; real adapter COM must not be memcpy'd. */
+				gpu_dxgi_reconcile(s->hwnd);
 				d11_log("savestate restored slot %d in %.1f ms, resumed "
 					"through the save it was taking",
 					k, savestate_last_ms());
