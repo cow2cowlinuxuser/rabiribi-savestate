@@ -12707,9 +12707,12 @@ static int do_save(int slotno)
 		 * different experiment from the one the config describes, and the only
 		 * evidence was a zero in the middle of the load line. */
 		ss_log("  heap blocks: OFF for this save - D3D9SW_HEAPBLOCKS reads as %d, "
-		       "so the restore will put back whole heap regions instead%s\n",
+		       "so Windows HeapWalk is not used%s\n",
 		       blk_mode(),
-		       ss_under_wine() ? " (Wine heap is not Windows HEAP)" : "");
+		       ss_under_wine() ? " (Wine heap is not Windows HEAP; the "
+					 "redirected game heap restores from GhHead "
+					 "busy blocks instead of a wholesale memcpy)"
+				       : "");
 	}
 	QueryPerformanceCounter(&t_susp);
 	build_exclusions();
@@ -14088,6 +14091,37 @@ static void live_peer_pages_collect(void)
 					live_page_scan((const uintptr_t *)p,
 						       (size_t)(stop - p) / sizeof(uintptr_t));
 				p = stop;
+			}
+		}
+		/* The TEB hop list is small private tables. The live stack is
+		 * where a mixer actually keeps the pointers it is using. Do not
+		 * GetThreadContext (wineserver). NT_TIB StackBase/StackLimit
+		 * are user-readable. */
+		{
+			uintptr_t stack_base = w[1], stack_limit = w[2], p;
+
+			if (stack_limit && stack_base > stack_limit &&
+			    stack_base - stack_limit <= 0x200000) {
+				p = stack_limit;
+				while (p < stack_base) {
+					MEMORY_BASIC_INFORMATION mbi;
+					uintptr_t stop;
+
+					if (VirtualQuery((LPCVOID)p, &mbi,
+							 sizeof(mbi)) != sizeof(mbi))
+						break;
+					stop = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+					if (stop > stack_base)
+						stop = stack_base;
+					if (stop <= p)
+						break;
+					if (mbi.State == MEM_COMMIT &&
+					    !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+						live_page_scan((const uintptr_t *)p,
+							       (size_t)(stop - p) /
+								       sizeof(uintptr_t));
+					p = stop;
+				}
 			}
 		}
 		if (named++ < 8) {
