@@ -54,6 +54,7 @@ int savestate_patch_iat(HMODULE mod, void *from, void *to);
 int savestate_patch_iat_named(HMODULE mod, const char *dll, const char *fn, void *to,
 			      void **prev);
 void savestate_game_heap(HANDLE h);
+void savestate_exclude(void *p, size_t bytes);
 /* Defined further down with the note on why a fixed base is what makes a layout
  * reproducible. Declared here because the installer runs above it. */
 static HANDLE gh_create_heap(void);
@@ -352,6 +353,90 @@ static int gh_tag_take(const void *u, unsigned *site, unsigned *size, unsigned *
 	return 0;
 }
 
+/* Busy-block sidetable: heapwalk without invoking the heap.
+ *
+ * HeapWalk / HEAP_SEGMENT is a closed door on Wine. Scanning the saved
+ * image for GhHead magic is a walk of the heap's bytes, not of the live
+ * set: one session found 2 blocks against hundreds live, because the
+ * scan jumped by aligned size and missed. We already intercept every
+ * game malloc and free. The live (user, size) pairs are therefore a
+ * thing we already know, kept in a table that is not itself on the heap.
+ *
+ * The live table is present-tense. A snapshot is taken after suspend_all
+ * at save, packed into a second excluded array, and that is what restore
+ * walks. After the copy, the live table is rewound to the snapshot so
+ * free/realloc see the set the game believes is live.
+ *
+ * Same constraints as the tags: this runs inside the game's malloc, so
+ * it must not allocate, must not lock, and must not touch a file. */
+#define GH_BUSY_SLOTS 16384u
+#define GH_BUSY_MASK (GH_BUSY_SLOTS - 1u)
+#define GH_BUSY_DEAD ((LONG)1)
+
+typedef struct {
+	volatile LONG addr; /* 0 empty, 1 tomb, else the user pointer */
+	size_t size;
+} GhBusy;
+
+typedef struct {
+	void *head;
+	size_t total;
+} GhBusySnap;
+
+static GhBusy *g_busy;
+static volatile LONG g_busy_n, g_busy_full, g_busy_congested;
+static GhBusySnap *g_busy_snap;
+static unsigned g_busy_snap_n, g_busy_snap_cap;
+
+static void gh_busy_put(const void *u, size_t n)
+{
+	unsigned h, i;
+
+	if (!g_busy || !u)
+		return;
+	h = gh_mix((unsigned)(uintptr_t)u) & GH_BUSY_MASK;
+	for (i = 0; i < GH_PROBE; i++) {
+		unsigned s = (h + i) & GH_BUSY_MASK;
+		LONG was = InterlockedCompareExchange(&g_busy[s].addr,
+						      (LONG)(uintptr_t)u, 0);
+
+		if (was != 0) {
+			was = InterlockedCompareExchange(&g_busy[s].addr,
+							 (LONG)(uintptr_t)u,
+							 GH_BUSY_DEAD);
+			if (was != GH_BUSY_DEAD)
+				continue;
+		}
+		g_busy[s].size = n;
+		InterlockedIncrement(&g_busy_n);
+		return;
+	}
+	InterlockedIncrement(&g_busy_full);
+}
+
+static int gh_busy_take(const void *u)
+{
+	unsigned h, i;
+
+	if (!g_busy || !u)
+		return 0;
+	h = gh_mix((unsigned)(uintptr_t)u) & GH_BUSY_MASK;
+	for (i = 0; i < GH_PROBE; i++) {
+		unsigned s = (h + i) & GH_BUSY_MASK;
+		LONG a = g_busy[s].addr;
+
+		if (a == 0)
+			return 0;
+		if (a != (LONG)(uintptr_t)u)
+			continue;
+		InterlockedExchange(&g_busy[s].addr, GH_BUSY_DEAD);
+		InterlockedDecrement(&g_busy_n);
+		return 1;
+	}
+	InterlockedIncrement(&g_busy_congested);
+	return 0;
+}
+
 typedef void *(__cdecl *PFN_malloc)(size_t);
 typedef void *(__cdecl *PFN_calloc)(size_t, size_t);
 typedef void *(__cdecl *PFN_realloc)(void *, size_t);
@@ -481,6 +566,7 @@ static void *give(void *raw, size_t n)
 	h->magic = GH_MAGIC ^ (uintptr_t)u;
 	h->size = n;
 	note_region(u);
+	gh_busy_put(u, n);
 	g_alloc++;
 	return u;
 }
@@ -597,6 +683,7 @@ static void gh_free(void *p)
 	}
 	gh_peek_free(p);
 	gh_vorbis_free(p, (unsigned)h->size);
+	gh_busy_take(p);
 	HeapFree(g_heap, 0, h);
 }
 
@@ -640,7 +727,10 @@ static void *gh_realloc_at(void *p, size_t n, unsigned site)
 		raw = HeapReAlloc(g_heap, 0, h, n + sizeof(GhHead));
 		if (raw)
 			{
-				void *u = give(raw, n);
+				void *u;
+
+				gh_busy_take(p);
+				u = give(raw, n);
 
 				if (!named) {
 					osite = site;
@@ -743,6 +833,8 @@ static void *gh_expand(void *p, size_t n)
 	if (!raw)
 		return NULL;
 	h->size = n;
+	gh_busy_take(p);
+	gh_busy_put(p, n);
 	return p;
 }
 
@@ -921,6 +1013,7 @@ static BOOL WINAPI gh_heapfree(HANDLE heap, DWORD flags, LPVOID p)
 		g_freed_ours++;
 		gh_peek_free(p);
 		gh_vorbis_free(p, (unsigned)h->size);
+		gh_busy_take(p);
 		return HeapFree(g_heap, flags, h);
 	}
 	/* The floor has to hold for the orphan case too, and this is the route the
@@ -1039,6 +1132,38 @@ int gameheap_install(void)
 		return 0;
 	}
 	InitializeCriticalSection(&g_cs);
+
+	/* Always, not only under GHTRACE: the tag table names blocks for a
+	 * diagnostic; this table IS the live set restore walks. Excluded so a
+	 * rewind cannot take the journal away while it is being used to rewind
+	 * the heap the journal describes. */
+	g_busy = (GhBusy *)VirtualAlloc(NULL, GH_BUSY_SLOTS * sizeof(GhBusy),
+					MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	g_busy_snap = (GhBusySnap *)VirtualAlloc(NULL,
+						GH_BUSY_SLOTS * sizeof(GhBusySnap),
+						MEM_COMMIT | MEM_RESERVE,
+						PAGE_READWRITE);
+	if (g_busy && g_busy_snap) {
+		g_busy_snap_cap = GH_BUSY_SLOTS;
+		savestate_exclude(g_busy, GH_BUSY_SLOTS * sizeof(GhBusy));
+		savestate_exclude(g_busy_snap,
+				  GH_BUSY_SLOTS * sizeof(GhBusySnap));
+		ss_log("gameheap: busy-block sidetable at %p (%u slots), snapshot "
+		       "at %p - Wine restore walks this instead of HeapWalk or a "
+		       "linear GhHead scan\n",
+		       (void *)g_busy, GH_BUSY_SLOTS, (void *)g_busy_snap);
+	} else {
+		if (g_busy) {
+			VirtualFree(g_busy, 0, MEM_RELEASE);
+			g_busy = NULL;
+		}
+		if (g_busy_snap) {
+			VirtualFree(g_busy_snap, 0, MEM_RELEASE);
+			g_busy_snap = NULL;
+		}
+		ss_log("gameheap: busy-block sidetable reservation failed - restore "
+		       "falls back to scanning saved bytes for GhHead magic\n");
+	}
 
 	/* Every forwarding path complete before any jump exists, then ready, then
 	 * the jumps. A call arriving midway through the last step reaches a
@@ -1593,8 +1718,15 @@ void gameheap_report(void)
 		return;
 	}
 	ss_log("gameheap: %lu allocation(s) served, %lu freed to us, %lu passed back "
-	       "to the runtime, %lu too big to take, %lu region(s) mapped\n",
-	       g_alloc, g_freed_ours, g_freed_theirs, g_toobig, (unsigned long)g_nreg);
+	       "to the runtime, %lu too big to take, %lu region(s) mapped, %ld "
+	       "busy live (sidetable)%s\n",
+	       g_alloc, g_freed_ours, g_freed_theirs, g_toobig, (unsigned long)g_nreg,
+	       (long)g_busy_n, g_busy ? "" : " - NO TABLE");
+	if (g_busy_full || g_busy_congested)
+		ss_log("gameheap: %ld busy insert(s) missed the table, %ld take(s) "
+		       "gave up searching - the sidetable is too small or too "
+		       "full of tombstones\n",
+		       (long)g_busy_full, (long)g_busy_congested);
 	/* The number two design notes wanted before anything was armed. Zero says
 	 * the runtime's allocator and the executable's other Heap callers never
 	 * traded a block; anything else says they do, and says we caught it. */
@@ -1640,4 +1772,62 @@ int gameheap_saved_block(const void *saved, void *live_head, size_t remain, size
 		return 0;
 	*n = total;
 	return 1;
+}
+
+unsigned gameheap_busy_snapshot(void)
+{
+	unsigned i, n = 0;
+
+	g_busy_snap_n = 0;
+	if (!g_busy || !g_busy_snap)
+		return 0;
+	for (i = 0; i < GH_BUSY_SLOTS; i++) {
+		LONG a = g_busy[i].addr;
+		size_t sz;
+
+		if (a == 0 || a == GH_BUSY_DEAD)
+			continue;
+		sz = g_busy[i].size;
+		if (!sz || sz >= GH_BIG)
+			continue;
+		if (n >= g_busy_snap_cap)
+			break;
+		g_busy_snap[n].head = (char *)(uintptr_t)a - sizeof(GhHead);
+		g_busy_snap[n].total = sizeof(GhHead) + sz;
+		n++;
+	}
+	g_busy_snap_n = n;
+	return n;
+}
+
+unsigned gameheap_busy_saved_count(void)
+{
+	return g_busy_snap_n;
+}
+
+int gameheap_busy_saved_at(unsigned i, void **head, size_t *total)
+{
+	if (!head || !total || !g_busy_snap || i >= g_busy_snap_n)
+		return 0;
+	*head = g_busy_snap[i].head;
+	*total = g_busy_snap[i].total;
+	return 1;
+}
+
+void gameheap_busy_rewind(void)
+{
+	unsigned i;
+
+	if (!g_busy || !g_busy_snap || !g_busy_snap_n)
+		return;
+	memset(g_busy, 0, GH_BUSY_SLOTS * sizeof(GhBusy));
+	g_busy_n = 0;
+	g_busy_full = 0;
+	g_busy_congested = 0;
+	for (i = 0; i < g_busy_snap_n; i++) {
+		void *u = (char *)g_busy_snap[i].head + sizeof(GhHead);
+		size_t sz = g_busy_snap[i].total - sizeof(GhHead);
+
+		gh_busy_put(u, sz);
+	}
 }

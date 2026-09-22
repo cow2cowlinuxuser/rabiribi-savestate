@@ -2008,6 +2008,10 @@ void ds_sw_report(void);
 void xa2_sw_report(void);
 void gameheap_report(void);
 int gameheap_saved_block(const void *saved, void *live_head, size_t remain, size_t *n);
+unsigned gameheap_busy_snapshot(void);
+unsigned gameheap_busy_saved_count(void);
+int gameheap_busy_saved_at(unsigned i, void **head, size_t *total);
+void gameheap_busy_rewind(void);
 void xa2_sw_pump(void);
 void xa2_sw_park(void);
 void xa2_sw_quiesce(void);
@@ -12702,17 +12706,31 @@ static int do_save(int slotno)
 		ss_log("  heap blocks: mapped %u busy block(s) across %u locked heap(s)\n",
 		       g_blk_save_n, g_blk_locked_n);
 	} else {
+		unsigned nbusy = 0;
+
 		/* Said out loud because the quiet version of this cost three runs.
 		 * With block mode off the restore puts back whole regions, which is a
 		 * different experiment from the one the config describes, and the only
-		 * evidence was a zero in the middle of the load line. */
+		 * evidence was a zero in the middle of the load line.
+		 *
+		 * Wine has no HEAP_SEGMENT, so HeapWalk is not used. The redirected
+		 * game heap still has a live set: we intercepted every malloc. The
+		 * snapshot is taken here, after suspend_all, so it describes the
+		 * same instant the page copy is about to capture. */
+		if (ss_under_wine() && blk_mode())
+			nbusy = gameheap_busy_snapshot();
 		ss_log("  heap blocks: OFF for this save - D3D9SW_HEAPBLOCKS reads as %d, "
 		       "so Windows HeapWalk is not used%s\n",
 		       blk_mode(),
-		       ss_under_wine() ? " (Wine heap is not Windows HEAP; the "
-					 "redirected game heap restores from GhHead "
-					 "busy blocks instead of a wholesale memcpy)"
-				       : "");
+		       ss_under_wine()
+			       ? " (Wine heap is not Windows HEAP; redirected game "
+				 "heap restores from the busy-block sidetable, not "
+				 "HeapWalk)"
+			       : "");
+		if (ss_under_wine() && blk_mode())
+			ss_log("  wine gameheap: sidetable snapshot %u busy block(s) "
+			       "(no HeapWalk)\n",
+			       nbusy);
 	}
 	QueryPerformanceCounter(&t_susp);
 	build_exclusions();
@@ -14191,12 +14209,43 @@ static int win_copy_except_live(Window *w, unsigned long long pos, void *mem, si
 
 /* Wine HEAPBLOCKS for the redirected game heap: put back busy GhHead blocks
  * from the save, leave allocator lists (and any live-peer pages) in the present.
- * Never falls back to a wholesale memcpy - that is the named leave. */
+ * Never falls back to a wholesale memcpy - that is the named leave.
+ *
+ * Preferred source is the sidetable snapshot taken after suspend: that is the
+ * exact live set, with no HeapWalk and no scan of heap bytes. The GhHead image
+ * scan remains for a slot that has no snapshot (cross-session, or the table
+ * was never reserved). */
 static int wine_gameheap_copy(Window *w, unsigned long long pos, void *live, size_t n)
 {
 	size_t off = 0;
 	int nblk = 0;
 	unsigned long long wrote = 0;
+	unsigned i, nbusy = gameheap_busy_saved_count();
+
+	if (nbusy) {
+		for (i = 0; i < nbusy; i++) {
+			void *head = NULL;
+			size_t blk = 0;
+
+			if (!gameheap_busy_saved_at(i, &head, &blk))
+				continue;
+			if ((uintptr_t)head < (uintptr_t)live)
+				continue;
+			off = (uintptr_t)head - (uintptr_t)live;
+			if (off >= n || blk > n - off)
+				continue;
+			if (!win_copy_except_live(w, pos + off, head, blk))
+				return -1;
+			nblk++;
+			wrote += blk;
+		}
+		ss_log("  wine gameheap: %d of %u sidetable block(s) copied, %llu KB "
+		       "written, %llu KB left as lists/live-peer pages (no HeapWalk, "
+		       "no wholesale memcpy)\n",
+		       nblk, nbusy, wrote >> 10,
+		       (unsigned long long)(n - (size_t)wrote) >> 10);
+		return nblk;
+	}
 
 	while (off + 8 <= n) {
 		unsigned char head[16];
@@ -14216,8 +14265,9 @@ static int wine_gameheap_copy(Window *w, unsigned long long pos, void *live, siz
 		wrote += blk;
 		off += (blk + 7u) & ~(size_t)7u;
 	}
-	ss_log("  wine gameheap: %d busy block(s) copied, %llu KB written, %llu KB "
-	       "left as lists/live-peer pages (no wholesale memcpy)\n",
+	ss_log("  wine gameheap: %d busy block(s) copied by GhHead scan (no "
+	       "sidetable snapshot), %llu KB written, %llu KB left as "
+	       "lists/live-peer pages (no wholesale memcpy)\n",
 	       nblk, wrote >> 10, (unsigned long long)(n - (size_t)wrote) >> 10);
 	return nblk;
 }
@@ -15045,6 +15095,10 @@ static int do_load(int slotno)
 			pos += size;
 		}
 		win_close(&wv);
+		/* Live table is excluded, so it is still present-tense. The game
+		 * now believes the save-time set is live. Rewind the journal to
+		 * match; no-op when there was no snapshot. */
+		gameheap_busy_rewind();
 		/* The blocks themselves, now that every heap region has been left
 		 * untouched and its offset recorded. One pass over the matched
 		 * list; a block whose region was not captured finds no home and is
