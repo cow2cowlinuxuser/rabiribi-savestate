@@ -2009,6 +2009,7 @@ void xa2_sw_report(void);
 void gameheap_report(void);
 void xa2_sw_pump(void);
 void xa2_sw_park(void);
+void xa2_sw_quiesce(void);
 void xa2_sw_resume(void);
 void dsh_play(void);
 
@@ -3342,10 +3343,63 @@ static BOOL(WINAPI *g_real_terminate)(HANDLE, UINT);
 static void(__cdecl *g_real_exit)(int);
 static void(__cdecl *g_real_uexit)(int);
 static void(__cdecl *g_real_amsg)(int);
+static void(__cdecl *g_real_abort)(void);
+
+/* Sticky until the op returns: who is in savestate, and which stage. The
+ * ExitProcess hook reads these because "chose to leave" previously named
+ * only the CRT thunk, not the thread or whether copy was in progress. */
+static const char *g_ss_op;
+static DWORD g_ss_op_tid;
+
+static void ss_op_set(const char *op)
+{
+	g_ss_op = op;
+	g_ss_op_tid = GetCurrentThreadId();
+}
+
+static void ss_name_leave_tid(DWORD tid);
 
 static void WINAPI hook_exitprocess(UINT code)
 {
-	exit_report("ExitProcess", __builtin_return_address(0));
+	void *bt[12];
+	USHORT n, k;
+	DWORD tid = GetCurrentThreadId();
+	void *caller = __builtin_return_address(0);
+	uintptr_t c = (uintptr_t)caller;
+
+	exit_report("ExitProcess", caller);
+	ss_log("      tid %lu code %u ss_op=%s ss_op_tid=%lu%s\n", (unsigned long)tid,
+	       (unsigned)code, g_ss_op ? g_ss_op : "(none)", (unsigned long)g_ss_op_tid,
+	       (g_ss_op_tid && tid == g_ss_op_tid) ? " - this IS the savestate thread"
+						   : " - a present peer (not the savestate thread)");
+	if (g_real_uexit) {
+		uintptr_t e = (uintptr_t)(void *)g_real_uexit;
+		if (c >= e && c < e + 128)
+			ss_log("      caller sits inside CRT _exit (+%X) - intra-module "
+			       "teardown; IAT exit/_exit would not see it\n",
+			       (unsigned)(c - e));
+	}
+	if (g_real_exit) {
+		uintptr_t e = (uintptr_t)(void *)g_real_exit;
+		if (c >= e && c < e + 128)
+			ss_log("      caller sits inside CRT exit (+%X)\n", (unsigned)(c - e));
+	}
+	if (g_real_abort) {
+		uintptr_t e = (uintptr_t)(void *)g_real_abort;
+		if (c >= e && c < e + 64)
+			ss_log("      caller sits inside CRT abort\n");
+	}
+	if (code == 3)
+		ss_log("      exit code 3 is the CRT abort/_exit convention "
+		       "(invalid_parameter, abort, or _invoke_watson)\n");
+	ss_name_leave_tid(tid);
+	n = CaptureStackBackTrace(0, 12, bt, NULL);
+	for (k = 0; k < n; k++) {
+		unsigned off = 0;
+		const char *mod = ss_module((uintptr_t)bt[k], &off);
+		ss_log("      leave stack[%u] %p %s+%X\n", (unsigned)k, bt[k],
+		       mod ? mod : "?", off);
+	}
 	g_real_exitprocess(code);
 }
 
@@ -3378,8 +3432,6 @@ static void __cdecl hook_amsg(int c)
 /* Mono finishes a fatal error with abort(), which reaches process death inside
  * ntdll rather than through any import we can watch, so the abort call itself is
  * the last observable point. */
-static void(__cdecl *g_real_abort)(void);
-
 static void __cdecl hook_abort(void)
 {
 	exit_report("abort", __builtin_return_address(0));
@@ -5439,8 +5491,12 @@ static int wine_freeze_this(PVOID start, unsigned state)
 static void park_audio_gpu(void)
 {
 	if (ss_under_wine()) {
-		ss_phase("  wine: not parking xa2/gpu - waveOutPause and Present wait "
-			 "on wineserver; mixer stays loaded\n");
+		/* waveOutPause / DXGI Present wait on wineserver. Our mix thread
+		 * lives in this DLL and can idle in user-mode without that. Pulse
+		 * stays loaded. */
+		ss_phase("  wine: xa2 user-mode quiesce only; skipping waveOutPause/"
+			 "Present (wineserver). mixer device stays loaded\n");
+		xa2_sw_quiesce();
 		return;
 	}
 	xa2_sw_park();
@@ -10663,6 +10719,29 @@ static void collect_threads(void)
 
 static char g_did_suspend[SS_MAX_THREADS];
 
+static void ss_name_leave_tid(DWORD tid)
+{
+	int i;
+
+	if (!g_ctl) {
+		ss_log("      no control block; cannot name the leave thread\n");
+		return;
+	}
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned off = 0;
+		const char *mod;
+		if (g_ctl->ids[i] != tid)
+			continue;
+		mod = g_ctl->starts[i] ? ss_module((uintptr_t)g_ctl->starts[i], &off) : NULL;
+		ss_log("      leave tid start %p (%s+%X) freeze=%s\n", g_ctl->starts[i],
+		       mod ? mod : "?", off,
+		       g_did_suspend[i] ? "WAS FROZEN (should not run)" : "LEFT RUNNING");
+		return;
+	}
+	ss_log("      leave tid is not in the freeze roster (requester or born after "
+	       "collect)\n");
+}
+
 static void suspend_all(void)
 {
 	int i, froze = 0, skipped = 0, audio_wait = 0, known = 0;
@@ -12485,6 +12564,7 @@ static int do_save(int slotno)
 
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t_begin);
+	ss_op_set("save");
 
 	/* Here rather than at hooks install, where the arena cannot be taken yet:
 	 * blk_arena registers an exclusion, and there is no control block to
@@ -14012,6 +14092,7 @@ static int do_load(int slotno)
 		slotfile_read(slotno, s);
 	if (!s->valid)
 		return 0;
+	ss_op_set("load");
 	/* Sampled here, before a single byte moves, because this is the only moment
 	 * that answers the question. A heap created after the snapshot exists right
 	 * now and will not exist in a moment; if the record of it is not taken on
@@ -14046,9 +14127,11 @@ static int do_load(int slotno)
 		 * nothing left to observe about what the present sounded like. */
 		dsh_mark_present();
 		dsh_quiet();
+		ss_op_set("load-park");
 		park_audio_gpu();
 		if (want)
 			blk_lock_all();
+		ss_op_set("load-freeze");
 		collect_threads();
 		suspend_all();
 		if (want) {
@@ -14529,6 +14612,7 @@ static int do_load(int slotno)
 	 * region's saved protection back as it goes - a region that was PAGE_NOACCESS
 	 * at save time would fault on being read a moment later. Here it is still
 	 * PAGE_EXECUTE_READWRITE, so the comparison is free of that problem. */
+	ss_op_set("load-copy");
 	{
 		Window wv;
 		unsigned long long vwords = 0;
@@ -15216,6 +15300,7 @@ static int do_load(int slotno)
 		       g_ctl->diff_wrote >> 20, g_ctl->diff_same >> 20,
 		       tot ? (g_ctl->diff_same * 100) / tot : 0, tot >> 20);
 	}
+	ss_op_set("load-resume");
 	ss_log("load: slot %d, %d restored, %d skipped, %d by block, %d threads, %d newer "
 	       "than save%s\n",
 	       slotno, restored, skipped, blocked, g_ctl->nids, g_ctl->last_fresh,

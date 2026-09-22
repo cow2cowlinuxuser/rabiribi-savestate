@@ -866,23 +866,36 @@ static void cb_drop(void)
 	LeaveCriticalSection(&g_cs);
 }
 
-void xa2_sw_park(void)
+/* User-mode only: drop pending callbacks and idle the mix thread. No
+ * waveOutPause - that waits on wineserver under Proton. */
+void xa2_sw_quiesce(void)
 {
-	int spins;
+	LARGE_INTEGER pf, t0, now;
 
-	/* Ahead of the g_out_live test: the ring fills from the game's own calls,
-	 * so it has entries to drop whether or not a mixer was ever started. */
 	cb_drop();
 	if (!g_out_live)
 		return;
 	InterlockedExchange(&g_mix_park, 1);
 	SetEvent(g_mix_wake);
-	for (spins = 0; spins < 200 && !g_mix_idle; spins++)
-		Sleep(1);
+	QueryPerformanceFrequency(&pf);
+	QueryPerformanceCounter(&t0);
+	while (!g_mix_idle) {
+		QueryPerformanceCounter(&now);
+		if ((now.QuadPart - t0.QuadPart) * 1000 > pf.QuadPart * 200)
+			break;
+		YieldProcessor();
+	}
 	if (!g_mix_idle)
 		ss_log("xa2_sw: the mixer did not park within 200 ms - the copy is "
 		       "going ahead anyway, so treat any audio corruption in this "
 		       "restore as explained\n");
+}
+
+void xa2_sw_park(void)
+{
+	xa2_sw_quiesce();
+	if (!g_out_live)
+		return;
 	waveOutPause(g_wo);
 }
 
