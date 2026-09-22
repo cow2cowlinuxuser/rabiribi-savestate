@@ -1615,3 +1615,29 @@ void gameheap_report(void)
 		       "this\n",
 		       g_fellback, g_regfull, g_stale);
 }
+
+/* HEAPBLOCKS for this heap under Wine, without HeapWalk. Wine has no Windows
+ * HEAP_SEGMENT, so the engine used to memcpy the whole region - lists, TLS
+ * objects a LEFT RUNNING mmdevapi thread still holds, everything. The magic
+ * is keyed to the user pointer, so a word that merely looks busy does not
+ * match. */
+int gameheap_saved_block(const void *saved, void *live_head, size_t remain, size_t *n)
+{
+	const GhHead *h;
+	uintptr_t user;
+	size_t total;
+
+	if (!saved || !live_head || !n || remain < sizeof(GhHead))
+		return 0;
+	h = (const GhHead *)saved;
+	user = (uintptr_t)live_head + sizeof(GhHead);
+	if (h->magic != (GH_MAGIC ^ user))
+		return 0;
+	if (!h->size || h->size >= GH_BIG)
+		return 0;
+	total = sizeof(GhHead) + h->size;
+	if (total > remain)
+		return 0;
+	*n = total;
+	return 1;
+}

@@ -2007,6 +2007,7 @@ void dsh_survey(void);
 void ds_sw_report(void);
 void xa2_sw_report(void);
 void gameheap_report(void);
+int gameheap_saved_block(const void *saved, void *live_head, size_t remain, size_t *n);
 void xa2_sw_pump(void);
 void xa2_sw_park(void);
 void xa2_sw_quiesce(void);
@@ -13973,6 +13974,220 @@ static int poke_skipped(uintptr_t base)
 	return poke_hit(g_skip_list, g_skip_n, base);
 }
 
+/* Pages a LEFT RUNNING thread currently holds a pointer into, on a heap we
+ * would otherwise memcpy. mmdevapi tid 524 ExitProcess(3) during load-copy
+ * was that memcpy: its TLS still pointed at gameheap 0CE20000 while we
+ * rewrote the region wholesale. Do not SuspendThread those peers (wineserver).
+ * Leave the pages they hold in the present. */
+#define SS_LIVE_PAGES 256
+static uintptr_t g_live_page[SS_LIVE_PAGES];
+static int g_live_page_n;
+static unsigned long long g_live_skip_bytes;
+
+static int live_page_held(uintptr_t a)
+{
+	uintptr_t pg = a & ~(uintptr_t)0xFFF;
+	int i;
+
+	for (i = 0; i < g_live_page_n; i++)
+		if (g_live_page[i] == pg)
+			return 1;
+	return 0;
+}
+
+static int live_page_in_span(uintptr_t base, size_t n)
+{
+	int i;
+
+	for (i = 0; i < g_live_page_n; i++)
+		if (g_live_page[i] >= base && g_live_page[i] < base + n)
+			return 1;
+	return 0;
+}
+
+static void live_page_note(uintptr_t a)
+{
+	uintptr_t pg = a & ~(uintptr_t)0xFFF;
+
+	if (!pg || live_page_held(pg) || g_live_page_n >= SS_LIVE_PAGES)
+		return;
+	g_live_page[g_live_page_n++] = pg;
+}
+
+static void live_page_scan(const uintptr_t *w, size_t words)
+{
+	size_t k;
+
+	for (k = 0; k < words; k++) {
+		int h = heap_index_of(w[k]);
+
+		if (h < 0 || !g_ctl->heap_ours[h])
+			continue;
+		live_page_note(w[k]);
+	}
+}
+
+static void live_peer_pages_collect(void)
+{
+	int i, named = 0;
+
+	g_live_page_n = 0;
+	g_live_skip_bytes = 0;
+	if (!g_ctl)
+		return;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		const uintptr_t *w;
+		uintptr_t hops[16];
+		unsigned k;
+		int nhops = 0, j;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		w = (const uintptr_t *)teb;
+		live_page_scan(w, 0x1000 / sizeof(uintptr_t));
+		for (k = 0; k < 0x1000 / sizeof(uintptr_t) && nhops < 16; k++) {
+			MEMORY_BASIC_INFORMATION mbi;
+			uintptr_t ab, span;
+
+			if (w[k] < 0x10000 ||
+			    VirtualQuery((LPCVOID)w[k], &mbi, sizeof(mbi)) != sizeof(mbi))
+				continue;
+			if (mbi.State != MEM_COMMIT || mbi.Type != MEM_PRIVATE ||
+			    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+				continue;
+			ab = (uintptr_t)mbi.AllocationBase;
+			span = alloc_span(ab);
+			if (!span || span > 0x10000 || heap_index_of(ab) >= 0)
+				continue;
+			for (j = 0; j < nhops; j++)
+				if (hops[j] == ab)
+					break;
+			if (j == nhops)
+				hops[nhops++] = ab;
+		}
+		for (j = 0; j < nhops; j++) {
+			uintptr_t end = hops[j] + alloc_span(hops[j]), p = hops[j];
+
+			while (p < end) {
+				MEMORY_BASIC_INFORMATION mbi;
+				uintptr_t stop;
+
+				if (VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) != sizeof(mbi))
+					break;
+				stop = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+				if (stop > end)
+					stop = end;
+				if (stop <= p)
+					break;
+				if (mbi.State == MEM_COMMIT &&
+				    !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+					live_page_scan((const uintptr_t *)p,
+						       (size_t)(stop - p) / sizeof(uintptr_t));
+				p = stop;
+			}
+		}
+		if (named++ < 8) {
+			unsigned moff = 0;
+			const char *mname = g_ctl->starts[i]
+						? ss_module((uintptr_t)g_ctl->starts[i], &moff)
+						: NULL;
+
+			ss_log("  live-peer: tid %lu LEFT RUNNING, start %s - scanning TLS "
+			       "for pointers into heaps we rewind\n",
+			       (unsigned long)g_ctl->ids[i], mname ? mname : "?");
+		}
+	}
+	if (g_live_page_n)
+		ss_log("  live-peer hold: %d page(s) (%u KB) on rewound heaps, left in "
+		       "the present so LEFT RUNNING TLS does not watch a memcpy\n",
+		       g_live_page_n, (unsigned)(g_live_page_n * 4));
+	else
+		ss_log("  live-peer hold: no TLS pointers into rewound heaps from LEFT "
+		       "RUNNING threads\n");
+}
+
+static int win_read(Window *w, unsigned long long pos, void *dst, size_t n)
+{
+	unsigned char *d = dst;
+
+	while (n) {
+		size_t chunk;
+		unsigned char *view;
+
+		if (!win_cover(w, pos))
+			return 0;
+		view = w->base + (size_t)(pos - w->off);
+		chunk = (size_t)(w->off + w->size - pos);
+		if (chunk > n)
+			chunk = n;
+		memcpy(d, view, chunk);
+		d += chunk;
+		pos += chunk;
+		n -= chunk;
+	}
+	return 1;
+}
+
+/* Copy saved bytes into live memory, but do not rewrite a page a LEFT RUNNING
+ * peer currently holds. pos still advances across a hole so the slot mapping
+ * stays aligned. */
+static int win_copy_except_live(Window *w, unsigned long long pos, void *mem, size_t n)
+{
+	unsigned char *p = mem;
+	size_t done = 0;
+
+	while (done < n) {
+		size_t page = 0x1000 - (((uintptr_t)p + done) & 0xFFF);
+
+		if (page > n - done)
+			page = n - done;
+		if (live_page_held((uintptr_t)p + done)) {
+			g_live_skip_bytes += page;
+		} else if (!win_copy(w, pos + done, p + done, page, 0)) {
+			return 0;
+		}
+		done += page;
+	}
+	return 1;
+}
+
+/* Wine HEAPBLOCKS for the redirected game heap: put back busy GhHead blocks
+ * from the save, leave allocator lists (and any live-peer pages) in the present.
+ * Never falls back to a wholesale memcpy - that is the named leave. */
+static int wine_gameheap_copy(Window *w, unsigned long long pos, void *live, size_t n)
+{
+	size_t off = 0;
+	int nblk = 0;
+	unsigned long long wrote = 0;
+
+	while (off + 8 <= n) {
+		unsigned char head[16];
+		size_t pull = sizeof(head), blk = 0;
+
+		if (pull > n - off)
+			pull = n - off;
+		if (!win_read(w, pos + off, head, pull))
+			return -1;
+		if (!gameheap_saved_block(head, (char *)live + off, n - off, &blk)) {
+			off += 8;
+			continue;
+		}
+		if (!win_copy_except_live(w, pos + off, (char *)live + off, blk))
+			return -1;
+		nblk++;
+		wrote += blk;
+		off += (blk + 7u) & ~(size_t)7u;
+	}
+	ss_log("  wine gameheap: %d busy block(s) copied, %llu KB written, %llu KB "
+	       "left as lists/live-peer pages (no wholesale memcpy)\n",
+	       nblk, wrote >> 10, (unsigned long long)(n - (size_t)wrote) >> 10);
+	return nblk;
+}
+
 static int catch_mode(void)
 {
 	static int cached = -1;
@@ -14628,6 +14843,7 @@ static int do_load(int slotno)
 
 		/* Ask the heaps what they own before a single region is written. */
 		lfh_find_regions(s);
+		live_peer_pages_collect();
 		if (der_alloc(s->nregs))
 			der_plan_regions(s);
 
@@ -14674,6 +14890,9 @@ static int do_load(int slotno)
 			 * them - which is what the allocator keeps its lists in -
 			 * are deliberately left alone. */
 			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base);
+			int hi_reg = heap_index_of(s->regs[i].base);
+			int wine_gh = ss_under_wine() && blk_mode() && g_redirect_heap &&
+				      hi_reg >= 0 && g_ctl->heap_h[hi_reg] == g_redirect_heap;
 
 			if (g_reg_off)
 				g_reg_off[i] = pos;
@@ -14684,7 +14903,7 @@ static int do_load(int slotno)
 			 * game carried forward from what we wrote looks exactly like
 			 * one that reverted to what was there before, unless both
 			 * numbers are on the same line. */
-			if (g_clob_off && writable && !by_block) {
+			if (g_clob_off && writable && !by_block && !wine_gh) {
 				unsigned long long fd = 0, wds = 0, sv = 0, mv = 0;
 
 				g_clob_off[i] = ~0ull;
@@ -14695,7 +14914,7 @@ static int do_load(int slotno)
 			}
 			/* The whole pre-image, not just the one sampled word, for the
 			 * regions the plan picked. Must happen before the paint. */
-			if (writable && !by_block)
+			if (writable && !by_block && !wine_gh)
 				der_capture(i, base, (size_t)size);
 			if (poke_skipped(s->regs[i].base)) {
 				handskip++;
@@ -14704,7 +14923,16 @@ static int do_load(int slotno)
 				       i, base, (unsigned long long)size);
 			} else if (by_block)
 				blocked++;
-			else if (win_copy(&w, pos, base, size, 0)) {
+			else if (wine_gh) {
+				int nb = wine_gameheap_copy(&w, pos, base, size);
+
+				if (nb >= 0) {
+					restored++;
+					if (g_clob_ok)
+						g_clob_ok[i] = 1;
+				} else
+					skipped++;
+			} else if (win_copy_except_live(&w, pos, base, size)) {
 				restored++;
 				/* Only regions we actually wrote are worth asking
 				 * about afterwards. One left in the present was
@@ -14727,7 +14955,9 @@ static int do_load(int slotno)
 			 * unguarded it reported the LFH regions as damage and printed
 			 * THE RESTORE DID NOT TAKE over a restore that took perfectly
 			 * - the same false alarm the derived mask raised earlier. */
-			if (vmode && writable && !by_block && !poke_skipped(s->regs[i].base)) {
+			if (vmode && writable && !by_block && !wine_gh &&
+			    !poke_skipped(s->regs[i].base) &&
+			    !live_page_in_span((uintptr_t)base, size)) {
 				unsigned long long fd = 0, words = 0, was = 0, now = 0;
 				int r = win_cmp(&wv, here, base, size, &fd, &words, &was, &now);
 				(void)was;
