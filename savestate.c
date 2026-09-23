@@ -10071,6 +10071,7 @@ static char g_did_suspend[SS_MAX_THREADS];
 /* Clears that bit on threads we left running, and can punch the frame's
  * page out of the copy. Does not SuspendThread and does not GetThreadContext. */
 static void unix_frame_shield(const char *when, int hold_pages);
+static void unix_frame_heal(void);
 
 static void build_exclusions(void)
 {
@@ -10843,6 +10844,11 @@ static void suspend_all(void)
 static void resume_all(int hold_fresh)
 {
 	int i;
+
+	/* The copy can write a saved eax back into a frame that was not
+	 * inside a call. Clear it again before any resumed thread reaches
+	 * pulse_stop. */
+	unix_frame_heal();
 	for (i = 0; i < g_ctl->nids; i++) {
 		if (!g_ctl->handles[i])
 			continue;
@@ -14173,8 +14179,11 @@ static void unix_frame_heal(void)
 				    PAGE_EXECUTE | PAGE_EXECUTE_READ)))
 			continue;
 		flags = *(DWORD *)frame;
-		if (!(flags & 0x8002))
-			continue;
+		/* Not only threads inside a call. winmm's device thread was idle
+		 * during the copy, then client_Stop -> pulse_stop asserted once
+		 * resume let it run. Call entry writes 0x8000 over the flags and
+		 * leaves the saved eax, so a stale frame+0x1c is what bit 2
+		 * reloads. Zero it on every left-running frame. */
 		if (flags & 2)
 			InterlockedAnd((LONG volatile *)frame, ~(LONG)2);
 		if (*(DWORD *)(frame + 0x1c))
