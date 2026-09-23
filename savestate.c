@@ -14108,12 +14108,27 @@ static void unix_frame_shield(const char *when, int hold_pages)
 			InterlockedAnd((LONG volatile *)frame, ~(LONG)2);
 			nclear++;
 		}
-		if (hold_pages)
-			live_page_note(frame);
-		ss_log("  unix frame: tid %lu at %p flags %08lx%s%s (%s)\n",
-		       (unsigned long)g_ctl->ids[i], (void *)frame,
-		       (unsigned long)flags, (flags & 2) ? " bit2 cleared" : " bit2 clear",
-		       h >= 0 ? " INSIDE a rewound heap" : "", when);
+		/* pulse_main_loop returns only 0. The dword at frame+0x1c is not
+		 * that return: it is eax saved by an earlier context round-trip
+		 * (0xD on the title's audio thread). The epilogue reloads it when
+		 * bit 2 is set, and mmdevapi asserts on any nonzero status. Zero
+		 * the saved status so the reload is success. */
+		{
+			DWORD saved = *(DWORD *)(frame + 0x1c);
+
+			if (saved) {
+				*(volatile DWORD *)(frame + 0x1c) = 0;
+				nclear++;
+			}
+			if (hold_pages)
+				live_page_note(frame);
+			ss_log("  unix frame: tid %lu at %p flags %08lx%s%s eax %08lx%s (%s)\n",
+			       (unsigned long)g_ctl->ids[i], (void *)frame,
+			       (unsigned long)flags,
+			       (flags & 2) ? " bit2 cleared" : " bit2 clear",
+			       h >= 0 ? " INSIDE a rewound heap" : "",
+			       (unsigned long)saved, saved ? " cleared" : "", when);
+		}
 	}
 	if (!nframe)
 		ss_log("  unix frame: no in-call frame on a left-running thread (%s)\n",
@@ -14125,6 +14140,79 @@ static void unix_frame_shield(const char *when, int hold_pages)
 	(void)when;
 	(void)hold_pages;
 #endif
+}
+
+/* Same clear as the shield, without a line per region. Called around each
+ * VirtualProtect so a SIGUSR1 that rewrote the saved status is put back
+ * before the unix call can return through it. */
+static void unix_frame_heal(void)
+{
+#if defined(_M_IX86) || defined(__i386__)
+	int i;
+
+	if (!ss_under_wine() || !g_ctl)
+		return;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		uintptr_t frame;
+		DWORD flags;
+		MEMORY_BASIC_INFORMATION mbi;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		frame = *(uintptr_t *)(teb + 0x218);
+		if (frame < 0x10000 || (frame & 3))
+			continue;
+		if (VirtualQuery((LPCVOID)frame, &mbi, sizeof(mbi)) != sizeof(mbi))
+			continue;
+		if (mbi.State != MEM_COMMIT ||
+		    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD | PAGE_READONLY |
+				    PAGE_EXECUTE | PAGE_EXECUTE_READ)))
+			continue;
+		flags = *(DWORD *)frame;
+		if (!(flags & 0x8002))
+			continue;
+		if (flags & 2)
+			InterlockedAnd((LONG volatile *)frame, ~(LONG)2);
+		if (*(DWORD *)(frame + 0x1c))
+			*(volatile DWORD *)(frame + 0x1c) = 0;
+	}
+#else
+#endif
+}
+
+/* True when a left-running unix frame lies in [base, base+size). The copy
+ * must not VirtualProtect that span: mprotect of the live frame is a
+ * SIGUSR1, and the epilogue then returns the saved eax. */
+static int unix_frame_in_span(uintptr_t base, size_t size)
+{
+#if defined(_M_IX86) || defined(__i386__)
+	int i;
+
+	if (!ss_under_wine() || !g_ctl || !size)
+		return 0;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		uintptr_t frame;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		frame = *(uintptr_t *)(teb + 0x218);
+		if (frame < base || frame >= base + size)
+			continue;
+		return 1;
+	}
+#else
+	(void)base;
+	(void)size;
+#endif
+	return 0;
 }
 
 static void live_peer_pages_collect(void)
@@ -15020,7 +15108,22 @@ static int do_load(int slotno)
 			SIZE_T size = (SIZE_T)s->regs[i].size;
 			unsigned long long here = pos;
 			DWORD old;
-			int writable =
+			int writable;
+
+			/* Before the protect. A SIGUSR1 from this call reloads eax from
+			 * the frame, so the saved status has to already be 0, and the
+			 * frame's own region is not protected or written at all. */
+			unix_frame_heal();
+			if (unix_frame_in_span((uintptr_t)base, (size_t)size)) {
+				ss_log("  unix frame: region %d at %p left untouched, %llu "
+				       "bytes (live syscall frame)\n",
+				       i, base, (unsigned long long)size);
+				if (g_reg_off)
+					g_reg_off[i] = pos;
+				pos += size;
+				continue;
+			}
+			writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
 
 			/* Here, and not beside the writeback at the end of the loop,
@@ -15176,6 +15279,9 @@ static int do_load(int slotno)
 			 * dies without either list being wrong. */
 			if (writable)
 				VirtualProtect(base, size, s->regs[i].prot, &old);
+			/* Heal again after the protect returns. The audio thread can
+			 * have taken the signal during it. */
+			unix_frame_heal();
 			pos += size;
 		}
 		win_close(&wv);
