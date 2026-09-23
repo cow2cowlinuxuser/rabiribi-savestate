@@ -554,9 +554,10 @@ static void advance(SwVoice *v)
  *
  * Output is fixed at 44100/16/stereo because every format in the survey
  * resamples into it cleanly and a fixed sink is one less thing that can change
- * underneath a restore. waveOut rather than anything newer: winmm is already in
- * the process, it needs no COM, no device enumeration and no session
- * management, and it brings none of AUDIOSES or MMDevApi with it. */
+ * underneath a restore. waveOut rather than XAudio2's own mixer: winmm needs
+ * no COM from us. On Windows that stops at winmm. Under Wine, waveOutOpen is
+ * mmdevapi's audio_client_main, and quiesce does not waveOutPause, so that
+ * thread stays inside __wine_unix_call across the copy. */
 #define OUT_RATE 44100
 #define OUT_CH 2
 #define OUT_FRAMES 1024 /* about 23 ms; four of these is a comfortable buffer */
@@ -813,12 +814,18 @@ static void out_start(void)
 	wf.nAvgBytesPerSec = OUT_RATE * wf.nBlockAlign;
 	wf.cbSize = 0;
 
+	MMRESULT mr;
+	UINT ndev;
+
 	g_mix_wake = CreateEventA(NULL, FALSE, FALSE, NULL);
-	if (waveOutOpen(&g_wo, WAVE_MAPPER, &wf, (DWORD_PTR)g_mix_wake, 0, CALLBACK_EVENT) !=
-	    MMSYSERR_NOERROR) {
+	ndev = waveOutGetNumDevs();
+	mr = waveOutOpen(&g_wo, WAVE_MAPPER, &wf, (DWORD_PTR)g_mix_wake, 0, CALLBACK_EVENT);
+	if (mr != MMSYSERR_NOERROR) {
 		g_wo = NULL;
-		ss_log("xa2_sw: waveOut would not open, so the engine stays silent - "
-		       "everything else about the restore is unaffected\n");
+		ss_log("xa2_sw: waveOut would not open (mmresult %u, %u device(s)), so the "
+		       "engine stays silent - everything else about the restore is "
+		       "unaffected\n",
+		       (unsigned)mr, (unsigned)ndev);
 		return;
 	}
 	for (i = 0; i < OUT_BLOCKS; i++) {
@@ -866,23 +873,41 @@ static void cb_drop(void)
 	LeaveCriticalSection(&g_cs);
 }
 
-void xa2_sw_park(void)
+/* User-mode only: drop pending callbacks and idle the mix thread. No
+ * waveOutPause - that waits on wineserver under Proton. */
+void xa2_sw_quiesce(void)
 {
-	int spins;
+	LARGE_INTEGER pf, t0, now;
 
-	/* Ahead of the g_out_live test: the ring fills from the game's own calls,
-	 * so it has entries to drop whether or not a mixer was ever started. */
+	/* g_cs exists only after XAudio2Create. A save with no engine must not
+	 * enter it: that critical section is uninitialized, and the wait never
+	 * ends. The logical harness path is that save. */
+	if (!g_ready)
+		return;
 	cb_drop();
 	if (!g_out_live)
 		return;
 	InterlockedExchange(&g_mix_park, 1);
 	SetEvent(g_mix_wake);
-	for (spins = 0; spins < 200 && !g_mix_idle; spins++)
-		Sleep(1);
+	QueryPerformanceFrequency(&pf);
+	QueryPerformanceCounter(&t0);
+	while (!g_mix_idle) {
+		QueryPerformanceCounter(&now);
+		if ((now.QuadPart - t0.QuadPart) * 1000 > pf.QuadPart * 200)
+			break;
+		YieldProcessor();
+	}
 	if (!g_mix_idle)
 		ss_log("xa2_sw: the mixer did not park within 200 ms - the copy is "
 		       "going ahead anyway, so treat any audio corruption in this "
 		       "restore as explained\n");
+}
+
+void xa2_sw_park(void)
+{
+	xa2_sw_quiesce();
+	if (!g_out_live)
+		return;
 	waveOutPause(g_wo);
 }
 

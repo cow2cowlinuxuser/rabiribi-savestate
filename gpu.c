@@ -840,6 +840,27 @@ static void gpu_teardown(void)
 	GPU_REL(g.ctx);
 	GPU_REL(g.dev);
 	g.up = 0;
+	g.tried = 0;
+}
+
+static int gpu_init(HWND hwnd);
+
+/* Recreate factory/adapter/swapchain/RTV from the live HWND. Stale DXGI COM
+ * copied out of a snapshot stays dead; the software framebuffer is the
+ * logical seed and is uploaded on the next present. Never memcpy COM. */
+void gpu_dxgi_reconcile(HWND hwnd)
+{
+	HWND live = hwnd ? hwnd : g.hwnd;
+
+	if (!g.up && !g.dev && !g.swap)
+		return;
+	if (!live)
+		return;
+	gpu_say("gpu: DXGI recreate factory/adapter/swapchain/RTV from live HWND; "
+		"COM pointers are historical");
+	gpu_teardown();
+	if (!gpu_init(live))
+		gpu_say("gpu: DXGI recreate failed - next present stays software");
 }
 
 void gpu_set_log(void (*log)(const char *))

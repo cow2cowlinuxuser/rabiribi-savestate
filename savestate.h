@@ -174,6 +174,21 @@ int savestate_dump_image(void);
 void savestate_soak_arm(void);
 int savestate_soak_action(void);
 
+/* Does the saved image at this heap offset look like one of our busy malloc
+ * blocks? live_head is the address that byte would occupy in the live heap
+ * (the heap does not move). remain is bytes from there to the end of the
+ * region. Writes the header-plus-payload length to *n on success. */
+int gameheap_saved_block(const void *saved, void *live_head, size_t remain, size_t *n);
+
+/* Heapwalk without invoking the heap: the redirected allocator already sees
+ * every busy block. Snapshot after suspend; restore walks that list. Empty
+ * snapshot (cross-session, or the table never reserved) falls back to
+ * gameheap_saved_block. */
+unsigned gameheap_busy_snapshot(void);
+unsigned gameheap_busy_saved_count(void);
+int gameheap_busy_saved_at(unsigned i, void **head, size_t *total);
+void gameheap_busy_rewind(void);
+
 /* One slot. Each costs a full copy of the game's committed memory, which for
  * this title is well over a gigabyte of physical RAM. */
 #define SAVESTATE_SLOTS 1

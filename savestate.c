@@ -2007,8 +2007,14 @@ void dsh_survey(void);
 void ds_sw_report(void);
 void xa2_sw_report(void);
 void gameheap_report(void);
+int gameheap_saved_block(const void *saved, void *live_head, size_t remain, size_t *n);
+unsigned gameheap_busy_snapshot(void);
+unsigned gameheap_busy_saved_count(void);
+int gameheap_busy_saved_at(unsigned i, void **head, size_t *total);
+void gameheap_busy_rewind(void);
 void xa2_sw_pump(void);
 void xa2_sw_park(void);
+void xa2_sw_quiesce(void);
 void xa2_sw_resume(void);
 void dsh_play(void);
 
@@ -3342,10 +3348,63 @@ static BOOL(WINAPI *g_real_terminate)(HANDLE, UINT);
 static void(__cdecl *g_real_exit)(int);
 static void(__cdecl *g_real_uexit)(int);
 static void(__cdecl *g_real_amsg)(int);
+static void(__cdecl *g_real_abort)(void);
+
+/* Sticky until the op returns: who is in savestate, and which stage. The
+ * ExitProcess hook reads these because "chose to leave" previously named
+ * only the CRT thunk, not the thread or whether copy was in progress. */
+static const char *g_ss_op;
+static DWORD g_ss_op_tid;
+
+static void ss_op_set(const char *op)
+{
+	g_ss_op = op;
+	g_ss_op_tid = GetCurrentThreadId();
+}
+
+static void ss_name_leave_tid(DWORD tid);
 
 static void WINAPI hook_exitprocess(UINT code)
 {
-	exit_report("ExitProcess", __builtin_return_address(0));
+	void *bt[12];
+	USHORT n, k;
+	DWORD tid = GetCurrentThreadId();
+	void *caller = __builtin_return_address(0);
+	uintptr_t c = (uintptr_t)caller;
+
+	exit_report("ExitProcess", caller);
+	ss_log("      tid %lu code %u ss_op=%s ss_op_tid=%lu%s\n", (unsigned long)tid,
+	       (unsigned)code, g_ss_op ? g_ss_op : "(none)", (unsigned long)g_ss_op_tid,
+	       (g_ss_op_tid && tid == g_ss_op_tid) ? " - this IS the savestate thread"
+						   : " - a present peer (not the savestate thread)");
+	if (g_real_uexit) {
+		uintptr_t e = (uintptr_t)(void *)g_real_uexit;
+		if (c >= e && c < e + 128)
+			ss_log("      caller sits inside CRT _exit (+%X) - intra-module "
+			       "teardown; IAT exit/_exit would not see it\n",
+			       (unsigned)(c - e));
+	}
+	if (g_real_exit) {
+		uintptr_t e = (uintptr_t)(void *)g_real_exit;
+		if (c >= e && c < e + 128)
+			ss_log("      caller sits inside CRT exit (+%X)\n", (unsigned)(c - e));
+	}
+	if (g_real_abort) {
+		uintptr_t e = (uintptr_t)(void *)g_real_abort;
+		if (c >= e && c < e + 64)
+			ss_log("      caller sits inside CRT abort\n");
+	}
+	if (code == 3)
+		ss_log("      exit code 3 is the CRT abort/_exit convention "
+		       "(invalid_parameter, abort, or _invoke_watson)\n");
+	ss_name_leave_tid(tid);
+	n = CaptureStackBackTrace(0, 12, bt, NULL);
+	for (k = 0; k < n; k++) {
+		unsigned off = 0;
+		const char *mod = ss_module((uintptr_t)bt[k], &off);
+		ss_log("      leave stack[%u] %p %s+%X\n", (unsigned)k, bt[k],
+		       mod ? mod : "?", off);
+	}
 	g_real_exitprocess(code);
 }
 
@@ -3378,8 +3437,6 @@ static void __cdecl hook_amsg(int c)
 /* Mono finishes a fatal error with abort(), which reaches process death inside
  * ntdll rather than through any import we can watch, so the abort call itself is
  * the last observable point. */
-static void(__cdecl *g_real_abort)(void);
-
 static void __cdecl hook_abort(void)
 {
 	exit_report("abort", __builtin_return_address(0));
@@ -5417,7 +5474,15 @@ static int wine_freeze_this(PVOID start, unsigned state)
 		return 0;
 	name = strrchr(path, '\\');
 	name = name ? name + 1 : path;
-	if (_strnicmp(name, "steam", 5) == 0 || _strnicmp(name, "gameoverlay", 11) == 0)
+	/* Steam overlay, Wine Steam IPC (lsteamclient — prefix "steam" misses it),
+	 * dinput/win32u waiters, and DXVK/winevulkan workers. Parking any of
+	 * those is "Steam is not responding" or a silent leave. The Present
+	 * thread is frozen only because request() already has it in a user-mode
+	 * spin; do not SuspendThread a presenter that is still in Present. */
+	if (_strnicmp(name, "steam", 5) == 0 || _strnicmp(name, "gameoverlay", 11) == 0 ||
+	    !_stricmp(name, "lsteamclient.dll") || _strnicmp(name, "dinput", 6) == 0 ||
+	    !_stricmp(name, "win32u.dll") || !_stricmp(name, "winevulkan.dll") ||
+	    _strnicmp(name, "dxvk", 4) == 0)
 		return 0;
 	return 1;
 }
@@ -5431,8 +5496,12 @@ static int wine_freeze_this(PVOID start, unsigned state)
 static void park_audio_gpu(void)
 {
 	if (ss_under_wine()) {
-		ss_phase("  wine: not parking xa2/gpu - waveOutPause and Present wait "
-			 "on wineserver; mixer stays loaded\n");
+		/* waveOutPause / DXGI Present wait on wineserver. Our mix thread
+		 * lives in this DLL and can idle in user-mode without that. Pulse
+		 * stays loaded. */
+		ss_phase("  wine: xa2 user-mode quiesce only; skipping waveOutPause/"
+			 "Present (wineserver). mixer device stays loaded\n");
+		xa2_sw_quiesce();
 		return;
 	}
 	xa2_sw_park();
@@ -6588,6 +6657,16 @@ static void heaps_partition(void)
 		} else {
 			m = heap_claimed_by(h, &votes);
 			who = m >= 0 ? g_ctl->mod_name[m] : "no clear owner";
+			/* Wine has no 0xFFEEFFEE HEAP_SEGMENT, so votes stay 0 and
+			 * ALLHEAPS=2 rewinds the heap. linux 82152 lived when those
+			 * unnamed heaps stayed in the present; linux 26458/31417/
+			 * 33277 died vkEndCommandBuffer after rewinding 001D0000
+			 * under tid 524's 001DCA88. Hold them. Handle-page exclude
+			 * for every held Wine heap is below, after heap_ours is
+			 * final - not only unnamed. */
+			if (ss_under_wine() && m < 0)
+				g_ctl->heap_ours[k] = 0;
+			else
 			/* Mode 2 keeps an unclaimed heap rather than stranding it,
 			 * since the only heaps that must stay behind are the ones
 			 * Windows reaches from data outside the save. */
@@ -6638,6 +6717,18 @@ static void heaps_partition(void)
 				       "combined against 15.81 MB outside them, which is the "
 				       "whole argument for doing this\n");
 		}
+		/* Wine has no HEAP_SEGMENT, so the segment-exclude loop below never
+		 * sees handle pages. linux 82fd84a held unnamed heaps only
+		 * (001DCA88 warning gone) then winevulkan+23434 walked 0015D390
+		 * on process heap 00150000: PARTITION LEAK 1.1 MB still captured
+		 * the process-heap and wrapper-heap handle pages. 82152 lived
+		 * when every held Wine heap's handle page stayed in the present.
+		 * Not the header-list walk (process-heap growth); that killed
+		 * load 1 in rabiribi.exe. Engine payload only. */
+		if (ss_under_wine() && !g_ctl->heap_ours[k])
+			ss_exclude_as("Wine heap left in the present",
+				      (void *)g_ctl->heap_lo[k],
+				      (size_t)(g_ctl->heap_hi[k] - g_ctl->heap_lo[k]));
 		lstrcpynA(g_ctl->heap_name[k], who, sizeof(g_ctl->heap_name[k]));
 		if (first)
 			ss_log("    heap %p %-24s %s (%d vote(s))\n", (void *)h, who,
@@ -9469,11 +9560,34 @@ static void ss_inventory(Slot *s)
 	ss_log("===== end inventory =====\n\n");
 }
 
+/* linux 61185: restore 1 and 2 lived, then HeapValidate of held process
+ * heap 00150000 FAILED after restore 2. Load 3 never logged load: slot —
+ * do_load's first act is heap_check("as the restore begins"), which takes
+ * that heap's lock while Present is in request() and DXVK may be in
+ * RtlAllocateHeap. Wine heap is not Windows HEAP. Do not HEAPWALK it.
+ * Do not hold process-heap growth. Skip HeapValidate for heaps we leave
+ * in the present so the next KEY_2 can start. */
+static int wine_heap_held(HANDLE h)
+{
+	int k;
+
+	if (!ss_under_wine() || !h)
+		return 0;
+	if (h == GetProcessHeap())
+		return 1;
+	if (!g_ctl || g_ctl->nheaps <= 0)
+		return 0;
+	for (k = 0; k < g_ctl->nheaps && k < SS_MAX_HEAPS; k++)
+		if (g_ctl->heap_h[k] == h)
+			return !g_ctl->heap_ours[k];
+	return 0;
+}
+
 static void heap_check(const char *when)
 {
 	HANDLE heaps[SS_MAX_HEAPS], failed[SS_MAX_HEAPS];
 	DWORD n, i;
-	int bad = 0;
+	int bad = 0, skipped = 0;
 	LARGE_INTEGER freq, t0, t1;
 
 	if (!heapcheck_mode() || !g_ctl)
@@ -9487,6 +9601,10 @@ static void heap_check(const char *when)
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&t0);
 	for (i = 0; i < n; i++) {
+		if (wine_heap_held(heaps[i])) {
+			skipped++;
+			continue;
+		}
 		if (HeapValidate(heaps[i], 0, NULL))
 			continue;
 		if (bad < SS_MAX_HEAPS)
@@ -9502,8 +9620,8 @@ static void heap_check(const char *when)
 	 * each time the log looked exactly like a healthy run. A number that tracks
 	 * the live count upward is the evidence that silence means "nothing was
 	 * lost" rather than "there was nothing to lose". */
-	ss_log("  heap check: %u heap(s) %s, %d failed, %d ever seen, %.1f ms\n",
-	       (unsigned)n, when, bad, g_seen ? g_seen->n : -1,
+	ss_log("  heap check: %u heap(s) %s, %d failed, %d skipped (held Wine), %d ever seen, %.1f ms\n",
+	       (unsigned)n, when, bad, skipped, g_seen ? g_seen->n : -1,
 	       (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)freq.QuadPart);
 	/* Deliberately after the summary. The walk can be fatal, and a fatal
 	 * diagnostic that also destroys the line saying how many heaps failed
@@ -9943,6 +10061,18 @@ static void audit_system_reachable(void)
 	VirtualFree(w.seen, 0, MEM_RELEASE);
 }
 
+/* Set by suspend_all. build_exclusions and the settle scanners run after
+ * that and must not GetThreadContext a thread we left running: under Wine
+ * that is a SIGUSR1 round-trip, and NtSetContextThread ORs bit 2 into a
+ * live unix-call frame. The dispatcher then reloads eax and mmdevapi's
+ * audio_client_main asserts on a pulse_main_loop that returned success. */
+static char g_did_suspend[SS_MAX_THREADS];
+
+/* Clears that bit on threads we left running, and can punch the frame's
+ * page out of the copy. Does not SuspendThread and does not GetThreadContext. */
+static void unix_frame_shield(const char *when, int hold_pages);
+static void unix_frame_heal(void);
+
 static void build_exclusions(void)
 {
 	MODULEENTRY32 me;
@@ -10138,8 +10268,12 @@ static void build_exclusions(void)
 				 * registers untouched. That is survivable while one is
 				 * parked in a wait, and not survivable while one is
 				 * inside the allocator, because the heap it is halfway
-				 * through is about to be replaced underneath it. */
-				if (g_ctl->handles[i]) {
+				 * through is about to be replaced underneath it.
+				 *
+				 * Read the park site only when we already suspended the
+				 * thread. GetThreadContext on one we left running is the
+				 * SIGUSR1 round-trip that clobbers a unix call's return. */
+				if (g_ctl->handles[i] && g_did_suspend[i]) {
 					CONTEXT c;
 					memset(&c, 0, sizeof(c));
 					c.ContextFlags = CONTEXT_CONTROL;
@@ -10211,6 +10345,9 @@ static void build_exclusions(void)
 				      k ? ", " : "", rnames[k], rcounts[k]);
 		ss_log("  rewound threads belong to: %s\n", line);
 	}
+	/* Before the snapshot is taken, and again before a restore writes.
+	 * A frame captured with bit 2 set is written back under the live call. */
+	unix_frame_shield("exclusions", 0);
 	audit_present_threads();
 	audit_system_reachable();
 }
@@ -10604,7 +10741,28 @@ static void collect_threads(void)
 	CloseHandle(snap);
 }
 
-static char g_did_suspend[SS_MAX_THREADS];
+static void ss_name_leave_tid(DWORD tid)
+{
+	int i;
+
+	if (!g_ctl) {
+		ss_log("      no control block; cannot name the leave thread\n");
+		return;
+	}
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned off = 0;
+		const char *mod;
+		if (g_ctl->ids[i] != tid)
+			continue;
+		mod = g_ctl->starts[i] ? ss_module((uintptr_t)g_ctl->starts[i], &off) : NULL;
+		ss_log("      leave tid start %p (%s+%X) freeze=%s\n", g_ctl->starts[i],
+		       mod ? mod : "?", off,
+		       g_did_suspend[i] ? "WAS FROZEN (should not run)" : "LEFT RUNNING");
+		return;
+	}
+	ss_log("      leave tid is not in the freeze roster (requester or born after "
+	       "collect)\n");
+}
 
 static void suspend_all(void)
 {
@@ -10686,6 +10844,11 @@ static void suspend_all(void)
 static void resume_all(int hold_fresh)
 {
 	int i;
+
+	/* The copy can write a saved eax back into a frame that was not
+	 * inside a call. Clear it again before any resumed thread reaches
+	 * pulse_stop. */
+	unix_frame_heal();
 	for (i = 0; i < g_ctl->nids; i++) {
 		if (!g_ctl->handles[i])
 			continue;
@@ -11499,7 +11662,7 @@ static int in_the_jit(unsigned *who, uintptr_t *where)
 		CONTEXT c;
 		uintptr_t pc;
 
-		if (!g_ctl->handles[i])
+		if (!g_ctl->handles[i] || !g_did_suspend[i])
 			continue;
 		memset(&c, 0, sizeof(c));
 		c.ContextFlags = CONTEXT_CONTROL;
@@ -11653,7 +11816,7 @@ static int in_the_allocator(unsigned *who, uintptr_t *where)
 		CONTEXT c;
 		uintptr_t pc;
 
-		if (!g_ctl->handles[i])
+		if (!g_ctl->handles[i] || !g_did_suspend[i])
 			continue;
 		memset(&c, 0, sizeof(c));
 		c.ContextFlags = CONTEXT_CONTROL;
@@ -11822,7 +11985,7 @@ static void held_build(void)
 		MEMORY_BASIC_INFORMATION mbi;
 		int w;
 
-		if (!g_ctl->transient[i] || !g_ctl->handles[i])
+		if (!g_ctl->transient[i] || !g_ctl->handles[i] || !g_did_suspend[i])
 			continue;
 		memset(&c, 0, sizeof(c));
 		c.ContextFlags = CONTEXT_FULL;
@@ -12428,6 +12591,7 @@ static int do_save(int slotno)
 
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t_begin);
+	ss_op_set("save");
 
 	/* Here rather than at hooks install, where the arena cannot be taken yet:
 	 * blk_arena registers an exclusion, and there is no control block to
@@ -12564,14 +12728,31 @@ static int do_save(int slotno)
 		ss_log("  heap blocks: mapped %u busy block(s) across %u locked heap(s)\n",
 		       g_blk_save_n, g_blk_locked_n);
 	} else {
+		unsigned nbusy = 0;
+
 		/* Said out loud because the quiet version of this cost three runs.
 		 * With block mode off the restore puts back whole regions, which is a
 		 * different experiment from the one the config describes, and the only
-		 * evidence was a zero in the middle of the load line. */
+		 * evidence was a zero in the middle of the load line.
+		 *
+		 * Wine has no HEAP_SEGMENT, so HeapWalk is not used. The redirected
+		 * game heap still has a live set: we intercepted every malloc. The
+		 * snapshot is taken here, after suspend_all, so it describes the
+		 * same instant the page copy is about to capture. */
+		if (ss_under_wine() && blk_mode())
+			nbusy = gameheap_busy_snapshot();
 		ss_log("  heap blocks: OFF for this save - D3D9SW_HEAPBLOCKS reads as %d, "
-		       "so the restore will put back whole heap regions instead%s\n",
+		       "so Windows HeapWalk is not used%s\n",
 		       blk_mode(),
-		       ss_under_wine() ? " (Wine heap is not Windows HEAP)" : "");
+		       ss_under_wine()
+			       ? " (Wine heap is not Windows HEAP; redirected game "
+				 "heap restores from the busy-block sidetable, not "
+				 "HeapWalk)"
+			       : "");
+		if (ss_under_wine() && blk_mode())
+			ss_log("  wine gameheap: sidetable snapshot %u busy block(s) "
+			       "(no HeapWalk)\n",
+			       nbusy);
 	}
 	QueryPerformanceCounter(&t_susp);
 	build_exclusions();
@@ -12809,7 +12990,7 @@ static int do_save(int slotno)
 		ThreadState *t;
 		if (!g_ctl->handles[i] || s->nthreads >= SS_MAX_THREADS)
 			continue;
-		if (g_ctl->transient[i])
+		if (g_ctl->transient[i] || !g_did_suspend[i])
 			continue;
 		if (!rewind_all_threads() && g_ctl->ids[i] != g_ctl->req_tid)
 			continue;
@@ -13836,6 +14017,459 @@ static int poke_skipped(uintptr_t base)
 	return poke_hit(g_skip_list, g_skip_n, base);
 }
 
+/* Pages a LEFT RUNNING thread currently holds a pointer into, on a heap we
+ * would otherwise memcpy. mmdevapi tid 524 ExitProcess(3) during load-copy
+ * was that memcpy: its TLS still pointed at gameheap 0CE20000 while we
+ * rewrote the region wholesale. Do not SuspendThread those peers (wineserver).
+ * Leave the pages they hold in the present. */
+#define SS_LIVE_PAGES 256
+static uintptr_t g_live_page[SS_LIVE_PAGES];
+static int g_live_page_n;
+static unsigned long long g_live_skip_bytes;
+
+static int live_page_held(uintptr_t a)
+{
+	uintptr_t pg = a & ~(uintptr_t)0xFFF;
+	int i;
+
+	for (i = 0; i < g_live_page_n; i++)
+		if (g_live_page[i] == pg)
+			return 1;
+	return 0;
+}
+
+static int live_page_in_span(uintptr_t base, size_t n)
+{
+	int i;
+
+	for (i = 0; i < g_live_page_n; i++)
+		if (g_live_page[i] >= base && g_live_page[i] < base + n)
+			return 1;
+	return 0;
+}
+
+static void live_page_note(uintptr_t a)
+{
+	uintptr_t pg = a & ~(uintptr_t)0xFFF;
+
+	if (!pg || live_page_held(pg) || g_live_page_n >= SS_LIVE_PAGES)
+		return;
+	g_live_page[g_live_page_n++] = pg;
+}
+
+static void live_page_scan(const uintptr_t *w, size_t words)
+{
+	size_t k;
+
+	for (k = 0; k < words; k++) {
+		int h = heap_index_of(w[k]);
+
+		if (h < 0 || !g_ctl->heap_ours[h])
+			continue;
+		live_page_note(w[k]);
+	}
+}
+
+/* i386 Wine keeps the unix syscall frame at TEB+0x218. The first dword is
+ * the restore flags. Bit 2 (orl $2 in signal_set_full_context) makes
+ * __wine_unix_call_dispatcher reload eax from frame+0x1c and throw away
+ * the unix function's 0. mmdevapi then asserts. The audio thread is left
+ * running, so this only reads the TEB and clears that one bit. */
+static void unix_frame_shield(const char *when, int hold_pages)
+{
+#if defined(_M_IX86) || defined(__i386__)
+	int i, nframe = 0, nclear = 0;
+
+	if (!ss_under_wine() || !g_ctl)
+		return;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		uintptr_t frame;
+		DWORD flags;
+		MEMORY_BASIC_INFORMATION mbi;
+		int h;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		frame = *(uintptr_t *)(teb + 0x218);
+		if (frame < 0x10000 || (frame & 3))
+			continue;
+		if (VirtualQuery((LPCVOID)frame, &mbi, sizeof(mbi)) != sizeof(mbi))
+			continue;
+		if (mbi.State != MEM_COMMIT ||
+		    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD | PAGE_READONLY |
+				    PAGE_EXECUTE | PAGE_EXECUTE_READ)))
+			continue;
+		flags = *(DWORD *)frame;
+		/* 0x8000 is the in-call mark the dispatcher writes. Bit 2 is
+		 * the poison. Anything else is not this frame. */
+		if (!(flags & 0x8002))
+			continue;
+		nframe++;
+		h = heap_index_of(frame);
+		if (flags & 2) {
+			InterlockedAnd((LONG volatile *)frame, ~(LONG)2);
+			nclear++;
+		}
+		/* pulse_main_loop returns only 0. The dword at frame+0x1c is not
+		 * that return: it is eax saved by an earlier context round-trip
+		 * (0xD on the title's audio thread). The epilogue reloads it when
+		 * bit 2 is set, and mmdevapi asserts on any nonzero status. Zero
+		 * the saved status so the reload is success. */
+		{
+			DWORD saved = *(DWORD *)(frame + 0x1c);
+
+			if (saved) {
+				*(volatile DWORD *)(frame + 0x1c) = 0;
+				nclear++;
+			}
+			if (hold_pages)
+				live_page_note(frame);
+			ss_log("  unix frame: tid %lu at %p flags %08lx%s%s eax %08lx%s (%s)\n",
+			       (unsigned long)g_ctl->ids[i], (void *)frame,
+			       (unsigned long)flags,
+			       (flags & 2) ? " bit2 cleared" : " bit2 clear",
+			       h >= 0 ? " INSIDE a rewound heap" : "",
+			       (unsigned long)saved, saved ? " cleared" : "", when);
+		}
+	}
+	if (!nframe)
+		ss_log("  unix frame: no in-call frame on a left-running thread (%s)\n",
+		       when);
+	else if (!nclear && !hold_pages)
+		ss_log("  unix frame: %d in-call frame(s), bit 2 already clear (%s)\n",
+		       nframe, when);
+#else
+	(void)when;
+	(void)hold_pages;
+#endif
+}
+
+/* Same clear as the shield, without a line per region. Called around each
+ * VirtualProtect so a SIGUSR1 that rewrote the saved status is put back
+ * before the unix call can return through it. */
+static void unix_frame_heal(void)
+{
+#if defined(_M_IX86) || defined(__i386__)
+	int i;
+
+	if (!ss_under_wine() || !g_ctl)
+		return;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		uintptr_t frame;
+		DWORD flags;
+		MEMORY_BASIC_INFORMATION mbi;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		frame = *(uintptr_t *)(teb + 0x218);
+		if (frame < 0x10000 || (frame & 3))
+			continue;
+		if (VirtualQuery((LPCVOID)frame, &mbi, sizeof(mbi)) != sizeof(mbi))
+			continue;
+		if (mbi.State != MEM_COMMIT ||
+		    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD | PAGE_READONLY |
+				    PAGE_EXECUTE | PAGE_EXECUTE_READ)))
+			continue;
+		flags = *(DWORD *)frame;
+		/* Not only threads inside a call. winmm's device thread was idle
+		 * during the copy, then client_Stop -> pulse_stop asserted once
+		 * resume let it run. Call entry writes 0x8000 over the flags and
+		 * leaves the saved eax, so a stale frame+0x1c is what bit 2
+		 * reloads. Zero it on every left-running frame. */
+		if (flags & 2)
+			InterlockedAnd((LONG volatile *)frame, ~(LONG)2);
+		if (*(DWORD *)(frame + 0x1c))
+			*(volatile DWORD *)(frame + 0x1c) = 0;
+	}
+#else
+#endif
+}
+
+/* True when a left-running unix frame lies in [base, base+size). The copy
+ * must not VirtualProtect that span: mprotect of the live frame is a
+ * SIGUSR1, and the epilogue then returns the saved eax. */
+static int unix_frame_in_span(uintptr_t base, size_t size)
+{
+#if defined(_M_IX86) || defined(__i386__)
+	int i;
+
+	if (!ss_under_wine() || !g_ctl || !size)
+		return 0;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		uintptr_t frame;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		frame = *(uintptr_t *)(teb + 0x218);
+		if (frame < base || frame >= base + size)
+			continue;
+		/* A left-running thread keeps this pointer after the call returns.
+		 * Only the in-call mark means the frame is live. Skipping every
+		 * stale slot left three other frame allocations unrestored. */
+		{
+			MEMORY_BASIC_INFORMATION mbi;
+			DWORD flags;
+
+			if (VirtualQuery((LPCVOID)frame, &mbi, sizeof(mbi)) != sizeof(mbi))
+				continue;
+			if (mbi.State != MEM_COMMIT ||
+			    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD | PAGE_READONLY |
+				    PAGE_EXECUTE | PAGE_EXECUTE_READ)))
+				continue;
+			flags = *(DWORD *)frame;
+			if (!(flags & 0x8000))
+				continue;
+		}
+		return 1;
+	}
+#else
+	(void)base;
+	(void)size;
+#endif
+	return 0;
+}
+
+static void live_peer_pages_collect(void)
+{
+	int i, named = 0;
+
+	g_live_page_n = 0;
+	g_live_skip_bytes = 0;
+	if (!g_ctl)
+		return;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		const uintptr_t *w;
+		uintptr_t hops[16];
+		unsigned k;
+		int nhops = 0, j;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		w = (const uintptr_t *)teb;
+		live_page_scan(w, 0x1000 / sizeof(uintptr_t));
+		for (k = 0; k < 0x1000 / sizeof(uintptr_t) && nhops < 16; k++) {
+			MEMORY_BASIC_INFORMATION mbi;
+			uintptr_t ab, span;
+
+			if (w[k] < 0x10000 ||
+			    VirtualQuery((LPCVOID)w[k], &mbi, sizeof(mbi)) != sizeof(mbi))
+				continue;
+			if (mbi.State != MEM_COMMIT || mbi.Type != MEM_PRIVATE ||
+			    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+				continue;
+			ab = (uintptr_t)mbi.AllocationBase;
+			span = alloc_span(ab);
+			if (!span || span > 0x10000 || heap_index_of(ab) >= 0)
+				continue;
+			for (j = 0; j < nhops; j++)
+				if (hops[j] == ab)
+					break;
+			if (j == nhops)
+				hops[nhops++] = ab;
+		}
+		for (j = 0; j < nhops; j++) {
+			uintptr_t end = hops[j] + alloc_span(hops[j]), p = hops[j];
+
+			while (p < end) {
+				MEMORY_BASIC_INFORMATION mbi;
+				uintptr_t stop;
+
+				if (VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) != sizeof(mbi))
+					break;
+				stop = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+				if (stop > end)
+					stop = end;
+				if (stop <= p)
+					break;
+				if (mbi.State == MEM_COMMIT &&
+				    !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+					live_page_scan((const uintptr_t *)p,
+						       (size_t)(stop - p) / sizeof(uintptr_t));
+				p = stop;
+			}
+		}
+		/* The TEB hop list is small private tables. The live stack is
+		 * where a mixer actually keeps the pointers it is using. Do not
+		 * GetThreadContext (wineserver). NT_TIB StackBase/StackLimit
+		 * are user-readable. */
+		{
+			uintptr_t stack_base = w[1], stack_limit = w[2], p;
+
+			if (stack_limit && stack_base > stack_limit &&
+			    stack_base - stack_limit <= 0x200000) {
+				p = stack_limit;
+				while (p < stack_base) {
+					MEMORY_BASIC_INFORMATION mbi;
+					uintptr_t stop;
+
+					if (VirtualQuery((LPCVOID)p, &mbi,
+							 sizeof(mbi)) != sizeof(mbi))
+						break;
+					stop = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+					if (stop > stack_base)
+						stop = stack_base;
+					if (stop <= p)
+						break;
+					if (mbi.State == MEM_COMMIT &&
+					    !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+						live_page_scan((const uintptr_t *)p,
+							       (size_t)(stop - p) /
+								       sizeof(uintptr_t));
+					p = stop;
+				}
+			}
+		}
+		if (named++ < 8) {
+			unsigned moff = 0;
+			const char *mname = g_ctl->starts[i]
+						? ss_module((uintptr_t)g_ctl->starts[i], &moff)
+						: NULL;
+
+			ss_log("  live-peer: tid %lu LEFT RUNNING, start %s - scanning TLS "
+			       "for pointers into heaps we rewind\n",
+			       (unsigned long)g_ctl->ids[i], mname ? mname : "?");
+		}
+	}
+	if (g_live_page_n)
+		ss_log("  live-peer hold: %d page(s) (%u KB) on rewound heaps, left in "
+		       "the present so LEFT RUNNING TLS does not watch a memcpy\n",
+		       g_live_page_n, (unsigned)(g_live_page_n * 4));
+	else
+		ss_log("  live-peer hold: no TLS pointers into rewound heaps from LEFT "
+		       "RUNNING threads\n");
+	/* After the TLS scan, so the frame page is not wiped with that list. */
+	unix_frame_shield("before-copy", 1);
+}
+
+static int win_read(Window *w, unsigned long long pos, void *dst, size_t n)
+{
+	unsigned char *d = dst;
+
+	while (n) {
+		size_t chunk;
+		unsigned char *view;
+
+		if (!win_cover(w, pos))
+			return 0;
+		view = w->base + (size_t)(pos - w->off);
+		chunk = (size_t)(w->off + w->size - pos);
+		if (chunk > n)
+			chunk = n;
+		memcpy(d, view, chunk);
+		d += chunk;
+		pos += chunk;
+		n -= chunk;
+	}
+	return 1;
+}
+
+/* Copy saved bytes into live memory, but do not rewrite a page a LEFT RUNNING
+ * peer currently holds. pos still advances across a hole so the slot mapping
+ * stays aligned. */
+static int win_copy_except_live(Window *w, unsigned long long pos, void *mem, size_t n)
+{
+	unsigned char *p = mem;
+	size_t done = 0;
+
+	while (done < n) {
+		size_t page = 0x1000 - (((uintptr_t)p + done) & 0xFFF);
+
+		if (page > n - done)
+			page = n - done;
+		if (live_page_held((uintptr_t)p + done)) {
+			g_live_skip_bytes += page;
+		} else if (!win_copy(w, pos + done, p + done, page, 0)) {
+			return 0;
+		}
+		done += page;
+	}
+	return 1;
+}
+
+/* Wine HEAPBLOCKS for the redirected game heap: put back busy GhHead blocks
+ * from the save, leave allocator lists (and any live-peer pages) in the present.
+ * Never falls back to a wholesale memcpy - that is the named leave.
+ *
+ * Preferred source is the sidetable snapshot taken after suspend: that is the
+ * exact live set, with no HeapWalk and no scan of heap bytes. The GhHead image
+ * scan remains for a slot that has no snapshot (cross-session, or the table
+ * was never reserved). */
+static int wine_gameheap_copy(Window *w, unsigned long long pos, void *live, size_t n)
+{
+	size_t off = 0;
+	int nblk = 0;
+	unsigned long long wrote = 0;
+	unsigned i, nbusy = gameheap_busy_saved_count();
+
+	if (nbusy) {
+		/* The copy below can restore a saved flags word. Clear bit 2
+		 * again first, and skip any block that lands on the live frame. */
+		unix_frame_shield("gameheap", 1);
+		for (i = 0; i < nbusy; i++) {
+			void *head = NULL;
+			size_t blk = 0;
+
+			if (!gameheap_busy_saved_at(i, &head, &blk))
+				continue;
+			if ((uintptr_t)head < (uintptr_t)live)
+				continue;
+			off = (uintptr_t)head - (uintptr_t)live;
+			if (off >= n || blk > n - off)
+				continue;
+			if (!win_copy_except_live(w, pos + off, head, blk))
+				return -1;
+			nblk++;
+			wrote += blk;
+		}
+		ss_log("  wine gameheap: %d of %u sidetable block(s) copied, %llu KB "
+		       "written, %llu KB left as lists/live-peer pages (no HeapWalk, "
+		       "no wholesale memcpy)\n",
+		       nblk, nbusy, wrote >> 10,
+		       (unsigned long long)(n - (size_t)wrote) >> 10);
+		return nblk;
+	}
+
+	while (off + 8 <= n) {
+		unsigned char head[16];
+		size_t pull = sizeof(head), blk = 0;
+
+		if (pull > n - off)
+			pull = n - off;
+		if (!win_read(w, pos + off, head, pull))
+			return -1;
+		if (!gameheap_saved_block(head, (char *)live + off, n - off, &blk)) {
+			off += 8;
+			continue;
+		}
+		if (!win_copy_except_live(w, pos + off, (char *)live + off, blk))
+			return -1;
+		nblk++;
+		wrote += blk;
+		off += (blk + 7u) & ~(size_t)7u;
+	}
+	ss_log("  wine gameheap: %d busy block(s) copied by GhHead scan (no "
+	       "sidetable snapshot), %llu KB written, %llu KB left as "
+	       "lists/live-peer pages (no wholesale memcpy)\n",
+	       nblk, wrote >> 10, (unsigned long long)(n - (size_t)wrote) >> 10);
+	return nblk;
+}
+
 static int catch_mode(void)
 {
 	static int cached = -1;
@@ -13955,6 +14589,7 @@ static int do_load(int slotno)
 		slotfile_read(slotno, s);
 	if (!s->valid)
 		return 0;
+	ss_op_set("load");
 	/* Sampled here, before a single byte moves, because this is the only moment
 	 * that answers the question. A heap created after the snapshot exists right
 	 * now and will not exist in a moment; if the record of it is not taken on
@@ -13989,9 +14624,11 @@ static int do_load(int slotno)
 		 * nothing left to observe about what the present sounded like. */
 		dsh_mark_present();
 		dsh_quiet();
+		ss_op_set("load-park");
 		park_audio_gpu();
 		if (want)
 			blk_lock_all();
+		ss_op_set("load-freeze");
 		collect_threads();
 		suspend_all();
 		if (want) {
@@ -14472,6 +15109,7 @@ static int do_load(int slotno)
 	 * region's saved protection back as it goes - a region that was PAGE_NOACCESS
 	 * at save time would fault on being read a moment later. Here it is still
 	 * PAGE_EXECUTE_READWRITE, so the comparison is free of that problem. */
+	ss_op_set("load-copy");
 	{
 		Window wv;
 		unsigned long long vwords = 0;
@@ -14487,6 +15125,7 @@ static int do_load(int slotno)
 
 		/* Ask the heaps what they own before a single region is written. */
 		lfh_find_regions(s);
+		live_peer_pages_collect();
 		if (der_alloc(s->nregs))
 			der_plan_regions(s);
 
@@ -14495,7 +15134,22 @@ static int do_load(int slotno)
 			SIZE_T size = (SIZE_T)s->regs[i].size;
 			unsigned long long here = pos;
 			DWORD old;
-			int writable =
+			int writable;
+
+			/* Before the protect. A SIGUSR1 from this call reloads eax from
+			 * the frame, so the saved status has to already be 0, and the
+			 * frame's own region is not protected or written at all. */
+			unix_frame_heal();
+			if (unix_frame_in_span((uintptr_t)base, (size_t)size)) {
+				ss_log("  unix frame: region %d at %p left untouched, %llu "
+				       "bytes (live syscall frame)\n",
+				       i, base, (unsigned long long)size);
+				if (g_reg_off)
+					g_reg_off[i] = pos;
+				pos += size;
+				continue;
+			}
+			writable =
 				VirtualProtect(base, size, PAGE_EXECUTE_READWRITE, &old) != 0;
 
 			/* Here, and not beside the writeback at the end of the loop,
@@ -14533,6 +15187,9 @@ static int do_load(int slotno)
 			 * them - which is what the allocator keeps its lists in -
 			 * are deliberately left alone. */
 			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base);
+			int hi_reg = heap_index_of(s->regs[i].base);
+			int wine_gh = ss_under_wine() && blk_mode() && g_redirect_heap &&
+				      hi_reg >= 0 && g_ctl->heap_h[hi_reg] == g_redirect_heap;
 
 			if (g_reg_off)
 				g_reg_off[i] = pos;
@@ -14543,7 +15200,7 @@ static int do_load(int slotno)
 			 * game carried forward from what we wrote looks exactly like
 			 * one that reverted to what was there before, unless both
 			 * numbers are on the same line. */
-			if (g_clob_off && writable && !by_block) {
+			if (g_clob_off && writable && !by_block && !wine_gh) {
 				unsigned long long fd = 0, wds = 0, sv = 0, mv = 0;
 
 				g_clob_off[i] = ~0ull;
@@ -14554,7 +15211,7 @@ static int do_load(int slotno)
 			}
 			/* The whole pre-image, not just the one sampled word, for the
 			 * regions the plan picked. Must happen before the paint. */
-			if (writable && !by_block)
+			if (writable && !by_block && !wine_gh)
 				der_capture(i, base, (size_t)size);
 			if (poke_skipped(s->regs[i].base)) {
 				handskip++;
@@ -14563,7 +15220,16 @@ static int do_load(int slotno)
 				       i, base, (unsigned long long)size);
 			} else if (by_block)
 				blocked++;
-			else if (win_copy(&w, pos, base, size, 0)) {
+			else if (wine_gh) {
+				int nb = wine_gameheap_copy(&w, pos, base, size);
+
+				if (nb >= 0) {
+					restored++;
+					if (g_clob_ok)
+						g_clob_ok[i] = 1;
+				} else
+					skipped++;
+			} else if (win_copy_except_live(&w, pos, base, size)) {
 				restored++;
 				/* Only regions we actually wrote are worth asking
 				 * about afterwards. One left in the present was
@@ -14586,7 +15252,9 @@ static int do_load(int slotno)
 			 * unguarded it reported the LFH regions as damage and printed
 			 * THE RESTORE DID NOT TAKE over a restore that took perfectly
 			 * - the same false alarm the derived mask raised earlier. */
-			if (vmode && writable && !by_block && !poke_skipped(s->regs[i].base)) {
+			if (vmode && writable && !by_block && !wine_gh &&
+			    !poke_skipped(s->regs[i].base) &&
+			    !live_page_in_span((uintptr_t)base, size)) {
 				unsigned long long fd = 0, words = 0, was = 0, now = 0;
 				int r = win_cmp(&wv, here, base, size, &fd, &words, &was, &now);
 				(void)was;
@@ -14637,9 +15305,16 @@ static int do_load(int slotno)
 			 * dies without either list being wrong. */
 			if (writable)
 				VirtualProtect(base, size, s->regs[i].prot, &old);
+			/* Heal again after the protect returns. The audio thread can
+			 * have taken the signal during it. */
+			unix_frame_heal();
 			pos += size;
 		}
 		win_close(&wv);
+		/* Live table is excluded, so it is still present-tense. The game
+		 * now believes the save-time set is live. Rewind the journal to
+		 * match; no-op when there was no snapshot. */
+		gameheap_busy_rewind();
 		/* The blocks themselves, now that every heap region has been left
 		 * untouched and its offset recorded. One pass over the matched
 		 * list; a block whose region was not captured finds no home and is
@@ -15159,6 +15834,7 @@ static int do_load(int slotno)
 		       g_ctl->diff_wrote >> 20, g_ctl->diff_same >> 20,
 		       tot ? (g_ctl->diff_same * 100) / tot : 0, tot >> 20);
 	}
+	ss_op_set("load-resume");
 	ss_log("load: slot %d, %d restored, %d skipped, %d by block, %d threads, %d newer "
 	       "than save%s\n",
 	       slotno, restored, skipped, blocked, g_ctl->nids, g_ctl->last_fresh,
@@ -15352,8 +16028,12 @@ static DWORD WINAPI helper_main(LPVOID param)
 		LONG req;
 		LARGE_INTEGER h0, h1, hf;
 
+		/* linux 39948: after a living first restore, helper Sleep(1)
+		 * hit C000001D in kernelbase (wineserver). VEH then parked tid
+		 * 500 - this thread, not xa2 - as mixer, so KEY_2 could not
+		 * start load 2. YieldProcessor is local, like request(). */
 		while ((req = InterlockedExchange(&g_ctl->request, REQ_NONE)) == REQ_NONE)
-			Sleep(1);
+			YieldProcessor();
 		QueryPerformanceCounter(&h0);
 		g_ctl->result = (req == REQ_SAVE) ? do_save((int)g_ctl->slot)
 						  : do_load((int)g_ctl->slot);
@@ -15686,7 +16366,13 @@ int savestate_load(int slot)
 {
 	/* Nothing after the request. The calling thread is rewound into the save
 	 * and never arrives back here - see the note beside the diff report in
-	 * do_load, which is where post-restore reporting has to live. */
+	 * do_load, which is where post-restore reporting has to live.
+	 *
+	 * Do not Flush here. linux 35034: presenter Flush then request() hung
+	 * SetThreadContext C000001D, same as helper Flush (24023). The Present
+	 * thread is about to spin in request(); it will not Present. Snapshot
+	 * copy is taken from Present after swrast_flush, so software CBs are
+	 * idle. Do not vkEndCommandBuffer unix-wait on the rewind path. */
 	if (g_ctl)
 		g_ctl->diff_same = g_ctl->diff_wrote = 0;
 	return request(REQ_LOAD, slot);

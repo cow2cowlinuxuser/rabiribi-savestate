@@ -125,6 +125,7 @@ int gpu_draw(const SwTri *tris, int n, void *texslot, const SwState *st);
 int gpu_frame_end(void);
 int gpu_readback(uint32_t *dst, unsigned dst_pitch, int w, int h);
 void gpu_park(int on);
+void gpu_dxgi_reconcile(HWND hwnd);
 void gpu_prof_take(unsigned *uploads, unsigned *draws, unsigned *verts);
 
 /* Installed by whichever front end has a hardware backend. Left null everywhere
