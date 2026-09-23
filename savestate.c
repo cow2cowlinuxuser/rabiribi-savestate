@@ -10061,6 +10061,13 @@ static void audit_system_reachable(void)
 	VirtualFree(w.seen, 0, MEM_RELEASE);
 }
 
+/* Set by suspend_all. build_exclusions and the settle scanners run after
+ * that and must not GetThreadContext a thread we left running: under Wine
+ * that is a SIGUSR1 round-trip, and NtSetContextThread ORs bit 2 into a
+ * live unix-call frame. The dispatcher then reloads eax and mmdevapi's
+ * audio_client_main asserts on a pulse_main_loop that returned success. */
+static char g_did_suspend[SS_MAX_THREADS];
+
 static void build_exclusions(void)
 {
 	MODULEENTRY32 me;
@@ -10256,8 +10263,12 @@ static void build_exclusions(void)
 				 * registers untouched. That is survivable while one is
 				 * parked in a wait, and not survivable while one is
 				 * inside the allocator, because the heap it is halfway
-				 * through is about to be replaced underneath it. */
-				if (g_ctl->handles[i]) {
+				 * through is about to be replaced underneath it.
+				 *
+				 * Read the park site only when we already suspended the
+				 * thread. GetThreadContext on one we left running is the
+				 * SIGUSR1 round-trip that clobbers a unix call's return. */
+				if (g_ctl->handles[i] && g_did_suspend[i]) {
 					CONTEXT c;
 					memset(&c, 0, sizeof(c));
 					c.ContextFlags = CONTEXT_CONTROL;
@@ -10721,8 +10732,6 @@ static void collect_threads(void)
 	}
 	CloseHandle(snap);
 }
-
-static char g_did_suspend[SS_MAX_THREADS];
 
 static void ss_name_leave_tid(DWORD tid)
 {
@@ -11640,7 +11649,7 @@ static int in_the_jit(unsigned *who, uintptr_t *where)
 		CONTEXT c;
 		uintptr_t pc;
 
-		if (!g_ctl->handles[i])
+		if (!g_ctl->handles[i] || !g_did_suspend[i])
 			continue;
 		memset(&c, 0, sizeof(c));
 		c.ContextFlags = CONTEXT_CONTROL;
@@ -11794,7 +11803,7 @@ static int in_the_allocator(unsigned *who, uintptr_t *where)
 		CONTEXT c;
 		uintptr_t pc;
 
-		if (!g_ctl->handles[i])
+		if (!g_ctl->handles[i] || !g_did_suspend[i])
 			continue;
 		memset(&c, 0, sizeof(c));
 		c.ContextFlags = CONTEXT_CONTROL;
@@ -11963,7 +11972,7 @@ static void held_build(void)
 		MEMORY_BASIC_INFORMATION mbi;
 		int w;
 
-		if (!g_ctl->transient[i] || !g_ctl->handles[i])
+		if (!g_ctl->transient[i] || !g_ctl->handles[i] || !g_did_suspend[i])
 			continue;
 		memset(&c, 0, sizeof(c));
 		c.ContextFlags = CONTEXT_FULL;
@@ -12968,7 +12977,7 @@ static int do_save(int slotno)
 		ThreadState *t;
 		if (!g_ctl->handles[i] || s->nthreads >= SS_MAX_THREADS)
 			continue;
-		if (g_ctl->transient[i])
+		if (g_ctl->transient[i] || !g_did_suspend[i])
 			continue;
 		if (!rewind_all_threads() && g_ctl->ids[i] != g_ctl->req_tid)
 			continue;
