@@ -10068,6 +10068,10 @@ static void audit_system_reachable(void)
  * audio_client_main asserts on a pulse_main_loop that returned success. */
 static char g_did_suspend[SS_MAX_THREADS];
 
+/* Clears that bit on threads we left running, and can punch the frame's
+ * page out of the copy. Does not SuspendThread and does not GetThreadContext. */
+static void unix_frame_shield(const char *when, int hold_pages);
+
 static void build_exclusions(void)
 {
 	MODULEENTRY32 me;
@@ -10340,6 +10344,9 @@ static void build_exclusions(void)
 				      k ? ", " : "", rnames[k], rcounts[k]);
 		ss_log("  rewound threads belong to: %s\n", line);
 	}
+	/* Before the snapshot is taken, and again before a restore writes.
+	 * A frame captured with bit 2 set is written back under the live call. */
+	unix_frame_shield("exclusions", 0);
 	audit_present_threads();
 	audit_system_reachable();
 }
@@ -14057,6 +14064,69 @@ static void live_page_scan(const uintptr_t *w, size_t words)
 	}
 }
 
+/* i386 Wine keeps the unix syscall frame at TEB+0x218. The first dword is
+ * the restore flags. Bit 2 (orl $2 in signal_set_full_context) makes
+ * __wine_unix_call_dispatcher reload eax from frame+0x1c and throw away
+ * the unix function's 0. mmdevapi then asserts. The audio thread is left
+ * running, so this only reads the TEB and clears that one bit. */
+static void unix_frame_shield(const char *when, int hold_pages)
+{
+#if defined(_M_IX86) || defined(__i386__)
+	int i, nframe = 0, nclear = 0;
+
+	if (!ss_under_wine() || !g_ctl)
+		return;
+	for (i = 0; i < g_ctl->nids; i++) {
+		unsigned char *teb;
+		uintptr_t frame;
+		DWORD flags;
+		MEMORY_BASIC_INFORMATION mbi;
+		int h;
+
+		if (g_did_suspend[i] || !g_ctl->handles[i])
+			continue;
+		teb = (unsigned char *)teb_of(g_ctl->handles[i]);
+		if (!teb)
+			continue;
+		frame = *(uintptr_t *)(teb + 0x218);
+		if (frame < 0x10000 || (frame & 3))
+			continue;
+		if (VirtualQuery((LPCVOID)frame, &mbi, sizeof(mbi)) != sizeof(mbi))
+			continue;
+		if (mbi.State != MEM_COMMIT ||
+		    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD | PAGE_READONLY |
+				    PAGE_EXECUTE | PAGE_EXECUTE_READ)))
+			continue;
+		flags = *(DWORD *)frame;
+		/* 0x8000 is the in-call mark the dispatcher writes. Bit 2 is
+		 * the poison. Anything else is not this frame. */
+		if (!(flags & 0x8002))
+			continue;
+		nframe++;
+		h = heap_index_of(frame);
+		if (flags & 2) {
+			InterlockedAnd((LONG volatile *)frame, ~(LONG)2);
+			nclear++;
+		}
+		if (hold_pages)
+			live_page_note(frame);
+		ss_log("  unix frame: tid %lu at %p flags %08lx%s%s (%s)\n",
+		       (unsigned long)g_ctl->ids[i], (void *)frame,
+		       (unsigned long)flags, (flags & 2) ? " bit2 cleared" : " bit2 clear",
+		       h >= 0 ? " INSIDE a rewound heap" : "", when);
+	}
+	if (!nframe)
+		ss_log("  unix frame: no in-call frame on a left-running thread (%s)\n",
+		       when);
+	else if (!nclear && !hold_pages)
+		ss_log("  unix frame: %d in-call frame(s), bit 2 already clear (%s)\n",
+		       nframe, when);
+#else
+	(void)when;
+	(void)hold_pages;
+#endif
+}
+
 static void live_peer_pages_collect(void)
 {
 	int i, named = 0;
@@ -14169,6 +14239,8 @@ static void live_peer_pages_collect(void)
 	else
 		ss_log("  live-peer hold: no TLS pointers into rewound heaps from LEFT "
 		       "RUNNING threads\n");
+	/* After the TLS scan, so the frame page is not wiped with that list. */
+	unix_frame_shield("before-copy", 1);
 }
 
 static int win_read(Window *w, unsigned long long pos, void *dst, size_t n)
@@ -14232,6 +14304,9 @@ static int wine_gameheap_copy(Window *w, unsigned long long pos, void *live, siz
 	unsigned i, nbusy = gameheap_busy_saved_count();
 
 	if (nbusy) {
+		/* The copy below can restore a saved flags word. Clear bit 2
+		 * again first, and skip any block that lands on the live frame. */
+		unix_frame_shield("gameheap", 1);
 		for (i = 0; i < nbusy; i++) {
 			void *head = NULL;
 			size_t blk = 0;
