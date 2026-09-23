@@ -14206,6 +14206,23 @@ static int unix_frame_in_span(uintptr_t base, size_t size)
 		frame = *(uintptr_t *)(teb + 0x218);
 		if (frame < base || frame >= base + size)
 			continue;
+		/* A left-running thread keeps this pointer after the call returns.
+		 * Only the in-call mark means the frame is live. Skipping every
+		 * stale slot left three other frame allocations unrestored. */
+		{
+			MEMORY_BASIC_INFORMATION mbi;
+			DWORD flags;
+
+			if (VirtualQuery((LPCVOID)frame, &mbi, sizeof(mbi)) != sizeof(mbi))
+				continue;
+			if (mbi.State != MEM_COMMIT ||
+			    (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD | PAGE_READONLY |
+				    PAGE_EXECUTE | PAGE_EXECUTE_READ)))
+				continue;
+			flags = *(DWORD *)frame;
+			if (!(flags & 0x8000))
+				continue;
+		}
 		return 1;
 	}
 #else
