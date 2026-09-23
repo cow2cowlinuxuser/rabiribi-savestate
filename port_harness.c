@@ -8,6 +8,14 @@
  *
  *   wine port_harness32.exe insession [cycles]
  *   wine port_harness32.exe xsession save|prove|restore <file> [seed]
+ *   wine port_harness32.exe audio
+ *   wine port_harness32.exe audio-silent
+ *
+ * audio opens waveOut the way xa2_sw does, then one save/load. Under Wine that
+ * device is mmdevapi's audio_client_main; quiesce parks our mix thread and
+ * does not waveOutPause, which is the game path. audio-silent is the same
+ * save/load with no device — the logical XA2 the rest of this harness already
+ * passes. One shot each, not a loop.
  */
 
 #include "savestate.h"
@@ -678,6 +686,56 @@ static int xsession_cmd(const char *cmd, const char *file, unsigned seed)
 	return 1;
 }
 
+HRESULT WINAPI xa2_sw_create(void **out, UINT32 flags, UINT32 processor);
+
+/* One save/load. with_device calls the software XAudio2, which opens waveOut
+ * and leaves it playing across the copy (no waveOutPause under Wine). */
+static int audio_cmd(int with_device)
+{
+	void *eng = NULL;
+	HRESULT hr;
+
+	printf("audio: device=%s\n", with_device ? "waveOut via xa2_sw" : "none");
+	if (!world_setup(4242)) {
+		printf("FAIL: world_setup\n");
+		return 1;
+	}
+	savestate_hooks_install();
+	if (with_device) {
+		hr = xa2_sw_create(&eng, 0, 0xFFFFFFFFu);
+		printf("audio: xa2_sw_create hr=%08lx eng=%p\n", (unsigned long)hr, eng);
+		if (hr != 0 || !eng) {
+			printf("FAIL: software XAudio2 did not come up\n");
+			world_teardown();
+			return 1;
+		}
+		/* A few quanta so the driver thread is inside its unix main loop
+		 * before we freeze, the way the title is when KEY_2 arrives. */
+		Sleep(400);
+	}
+	printf("audio: save\n");
+	if (!savestate_save(0)) {
+		printf("FAIL: save refused\n");
+		world_teardown();
+		return 1;
+	}
+	if (savestate_last_was_restore()) {
+		printf("PASS: restore resumed inside save; process lived (device=%s)\n",
+		       with_device ? "waveOut" : "none");
+		world_teardown();
+		return 0;
+	}
+	printf("audio: load (quiesce does not waveOutPause)\n");
+	if (!savestate_load(0)) {
+		printf("FAIL: load refused\n");
+		world_teardown();
+		return 1;
+	}
+	printf("audio: load returned without resuming inside save\n");
+	world_teardown();
+	return 1;
+}
+
 int main(int argc, char **argv)
 {
 	unsigned seed = 9001;
@@ -685,9 +743,14 @@ int main(int argc, char **argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	if (argc < 2) {
 		printf("usage: port_harness32.exe insession [cycles]\n"
-		       "       port_harness32.exe xsession save|prove|restore <file> [seed]\n");
+		       "       port_harness32.exe xsession save|prove|restore <file> [seed]\n"
+		       "       port_harness32.exe audio | audio-silent\n");
 		return 2;
 	}
+	if (!strcmp(argv[1], "audio"))
+		return audio_cmd(1);
+	if (!strcmp(argv[1], "audio-silent"))
+		return audio_cmd(0);
 	if (!strcmp(argv[1], "insession"))
 		return insession(argc > 2 ? atoi(argv[2]) : 20);
 	if (!strcmp(argv[1], "xsession") && argc >= 4) {
@@ -695,6 +758,7 @@ int main(int argc, char **argv)
 			seed = (unsigned)strtoul(argv[4], NULL, 10);
 		return xsession_cmd(argv[2], argv[3], seed);
 	}
-	printf("usage: port_harness32.exe insession [cycles]\n");
+	printf("usage: port_harness32.exe insession [cycles]\n"
+	       "       port_harness32.exe audio | audio-silent\n");
 	return 2;
 }
