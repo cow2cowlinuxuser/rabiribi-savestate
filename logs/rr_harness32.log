@@ -1,0 +1,101 @@
+zoo fill: const
+  shape (after build_world):
+    node table  at 02F00020  alloc base 02F00000  region     1.00 MB  state 1000 type 20000 prot 4
+    first node  at 00243F40  alloc base 00240000  region     0.05 MB  state 1000 type 20000 prot 4
+    last node   at 0300E9B0  alloc base 03000000  region     1.07 MB  state 1000 type 20000 prot 4
+    bulk table  at 030991E8  alloc base 03000000  region     0.53 MB  state 1000 type 20000 prot 4
+    first bulk  at 03200488  alloc base 03200000  region     0.06 MB  state 1000 type 20000 prot 4
+    last bulk   at 07F0A838  alloc base 07EE0000  region     0.40 MB  state 1000 type 20000 prot 4
+  zoo (after build_world, const fill): does the engine's segment test find these heaps?
+    heap          live region signed  owned   commit   walk   walk MB
+    growable      4096    129      0      0   74.19M      4     3.88M  <<< invisible
+    fixed         1800      1      0      0   32.00M      1    32.00M  <<< invisible
+    precommit     4096    126      0      0   86.31M      1    16.00M  <<< invisible
+    tiny         65536      4      0      0    4.06M      4     4.06M  <<< invisible
+    huge            32     32      0      0   34.00M      1     0.06M  <<< invisible
+    noserial      4096      6      0      0   16.94M      6    16.94M  <<< invisible
+    exec          2048      5      0      0    8.31M      5     8.31M  <<< invisible
+    frag         32768      6      0      0   17.06M      6    17.06M  <<< invisible
+    cross         8192      3      0      0    2.19M      3     2.19M  <<< invisible
+    total       122664    312      0      0  275.06M     31   100.50M
+    HeapWalk admits 31 region(s) across the zoo; the engine's signature test finds 0 of them
+      growable   default heap, 16 KB items - the shape already under test
+      fixed      non-growable, whole 32 MB reserved at create time
+      precommit  growable, but 16 MB committed before the first request
+      tiny       48-byte items, the size that drives the front end
+      huge       1 MB items, over the threshold that bypasses segments
+      noserial   HEAP_NO_SERIALIZE, so there is no lock to contend with
+      exec       executable pages, a protection the region filter must classify
+      frag       every third item freed, so the free lists are holes
+      cross      items point into the heap before it - the aliasing case
+  zoo space: 478 committed private region(s), 390.33 MB; 0 of them carry the heap signature, 0.00 MB
+             8.31 MB committed MEM_MAPPED, which region_wanted drops on the floor whatever the signature says
+ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_concat returned error: No such file or directory
+ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
+ALSA lib conf.c:5731:(snd_config_expand) Evaluate error: No such file or directory
+ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default
+ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_concat returned error: No such file or directory
+ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
+ALSA lib conf.c:5731:(snd_config_expand) Evaluate error: No such file or directory
+ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default
+rr harness: 1 cycle(s), 1 restore(s), call-anyway off
+  condition 1  16384 node(s) of 56 bytes on the SHARED process heap
+  condition 2  7 pool worker(s) live on ntdll threads
+  condition 2b 30 thread(s) of our own, which DO rewind, each publishing a node into a TLS slot
+  condition 3  dsound UNAVAILABLE (no device) with 0 buffer(s) created after the hook armed, callback pointers inside every node
+  contested    node pointers published into TLS, window user data, a timer-queue context and a registered wait
+  condition 4  4096 bulk block(s) of 16 KB on a private heap (64 MB), plus a 4 MB mapped view
+
+  zoo (after the last restore, const fill): does the engine's segment test find these heaps?
+    heap          live region signed  owned   commit   walk   walk MB
+    growable      4096    129      0      0   74.19M      4     3.88M  <<< invisible
+    fixed         1800      1      0      0   32.00M      1    32.00M  <<< invisible
+    precommit     4096    126      0      0   86.31M      1    16.00M  <<< invisible
+    tiny         65536      4      0      0    4.06M      4     4.06M  <<< invisible
+    huge            32     32      0      0   34.00M      1     0.06M  <<< invisible
+    noserial      4096      6      0      0   16.94M      6    16.94M  <<< invisible
+    exec          2048      5      0      0    8.31M      5     8.31M  <<< invisible
+    frag         32768      6      0      0   17.06M      6    17.06M  <<< invisible
+    cross         8192      3      0      0    2.19M      3     2.19M  <<< invisible
+    total       122664    312      0      0  275.06M     31   100.50M
+    HeapWalk admits 31 region(s) across the zoo; the engine's signature test finds 0 of them
+      growable   default heap, 16 KB items - the shape already under test
+      fixed      non-growable, whole 32 MB reserved at create time
+      precommit  growable, but 16 MB committed before the first request
+      tiny       48-byte items, the size that drives the front end
+      huge       1 MB items, over the threshold that bypasses segments
+      noserial   HEAP_NO_SERIALIZE, so there is no lock to contend with
+      exec       executable pages, a protection the region filter must classify
+      frag       every third item freed, so the free lists are holes
+      cross      items point into the heap before it - the aliasing case
+  zoo space: 527 committed private region(s), 580.27 MB; 0 of them carry the heap signature, 0.00 MB
+             15.53 MB committed MEM_MAPPED, which region_wanted drops on the floor whatever the signature says
+
+================ result ================
+  restores               0
+  nodes checked          0
+  nodes wrong magic      0
+  nodes wrong identity   0
+  nodes wrong callback   0
+  pool calls             83
+  pool stale pointers    0
+  pool skipped the call  0
+  pool called anyway     0
+  mapped view mismatches 0
+  heap oracle failures   0
+  dsound buffers / ticks 0 / 0, lost 0
+  our worker calls / bad 12026 / 0
+  pump ticks / file reads 96 / 133
+
+  NOT REPRODUCED. All four conditions held at the game's scale
+  and every oracle passed, so the engine handles this shape and
+  the remaining difference is specific to the game.
+X connection to :99 broken (explicit kill or server shutdown).

@@ -10,7 +10,10 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-INC = r"C:\zig\lib\libc\include\any-windows-any\GL"
+# The mingw GL headers ship inside zig's own libc tree. On Windows that is the
+# fixed install path below; on other hosts the zig install lives elsewhere, so
+# ZIG_GL_INC (set by build.sh from `zig env`) overrides it when present.
+INC = os.environ.get("ZIG_GL_INC", r"C:\zig\lib\libc\include\any-windows-any\GL")
 
 # Implemented in gl_sw.c. Names must match exported symbols.
 HAND = {

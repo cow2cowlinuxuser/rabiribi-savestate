@@ -1,0 +1,76 @@
+cpu features = 0xf
+
+---- scalar ----
+1 quad 256, integer origin                     gaps=0      doubles=0     
+1 quad 256, half-pixel origin                  gaps=0      doubles=0     
+1 quad 256, 3/16 origin                        gaps=0      doubles=0     
+8x8 tiles of 32, integer origin                gaps=0      doubles=0     
+8x8 tiles of 32, half-pixel origin             gaps=0      doubles=0     
+8x8 tiles of 32, 3/16 origin                   gaps=0      doubles=0     
+12x12 tiles of 33.5, integer origin            gaps=0      doubles=0     
+6x6 tiles of 67.1875                           gaps=0      doubles=0     
+2x2 tiles of 200, integer origin               gaps=0      doubles=0     
+8x8 tiles of 32, 3/16 origin, bilinear         gaps=0      doubles=0     
+fan, 64 spokes, integer centre                 gaps=0      doubles=0     
+fan, 61 spokes, phase 0.137                    gaps=2      doubles=0       first gap (173,274)
+fan, 199 spokes, phase 0.9                     gaps=0      doubles=0     
+fan, 360 spokes, tiny radius                   gaps=0      doubles=0     
+1:1 blit, integer origin                       wrong=0      
+1:1 blit, origin 65,67                         wrong=0      
+near-1:1 blit, +3e-5 per texel                 wrong=0      
+near-1:1 blit, -5e-5 per texel                 wrong=0      
+off-1:1 blit, +2e-3 per texel                  wrong=0      
+atlas purity, 1:1 quads                        wrong=0      
+atlas purity, 1:1 quads, off-grid origin       wrong=0      
+atlas purity, minified 6x                      wrong=0      
+atlas purity, magnified                        wrong=0      
+atlas purity, perspective                      wrong=0      
+tessellation 2 vs 8 tris                       differ=0      
+tessellation 2 vs 32 tris                      differ=0      
+tessellation 2 vs 128 tris                     differ=0      
+tessellation 8 vs 128 tris                     differ=0      
+tessellation 2 vs 128, off-grid                differ=0      
+D3D9 1:1 quad, +0.5 shift, point               wrong=0      
+D3D9 1:1 quad, +0.5 shift, bilinear            wrong=0      
+
+---- simd ----
+1 quad 256, integer origin                     gaps=0      doubles=0     
+1 quad 256, half-pixel origin                  gaps=0      doubles=0     
+1 quad 256, 3/16 origin                        gaps=0      doubles=0     
+8x8 tiles of 32, integer origin                gaps=0      doubles=0     
+8x8 tiles of 32, half-pixel origin             gaps=0      doubles=0     
+8x8 tiles of 32, 3/16 origin                   gaps=0      doubles=0     
+12x12 tiles of 33.5, integer origin            gaps=0      doubles=0     
+6x6 tiles of 67.1875                           gaps=0      doubles=0     
+2x2 tiles of 200, integer origin               gaps=0      doubles=0     
+8x8 tiles of 32, 3/16 origin, bilinear         gaps=0      doubles=0     
+fan, 64 spokes, integer centre                 gaps=0      doubles=0     
+fan, 61 spokes, phase 0.137                    gaps=2      doubles=0       first gap (173,274)
+fan, 199 spokes, phase 0.9                     gaps=0      doubles=0     
+fan, 360 spokes, tiny radius                   gaps=0      doubles=0     
+1:1 blit, integer origin                       wrong=0      
+1:1 blit, origin 65,67                         wrong=0      
+near-1:1 blit, +3e-5 per texel                 wrong=0      
+near-1:1 blit, -5e-5 per texel                 wrong=0      
+off-1:1 blit, +2e-3 per texel                  wrong=0      
+atlas purity, 1:1 quads                        wrong=0      
+atlas purity, 1:1 quads, off-grid origin       wrong=0      
+atlas purity, minified 6x                      wrong=0      
+atlas purity, magnified                        wrong=0      
+atlas purity, perspective                      wrong=0      
+tessellation 2 vs 8 tris                       differ=0      
+tessellation 2 vs 32 tris                      differ=0      
+tessellation 2 vs 128 tris                     differ=0      
+tessellation 8 vs 128 tris                     differ=0      
+tessellation 2 vs 128, off-grid                differ=0      
+D3D9 1:1 quad, +0.5 shift, point               wrong=0      
+D3D9 1:1 quad, +0.5 shift, bilinear            wrong=0      
+
+---- controls ----
+CONTROL: surface drawn twice, expect doubles   gaps=0      doubles=15376   first double (66,66) x2
+CONTROL: no shift, point, expect wrong         wrong=64516    first (1,1) got ff000202 want ff000101
+CONTROL: no shift, bilinear, expect blur       wrong=64516    first (1,1) got ff000202 want ff000101
+control OK: the half pixel is detectable
+control OK: seams are detectable
+FAIL: coverage is not watertight
+X connection to :100 broken (explicit kill or server shutdown).
