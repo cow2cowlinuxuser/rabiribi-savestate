@@ -28,6 +28,11 @@ if ($force -and $force -ne 'NOTSET' -and $force -ne 'OFF') {
 
 foreach ($p in $Path) {
 	if (-not (Test-Path $p)) { Write-Host "  $p missing"; continue }
+	# .NET file APIs resolve relative paths against [Environment]::CurrentDirectory,
+	# which PowerShell does NOT keep in step with cd/$PWD - so a relative $p that
+	# Test-Path just found can still miss in ReadAllBytes/WriteAllBytes. Resolve to
+	# an absolute path here so both the read below and the write later agree.
+	$p = (Resolve-Path -LiteralPath $p).Path
 
 	$b = [IO.File]::ReadAllBytes($p)
 	$pe = [BitConverter]::ToUInt32($b, 0x3C)

@@ -25,9 +25,10 @@ $magic    = U16 $opt
 $plus     = ($magic -eq 0x20B)
 Write-Host ("format      : {0}" -f $(if ($plus) { "PE32+ (64-bit)" } else { "PE32 (32-bit)" }))
 
-# The data directory sits at a different offset in PE32 vs PE32+, and the
-# import table is entry 1.
-$ddOff = $opt + $(if ($plus) { 112 } else { 96 })
+# Data directories start at a different offset in PE32 vs PE32+. Entry 0 is
+# the export table; the import table is entry 1, eight bytes later. Reading
+# entry 0 walks the export blob and looks like a packed import directory.
+$ddOff = $opt + $(if ($plus) { 112 } else { 96 }) + 8
 $impRva  = U32 $ddOff
 $impSize = U32 ($ddOff + 4)
 Write-Host ("import dir  : rva 0x{0:X} size 0x{1:X}" -f $impRva, $impSize)

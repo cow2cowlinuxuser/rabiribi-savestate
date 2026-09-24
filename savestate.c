@@ -2012,12 +2012,31 @@ unsigned gameheap_busy_snapshot(void);
 unsigned gameheap_busy_saved_count(void);
 int gameheap_busy_saved_at(unsigned i, void **head, size_t *total);
 void gameheap_busy_rewind(void);
+/* 1 when `base` is a heap gameheap owns and has made self-contained (LFH off) for
+ * D3D9SW_WHOLESALE, so its whole region may be restored byte-for-byte - freelist
+ * and all - instead of block by block, which is the address-reuse cure. 0 unless
+ * the knob is set. Defined in gameheap.c. */
+int gameheap_owned_heap(uintptr_t base);
+/* Names the gameheap block an address belongs to from the tag table, which lives
+ * in our image and survives a rewind - so a zeroed post-restore block can still
+ * report the call site, size and ordinal it was born with. 1 = block start,
+ * 2 = interior pointer, 0 = not ours. Defined in gameheap.c. */
+int gameheap_whatis(const void *p, unsigned *site, unsigned *size, unsigned *ord,
+		    uintptr_t *base);
 void xa2_sw_pump(void);
 void xa2_sw_park(void);
 void xa2_sw_quiesce(void);
 void xa2_sw_resume(void);
+/* Bumps the audio restore-generation so voices that outlived this restore can be
+ * told apart from ones the game builds afterwards; the generation valve refuses
+ * callbacks for the former (the track-change crash). Defined in xa2_sw.c. */
+void xa2_sw_restored(void);
 void dsh_play(void);
 
+/* x86 only, like the clamp that reads them: the only callers live under the same
+ * 32-bit guard, and the x64 build compiles this file too - so without this the
+ * counter and the knob are stranded as "unused" on every 64-bit target. */
+#if defined(_M_IX86) || defined(__i386__)
 static int g_runaway_hits;
 
 /* On unless explicitly switched off: a negative copy length is a bug in every
@@ -2036,6 +2055,7 @@ static int runaway_mode(void)
 	}
 	return cached;
 }
+#endif
 
 /* x86 only, like the clamp that calls it: the frame layout it walks is the
  * 32-bit calling convention's, and the x64 build compiles this file too.
@@ -2311,7 +2331,11 @@ static void decoder_patch_once(void)
 }
 
 static uintptr_t g_nothr_at;
+/* x86 only: every read/write of this counter sits under the 32-bit fault-fixup
+ * guard, so on a 64-bit target it would otherwise be an unused static. */
+#if defined(_M_IX86) || defined(__i386__)
 static int g_nothr_hits;
+#endif
 static DWORD g_nothr_until;
 static void nothread_arm(int on);
 
@@ -2504,6 +2528,10 @@ static void freeze_arm_once(void)
  * early in the file. This lives in our own image and our image rewinds with the
  * game, so a restore winds it back - it counts fixups since the last restore,
  * not since the session began, and the log says so. */
+/* x86 only, like the LFH divide fixup that reads them (the frame it walks is the
+ * 32-bit allocator's); the x64 build compiles this file too and would strand both
+ * as unused. */
+#if defined(_M_IX86) || defined(__i386__)
 static unsigned long long g_div_fix;
 
 /* Off makes the fault fatal again, which is the only way to tell whether the
@@ -2520,6 +2548,7 @@ static int div_fixup(void)
 	}
 	return cached;
 }
+#endif
 
 static LONG CALLBACK ss_fault_log(EXCEPTION_POINTERS *ep)
 {
@@ -5067,6 +5096,40 @@ static const char *ss_ours(uintptr_t v)
 	return NULL;
 }
 
+/* A short hex + ascii dump of a block, for the fault reporter: the bytes that
+ * are actually on the page right now, so the read the game just made is in
+ * plaintext instead of guessed from a single word. Guarded row by row with
+ * ss_readable so a block ending at a page boundary cannot fault the handler. */
+static void ss_dump_bytes(uintptr_t base, unsigned n)
+{
+	unsigned off;
+
+	if (n > 64)
+		n = 64; /* a header and the first few fields is enough to read intent */
+	for (off = 0; off < n; off += 16) {
+		unsigned row = (n - off < 16) ? (n - off) : 16, k;
+		const unsigned char *r = (const unsigned char *)(base + off);
+		char line[128], *o = line;
+
+		if (!ss_readable(base + off, row))
+			break;
+		o += wsprintfA(o, "         +%02X ", off);
+		for (k = 0; k < row; k++)
+			o += wsprintfA(o, "%02X ", r[k]);
+		for (; k < 16; k++) {
+			*o++ = ' ';
+			*o++ = ' ';
+			*o++ = ' ';
+		}
+		*o++ = '|';
+		for (k = 0; k < row; k++)
+			*o++ = (r[k] >= 32 && r[k] < 127) ? (char)r[k] : '.';
+		*o++ = '|';
+		*o = 0;
+		ss_raw("%s\n", line);
+	}
+}
+
 static void ss_where_reg(const char *name, uintptr_t v)
 {
 	MEMORY_BASIC_INFORMATION mbi;
@@ -5142,7 +5205,26 @@ static void ss_where_reg(const char *name, uintptr_t v)
 		if (mine)
 			ss_raw(" -- THIS REGISTER IS %s", mine);
 	}
-	ss_raw("\n");
+	/* Birth certificate from the gameheap tag table. The tag lives in our image,
+	 * not the block, so a block the restore rewound to zeroes can still name the
+	 * call site, size and ordinal it was allocated with - the one thing its own
+	 * blanked contents can no longer say. Then dump those contents, so the object
+	 * the game just faulted reading is on the page in full rather than one word. */
+	{
+		unsigned bsite = 0, bsize = 0, bord = 0;
+		uintptr_t bbase = 0;
+		int w = gameheap_whatis((const void *)v, &bsite, &bsize, &bord, &bbase);
+
+		ss_raw("\n");
+		if (w) {
+			ss_raw("         born: rabiribi.exe+%X, %u byte(s), ordinal %u%s\n",
+			       bsite, bsize, bord,
+			       w == 2 ? " (the address is inside this block, not its head)"
+				      : "");
+			ss_dump_bytes(bbase, bsize);
+		}
+		return;
+	}
 }
 
 /* Writable, committed, and actually part of the program's state. Image regions
@@ -12569,6 +12651,61 @@ static void delta_scan(Slot *s)
 	g_dl_have = 1;
 }
 
+/* Fill the module name table at the very top of a save, before anything in the
+ * opening steps can fault.
+ *
+ * build_exclusions rebuilds this properly once the threads are frozen, but it
+ * does not run until well after dsh_quiet and the audio/gpu park, and those
+ * steps run with every other thread still live. A background thread that faults
+ * in that window hits ss_module with nmods==0, so the whole report comes out as
+ * "unknown+0" and there is no way to tell ntdll from our own d3d11 from the
+ * graphics stack. Priming the table here - a fresh snapshot, before the freeze,
+ * so it is safe - means such a fault resolves to real names. The mod_rewound
+ * flags are left zeroed; only the name and range matter for the report, and
+ * build_exclusions overwrites them with the real verdict a moment later. */
+static void ss_prime_module_table(void)
+{
+	HANDLE snap;
+	MODULEENTRY32 me;
+	HMODULE exe = GetModuleHandleA(NULL);
+	char pv[8];
+
+	if (!g_ctl)
+		return;
+	/* Opt-out for A/B testing. This walks the module list at the top of a save,
+	 * before the freeze, purely so a fault's addresses resolve to names. It is
+	 * the only thing added to the save path, so if a save is misbehaving it is
+	 * the first suspect to rule out: D3D9SW_PRIMEMODS=0 skips it (faults then
+	 * report unknown+0 again, but the save runs exactly as it did before). */
+	if (ss_getenv("D3D9SW_PRIMEMODS", pv, sizeof(pv)) > 0 && pv[0] == '0')
+		return;
+	snap = modsnap_use();
+	if (!snap || snap == INVALID_HANDLE_VALUE)
+		return;
+	find_steam_dir(snap);
+	find_game_dir(snap, exe);
+	me.dwSize = sizeof(me);
+	g_ctl->nmods = 0;
+	if (Module32First(snap, &me)) {
+		do {
+			const char *nm;
+			int m;
+
+			if (g_ctl->nmods >= SS_MAX_MODS)
+				break;
+			nm = strrchr(me.szExePath, '\\');
+			m = g_ctl->nmods++;
+			g_ctl->mod_lo[m] = (uintptr_t)me.modBaseAddr;
+			g_ctl->mod_hi[m] = (uintptr_t)me.modBaseAddr + me.modBaseSize;
+			g_ctl->mod_rewound[m] = 0;
+			lstrcpynA(g_ctl->mod_name[m], nm ? nm + 1 : me.szExePath,
+				  sizeof(g_ctl->mod_name[m]));
+		} while (Module32Next(snap, &me));
+	}
+	CloseHandle(snap);
+	sort_modules();
+}
+
 static int do_save(int slotno)
 {
 	Slot *s = &g_ctl->slots[slotno];
@@ -12592,6 +12729,11 @@ static int do_save(int slotno)
 	QueryPerformanceFrequency(&pf);
 	QueryPerformanceCounter(&t_begin);
 	ss_op_set("save");
+
+	/* Before anything else in the save can fault, so the report is legible if it
+	 * does. build_exclusions rebuilds this after the freeze; this is only for the
+	 * window before it. */
+	ss_prime_module_table();
 
 	/* Here rather than at hooks install, where the arena cannot be taken yet:
 	 * blk_arena registers an exclusion, and there is no control block to
@@ -15182,14 +15324,34 @@ static int do_load(int slotno)
 						       (unsigned long)s->regs[i].prot);
 				}
 			}
-			/* A heap region is not copied wholesale any more. Its blocks
+			/* A heap region is normally not copied wholesale: its blocks
 			 * are put back one at a time below, and the bytes between
 			 * them - which is what the allocator keeps its lists in -
-			 * are deliberately left alone. */
-			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base);
+			 * are deliberately left alone, because rewinding the free
+			 * lists of a heap whose allocator state straddles the region
+			 * boundary kills the process. Under Wine the gameheap is not
+			 * that kind of region: a wholesale memcpy races live mmdevapi
+			 * TLS, so those bytes go through wine_gameheap_copy instead.
+			 * A heap gameheap owns and has made self-contained (LFH off,
+			 * D3D9SW_WHOLESALE) keeps its lists inside the region, so on
+			 * Windows it is restored whole. */
 			int hi_reg = heap_index_of(s->regs[i].base);
 			int wine_gh = ss_under_wine() && blk_mode() && g_redirect_heap &&
 				      hi_reg >= 0 && g_ctl->heap_h[hi_reg] == g_redirect_heap;
+			int gh_whole = !wine_gh && gameheap_owned_heap(s->regs[i].base);
+			int by_block = g_blk_ready && heap_rewound_at(s->regs[i].base) &&
+				       !gh_whole;
+
+			if (gh_whole) {
+				static int wsaid;
+
+				if (wsaid++ < 4)
+					ss_log("  WHOLESALE: region %d at %p is an owned "
+					       "self-contained heap - restoring the whole "
+					       "region, freelist included, not block by "
+					       "block\n",
+					       i, base);
+			}
 
 			if (g_reg_off)
 				g_reg_off[i] = pos;
@@ -15839,6 +16001,12 @@ static int do_load(int slotno)
 	       "than save%s\n",
 	       slotno, restored, skipped, blocked, g_ctl->nids, g_ctl->last_fresh,
 	       (g_ctl->last_fresh && policy() == POLICY_HOLD) ? " (held suspended)" : "");
+	/* The SKIPREG/SCRIBBLE knobs log each region as it is handled; this is the
+	 * roll-up those two counts were always meant to feed. Printed only when a knob
+	 * actually acted, so a normal restore stays quiet. */
+	if (handskip || handscrib)
+		ss_log("load: %d region(s) left in the present by hand (SKIPREG), %d "
+		       "scribbled with 0xCD (SCRIBBLE)\n", handskip, handscrib);
 	/* Breadcrumbs around the resume, because a silent death here is the oldest
 	 * unexplained signature this project has and the log could not say which
 	 * side of it the process was on.
@@ -15885,6 +16053,9 @@ static int do_load(int slotno)
 	 * buffer. When it is off, which is the default, no cursor moves in either
 	 * place and the buffers resume from where they actually are. */
 	dsh_play();
+	/* Before the mixer runs again, so the first post-restore notification it
+	 * raises is already checked against the new generation. */
+	xa2_sw_restored();
 	xa2_sw_resume();
 	ss_log("  resume: done, all threads runnable\n");
 	/* After the threads are running again, because the comparison is a read of
@@ -18239,7 +18410,12 @@ static void save_at_parse(void)
 			cur = cur * 10 + (v[k] - '0');
 			any = 1;
 		} else {
-			if (any && g_save_at_n < SS_SAVE_AT_MAX)
+			/* Frame 0 cannot be saved - the game has not ticked once - and a
+			 * bare "0" is how a cfg means OFF, the way LOAD_AT and QUIT_AT
+			 * already read it. Without this guard "0" scheduled a save on
+			 * frame 1 (the counter pre-increments to 1 and 1 < 0 is false),
+			 * an auto-save nobody asked for. Use SAVE_AT=1 for a frame-1 cut. */
+			if (any && cur > 0 && g_save_at_n < SS_SAVE_AT_MAX)
 				g_save_at[g_save_at_n++] = cur;
 			cur = 0;
 			any = 0;

@@ -59,6 +59,13 @@ void savestate_exclude(void *p, size_t bytes);
  * reproducible. Declared here because the installer runs above it. */
 static HANDLE gh_create_heap(void);
 static void clock_probe_install(HMODULE exe);
+static int gh_wholesale(void);
+static void gh_make_selfcontained(HANDLE h);
+/* Public: 1 when `base` is the start of a heap we own AND have made self-contained
+ * for a wholesale (freelist-and-all) restore. The savestate engine asks this to
+ * decide whether a rewound heap region may be copied whole instead of block by
+ * block. Returns 0 unless D3D9SW_WHOLESALE is set. */
+int gameheap_owned_heap(uintptr_t base);
 
 static void ss_log(const char *fmt, ...)
 {
@@ -90,6 +97,23 @@ static int g_ready;
 static uintptr_t g_lo[GH_REG], g_hi[GH_REG];
 static volatile LONG g_nreg;
 
+/* D3D9SW_LAA_FALSE: a second region we own and the game does not know exists.
+ * When on, the redirect and the floor serve blocks out of it instead of the
+ * pinned arena, so the game runs on memory we control end to end. On a non-LAA
+ * exe there is no space above 2 GB, so this competes with the game and is
+ * EXPECTED to crash - that crash is the measurement. Reserved once and never
+ * per-block freed, so it snapshots atomically like the arena. */
+static HANDLE g_laa_heap;
+static int g_laa_on;
+static unsigned g_laa_mb;
+static uintptr_t g_laa_lo, g_laa_hi;
+/* The pinned arena's extent, set only on a successful fixed-base pin - a growable
+ * HeapCreate fallback has no bounded extent and cannot be wholesale-restored. */
+static uintptr_t g_heap_lo, g_heap_hi;
+static int g_laa_high;			/* landed in the >2 GB band (exe really is LAA) */
+static unsigned long g_laa_fell;	/* times the region was full and we fell back */
+static void gh_create_laa_region(void);
+
 static unsigned long g_alloc, g_freed_ours, g_freed_theirs, g_toobig, g_regfull;
 static unsigned long g_stale, g_fellback;
 
@@ -100,6 +124,9 @@ static int g_peek_n;
 static void gh_peek_free(void *u);
 static void gh_peek_parse(void);
 static void gh_vorbis_free(const void *u, unsigned size);
+static void gh_watch_parse(void);
+static void gh_watch(const void *u, size_t n, unsigned site, unsigned ord,
+		     const char *how);
 
 /* -------------------------------------------------- the allocation trace
  *
@@ -467,6 +494,23 @@ static int in_range(const void *p)
 	return 0;
 }
 
+/* True while a pointer lives in the D3D9SW_LAA_FALSE region, so a realloc lands
+ * on the heap that actually owns the block instead of the arena. */
+static int in_laa(const void *p)
+{
+	uintptr_t a = (uintptr_t)p;
+
+	return g_laa_hi && a >= g_laa_lo && a < g_laa_hi;
+}
+
+/* Where the redirect and the floor put a NEW block: the LAA_FALSE region when
+ * that experiment is on, otherwise the pinned arena. A realloc must not use this
+ * - it has to reuse the heap the existing block came from (see in_laa). */
+static HANDLE gh_serving_heap(void)
+{
+	return (g_laa_on && g_laa_heap) ? g_laa_heap : g_heap;
+}
+
 /* The whole reservation the block sits in, so one lookup covers a segment rather
  * than a page. Only ever called when a new allocation lands outside everything
  * we already know about, which after warm-up is almost never. */
@@ -579,13 +623,18 @@ static void *gh_malloc_at(size_t n, unsigned site)
 	void *raw;
 
 	if (!g_ready || n >= GH_BIG) {
+		void *u = r_malloc(n);
+
 		g_toobig += n >= GH_BIG;
 		gh_trace(GH_TR_BIG, n, NULL);
-		return r_malloc(n);
+		gh_watch(u, n, site, 0xFFFFFFFFu, "malloc-big");
+		return u;
 	}
-	raw = HeapAlloc(g_heap, 0, n + sizeof(GhHead));
+	raw = HeapAlloc(gh_serving_heap(), 0, n + sizeof(GhHead));
 	if (!raw) {
 		g_fellback++;
+		if (g_laa_on)
+			g_laa_fell++;
 		return r_malloc(n);
 	}
 	{
@@ -594,6 +643,7 @@ static void *gh_malloc_at(size_t n, unsigned site)
 
 		gh_tag_put(u, site, (unsigned)n, ord);
 		gh_trace_at(GH_TR_ALLOC, n, u, site, ord);
+		gh_watch(u, n, site, ord, g_laa_on ? "malloc-laa" : "malloc-arena");
 		return u;
 	}
 }
@@ -611,13 +661,18 @@ static void *gh_calloc_at(size_t c, size_t s, unsigned site)
 	if (c && n / c != s)
 		return NULL;
 	if (!g_ready || n >= GH_BIG) {
+		void *u = r_calloc(c, s);
+
 		g_toobig += n >= GH_BIG;
 		gh_trace(GH_TR_BIG, n, NULL);
-		return r_calloc(c, s);
+		gh_watch(u, n, site, 0xFFFFFFFFu, "calloc-big");
+		return u;
 	}
-	raw = HeapAlloc(g_heap, HEAP_ZERO_MEMORY, n + sizeof(GhHead));
+	raw = HeapAlloc(gh_serving_heap(), HEAP_ZERO_MEMORY, n + sizeof(GhHead));
 	if (!raw) {
 		g_fellback++;
+		if (g_laa_on)
+			g_laa_fell++;
 		return r_calloc(c, s);
 	}
 	{
@@ -626,6 +681,7 @@ static void *gh_calloc_at(size_t c, size_t s, unsigned site)
 
 		gh_tag_put(u, site, (unsigned)n, ord);
 		gh_trace_at(GH_TR_CALLOC, n, u, site, ord);
+		gh_watch(u, n, site, ord, g_laa_on ? "calloc-laa" : "calloc-arena");
 		return u;
 	}
 }
@@ -655,10 +711,20 @@ static void gh_orphan_note(const char *what, void *p)
 		       what, p);
 }
 
+/* Defined with the allocation floor below. A dedicated-VirtualAlloc big block is
+ * released here (and in gh_heapfree) before the arena logic runs: it is not in
+ * the arena and must go back via VirtualFree, not HeapFree. Returns its size if
+ * it was one of ours (and, with take, releases it). */
+static unsigned long gh_va_lookup(void *u, int take);
+
 static void gh_free(void *p)
 {
 	int orphan;
-	GhHead *h = ours_why(p, &orphan);
+	GhHead *h;
+
+	if (gh_va_lookup(p, 1))
+		return;
+	h = ours_why(p, &orphan);
 
 	if (!h) {
 		if (orphan) {
@@ -684,7 +750,11 @@ static void gh_free(void *p)
 	gh_peek_free(p);
 	gh_vorbis_free(p, (unsigned)h->size);
 	gh_busy_take(p);
-	HeapFree(g_heap, 0, h);
+	/* Free against the heap that ISSUED the block. Under LAA_FALSE a block can
+	 * live in the region rather than the arena, and freeing it against the wrong
+	 * heap corrupts that heap's free list. in_laa is always false when the
+	 * experiment is off, so the normal path is unchanged. */
+	HeapFree(in_laa(p) ? g_laa_heap : g_heap, 0, h);
 }
 
 static void *gh_realloc_at(void *p, size_t n, unsigned site)
@@ -724,7 +794,11 @@ static void *gh_realloc_at(void *p, size_t n, unsigned site)
 	old = h->size;
 	named = gh_tag_take(p, &osite, &osize, &oord);
 	if (n < GH_BIG) {
-		raw = HeapReAlloc(g_heap, 0, h, n + sizeof(GhHead));
+		/* Reuse the heap that issued this block, not the current serving heap:
+		 * under LAA_FALSE an older arena block and a newer region block coexist,
+		 * and reallocating one against the other's heap corrupts it. */
+		raw = HeapReAlloc(in_laa(p) ? g_laa_heap : g_heap, 0, h,
+				  n + sizeof(GhHead));
 		if (raw)
 			{
 				void *u;
@@ -739,6 +813,7 @@ static void *gh_realloc_at(void *p, size_t n, unsigned site)
 				gh_tag_put(u, osite, osize ? osize : (unsigned)n,
 					   oord);
 				gh_trace_at(GH_TR_REALLOC, n, u, osite, oord);
+				gh_watch(u, n, osite, oord, "realloc-arena");
 				return u;
 			}
 	}
@@ -829,7 +904,8 @@ static void *gh_expand(void *p, size_t n)
 	}
 	if (n >= GH_BIG)
 		return NULL;
-	raw = HeapReAlloc(g_heap, HEAP_REALLOC_IN_PLACE_ONLY, h, n + sizeof(GhHead));
+	raw = HeapReAlloc(in_laa(p) ? g_laa_heap : g_heap, HEAP_REALLOC_IN_PLACE_ONLY,
+			  h, n + sizeof(GhHead));
 	if (!raw)
 		return NULL;
 	h->size = n;
@@ -999,12 +1075,19 @@ static int site_wire(HMODULE exe, struct Site *s)
 static BOOL(WINAPI *r_heapfree)(HANDLE, DWORD, LPVOID);
 static unsigned long g_caught;
 
+/* Defined with the log-only allocation floor below; used here so a forwarded
+ * free can subtract the block from the floor's live-footprint tally. */
+static int g_floor_on;
+static int floor_live_take(void *p);
+
 static BOOL WINAPI gh_heapfree(HANDLE heap, DWORD flags, LPVOID p)
 {
 	GhHead *h;
 
 	int orphan = 0;
 
+	if (gh_va_lookup(p, 1))
+		return TRUE;
 	/* Our own HeapFree calls do not come back through here - those go direct
 	 * to the real one - so this only ever sees the game's. */
 	if (g_ready && (h = ours_why(p, &orphan)) != NULL) {
@@ -1014,7 +1097,7 @@ static BOOL WINAPI gh_heapfree(HANDLE heap, DWORD flags, LPVOID p)
 		gh_peek_free(p);
 		gh_vorbis_free(p, (unsigned)h->size);
 		gh_busy_take(p);
-		return HeapFree(g_heap, flags, h);
+		return HeapFree(in_laa(p) ? g_laa_heap : g_heap, flags, h);
 	}
 	/* The floor has to hold for the orphan case too, and this is the route the
 	 * observed crash actually took: RtlFreeHeap called with the process heap's
@@ -1023,7 +1106,372 @@ static BOOL WINAPI gh_heapfree(HANDLE heap, DWORD flags, LPVOID p)
 		gh_orphan_note("HeapFree", p);
 		return TRUE;
 	}
+	if (g_floor_on)
+		floor_live_take(p);
 	return r_heapfree(heap, flags, p);
+}
+
+/* ---- allocation floor, log-only (D3D9SW_GHFLOOR=1) --------------------------
+ *
+ * The seven detours above own the executable's static CRT, so the game's own
+ * malloc/free live in the pinned arena and rewind with it. Anything the game
+ * reaches by another route - a direct HeapAlloc, or the system CRT that
+ * ucrtbase routes to GetProcessHeap - lands on the process heap, which we do
+ * not own. Those are the blocks a restore cannot keep in step: the game's
+ * pointer to one rewinds to the save while the process-heap block has moved on,
+ * and the next free walks metadata that no longer matches. The RtlFreeHeap
+ * fault a few hundred frames after a BGM swap is exactly this.
+ *
+ * Before deciding what to redirect, name what escapes. This forwards HeapAlloc
+ * and HeapReAlloc to the real functions UNCHANGED - it never redirects, so it
+ * cannot move the baseline - and tallies, by the game call site, every result
+ * that lands outside the arena. The report prints the finite list. That outline
+ * is the whole point: it says whether owning the rest is a short list or a long
+ * one, and it is the same divergence set a cross-session restore would have to
+ * reconstruct. */
+#define GH_FLOOR_SITES 256
+
+static struct {
+	void *ret;           /* the game call site that allocated off-arena */
+	volatile LONG count;
+	unsigned long bytes; /* cumulative requested; summed without a lock */
+} g_floor[GH_FLOOR_SITES];
+static volatile LONG g_floor_n;
+static volatile LONG g_floor_over; /* escapes seen after the table filled */
+static volatile LONG g_floor_a_calls, g_floor_r_calls; /* HeapAlloc vs HeapReAlloc */
+static int g_floor_redirect; /* GHFLOOR>=2: serve escapes from the arena, not just log */
+static int g_floor_va;       /* GHFLOOR>=3: big blocks on dedicated VirtualAlloc.
+                              * EXPERIMENTAL and known-broken across >1 save: a freed
+                              * VA reservation's address is reused, which the snapshot
+                              * cannot capture atomically the way it does the arena. */
+
+static LPVOID(WINAPI *r_floor_halloc)(HANDLE, DWORD, SIZE_T);
+static LPVOID(WINAPI *r_floor_ralloc)(HANDLE, DWORD, LPVOID, SIZE_T);
+
+/* Live-footprint map: address -> KB, so PEAK concurrent off-arena bytes can be
+ * reported. That number, not the cumulative sum, decides whether owning this
+ * site fits the 64 MB arena or needs it grown. Open-addressed with a tombstone
+ * so deletions do not break probe chains; the live set stays small when the site
+ * is a decode treadmill, which is the case we expect. Held in this DLL's data,
+ * which is left in the present, so it is not disturbed by a rewind. */
+#define GH_FLOOR_MAP 16384
+#define GH_FLOOR_TOMB ((void *)~(uintptr_t)0)
+static CRITICAL_SECTION g_floor_cs;
+static int g_floor_cs_ready;
+static struct {
+	void *p;
+	unsigned long kb;
+} g_floor_map[GH_FLOOR_MAP];
+static unsigned long g_floor_live_kb, g_floor_peak_kb;
+static unsigned g_pin_mb; /* the pinned arena size, set when the heap is created */
+
+static unsigned long gh_kb(size_t n)
+{
+	return (unsigned long)((n + 1023) >> 10);
+}
+
+static void floor_live_add(void *p, size_t n)
+{
+	unsigned h, i;
+
+	if (!g_floor_cs_ready || !p)
+		return;
+	EnterCriticalSection(&g_floor_cs);
+	h = (unsigned)(((uintptr_t)p >> 4) & (GH_FLOOR_MAP - 1));
+	for (i = 0; i < GH_FLOOR_MAP; i++) {
+		unsigned s = (h + i) & (GH_FLOOR_MAP - 1);
+
+		if (!g_floor_map[s].p || g_floor_map[s].p == GH_FLOOR_TOMB) {
+			g_floor_map[s].p = p;
+			g_floor_map[s].kb = gh_kb(n);
+			g_floor_live_kb += g_floor_map[s].kb;
+			if (g_floor_live_kb > g_floor_peak_kb)
+				g_floor_peak_kb = g_floor_live_kb;
+			break;
+		}
+	}
+	LeaveCriticalSection(&g_floor_cs);
+}
+
+/* Nonzero if the address was one of ours, so a forwarded free knows whether it
+ * was a floor block. */
+static int floor_live_take(void *p)
+{
+	unsigned h, i;
+	int found = 0;
+
+	if (!g_floor_cs_ready || !p)
+		return 0;
+	EnterCriticalSection(&g_floor_cs);
+	h = (unsigned)(((uintptr_t)p >> 4) & (GH_FLOOR_MAP - 1));
+	for (i = 0; i < GH_FLOOR_MAP; i++) {
+		unsigned s = (h + i) & (GH_FLOOR_MAP - 1);
+
+		if (!g_floor_map[s].p)
+			break; /* empty slot ends the probe: not ours */
+		if (g_floor_map[s].p == p) {
+			if (g_floor_live_kb >= g_floor_map[s].kb)
+				g_floor_live_kb -= g_floor_map[s].kb;
+			g_floor_map[s].p = GH_FLOOR_TOMB;
+			g_floor_map[s].kb = 0;
+			found = 1;
+			break;
+		}
+	}
+	LeaveCriticalSection(&g_floor_cs);
+	return found;
+}
+
+/* ---- dedicated VirtualAlloc for big floor blocks ---------------------------
+ *
+ * gh_floor_arena sends anything >= GH_BIG here instead of into the shared arena.
+ * Each big block is its own VirtualAlloc reservation, so it never fragments the
+ * fixed arena and never needs it grown - the arena then only ever holds small
+ * blocks. The block is committed private memory, so a save captures it and it
+ * rewinds with the game like any owned block; on free it is released with
+ * VirtualFree, which - unlike HeapFree - reads no heap metadata and so cannot
+ * fault on a block whose contents a restore rewound. Identified at free time by
+ * a small present-tense registry rather than by the arena's in_range table, so
+ * releasing one never leaves a stale range that could launder a later address
+ * into ours. Blocks the game orphans across a restore leak their reservation -
+ * a bounded, later-reclaimable cost, not a crash. */
+#define GH_VA_MAP 4096
+#define GH_VA_TOMB ((void *)~(uintptr_t)0)
+static struct {
+	void *p;
+	unsigned long bytes;
+} g_va_map[GH_VA_MAP];
+static volatile LONG g_va_n; /* live big VA blocks */
+static unsigned long g_va_total, g_va_live_kb, g_va_peak_kb;
+
+static void gh_va_put(void *u, size_t bytes)
+{
+	unsigned hh, i;
+
+	if (!g_floor_cs_ready || !u)
+		return;
+	EnterCriticalSection(&g_floor_cs);
+	hh = (unsigned)(((uintptr_t)u >> 4) & (GH_VA_MAP - 1));
+	for (i = 0; i < GH_VA_MAP; i++) {
+		unsigned s = (hh + i) & (GH_VA_MAP - 1);
+
+		if (!g_va_map[s].p || g_va_map[s].p == GH_VA_TOMB) {
+			g_va_map[s].p = u;
+			g_va_map[s].bytes = (unsigned long)bytes;
+			InterlockedIncrement(&g_va_n);
+			g_va_total++;
+			g_va_live_kb += (unsigned long)((bytes + 1023) >> 10);
+			if (g_va_live_kb > g_va_peak_kb)
+				g_va_peak_kb = g_va_live_kb;
+			break;
+		}
+	}
+	LeaveCriticalSection(&g_floor_cs);
+}
+
+static unsigned long gh_va_lookup(void *u, int take)
+{
+	unsigned hh, i;
+	unsigned long bytes = 0;
+
+	if (!g_floor_cs_ready || !u || !g_va_n)
+		return 0; /* no big blocks live: the common free pays nothing */
+	EnterCriticalSection(&g_floor_cs);
+	hh = (unsigned)(((uintptr_t)u >> 4) & (GH_VA_MAP - 1));
+	for (i = 0; i < GH_VA_MAP; i++) {
+		unsigned s = (hh + i) & (GH_VA_MAP - 1);
+
+		if (!g_va_map[s].p)
+			break; /* empty slot ends the probe: not one of ours */
+		if (g_va_map[s].p == u) {
+			bytes = g_va_map[s].bytes;
+			if (take) {
+				unsigned long kb = (bytes + 1023) >> 10;
+
+				g_va_map[s].p = GH_VA_TOMB;
+				g_va_map[s].bytes = 0;
+				if (g_va_live_kb >= kb)
+					g_va_live_kb -= kb;
+				InterlockedDecrement(&g_va_n);
+				VirtualFree((char *)u - sizeof(GhHead), 0, MEM_RELEASE);
+			}
+			break;
+		}
+	}
+	LeaveCriticalSection(&g_floor_cs);
+	return bytes;
+}
+
+static void *gh_va_alloc(size_t n, unsigned site)
+{
+	void *base = VirtualAlloc(NULL, sizeof(GhHead) + n, MEM_COMMIT | MEM_RESERVE,
+				 PAGE_READWRITE);
+	GhHead *h;
+	void *u;
+
+	(void)site;
+	if (!base) {
+		g_fellback++;
+		return r_malloc(n); /* rare; escapes, which the caller then records */
+	}
+	h = (GhHead *)base;
+	u = (char *)base + sizeof(GhHead);
+	h->magic = GH_MAGIC ^ (uintptr_t)u; /* so a stray ours_why still reads sane */
+	h->size = n;
+	gh_va_put(u, n); /* VirtualAlloc already zeroed the pages, so zero-init is free */
+	return u;
+}
+
+/* Per-site tally, plus feeding the live map. Keyed by call site, not by block,
+ * so the table stays tiny; a race on first sight can duplicate a row, which the
+ * report sums correctly either way. */
+static void gh_floor_note(void *ret, void *p, size_t n)
+{
+	LONG i, seen;
+
+	if (!p || in_range(p))
+		return; /* already owned - not an escape */
+	floor_live_add(p, n);
+	seen = g_floor_n;
+	for (i = 0; i < seen && i < GH_FLOOR_SITES; i++) {
+		if (g_floor[i].ret == ret) {
+			InterlockedIncrement(&g_floor[i].count);
+			g_floor[i].bytes += (unsigned long)n;
+			return;
+		}
+	}
+	i = InterlockedIncrement(&g_floor_n) - 1;
+	if (i >= GH_FLOOR_SITES) {
+		InterlockedIncrement(&g_floor_over);
+		return;
+	}
+	g_floor[i].ret = ret;
+	g_floor[i].count = 1;
+	g_floor[i].bytes = (unsigned long)n;
+}
+
+/* Arena allocation for the floor, WITHOUT the GH_BIG cap. gh_malloc_at sends
+ * anything >= 256 KB back to the runtime, which for this site would leave the big
+ * decode buffers - the very ones freed across a restore - on the process heap,
+ * i.e. unfixed. The floor's point is to own them, so it takes them into the arena
+ * at any size, falling back to the runtime only if the arena is genuinely out of
+ * room, which the report then shows as a remaining escape (the signal to grow
+ * D3D9SW_GHPIN_MB). give() stamps the same header the free paths already read, so
+ * both HeapFree and static-CRT free reclaim these exactly like the game's own. */
+static void *gh_floor_arena(size_t n, int zero, unsigned site)
+{
+	void *raw;
+
+	if (!g_ready)
+		return zero ? r_calloc(1, n) : r_malloc(n);
+	/* Big blocks CAN get their own VirtualAlloc, released on free, so they neither
+	 * fragment the fixed arena nor need it grown - but only under GHFLOOR>=3,
+	 * because that path is not snapshot-safe across more than one save (a freed
+	 * reservation's address is reused and the snapshot cannot track it). Default
+	 * (GHFLOOR=2) keeps everything in the atomically-captured arena. */
+	if (g_floor_va && n >= GH_BIG)
+		return gh_va_alloc(n, site);
+	raw = HeapAlloc(gh_serving_heap(), zero ? HEAP_ZERO_MEMORY : 0,
+			n + sizeof(GhHead));
+	if (!raw) {
+		g_fellback++;
+		if (g_laa_on)
+			g_laa_fell++;
+		return zero ? r_calloc(1, n) : r_malloc(n);
+	}
+	{
+		void *u = give(raw, n);
+		unsigned ord = gh_ordinal(site, (unsigned)n);
+
+		gh_tag_put(u, site, (unsigned)n, ord);
+		gh_trace_at(zero ? GH_TR_CALLOC : GH_TR_ALLOC, n, u, site, ord);
+		gh_watch(u, n, site, ord, g_laa_on ? "floor-laa" : "floor-arena");
+		return u;
+	}
+}
+
+static LPVOID WINAPI gh_floor_heapalloc(HANDLE heap, DWORD flags, SIZE_T n)
+{
+	void *ret = __builtin_return_address(0);
+	LPVOID p;
+
+	/* Redirect (GHFLOOR>=2): serve from the pinned arena so the block rewinds
+	 * with the game and its pointer stays in step across a restore. Reuses the
+	 * same header/tag path as the game's own malloc, so both free routes - the
+	 * HeapFree floor and the static-CRT free - already reclaim it. HEAP_ZERO_MEMORY
+	 * is honoured. If the arena cannot take it (>= GH_BIG, or full) gh_*_at fall
+	 * back to the runtime and the block escapes again, which the tally still
+	 * records - so a resize need shows up instead of silently corrupting. */
+	if (g_floor_redirect && g_ready) {
+		unsigned site = gh_site_of(ret);
+
+		p = gh_floor_arena(n, (flags & HEAP_ZERO_MEMORY) != 0, site);
+		if (g_floor_on) {
+			InterlockedIncrement(&g_floor_a_calls);
+			/* Only a result that reached neither the arena nor a VA block is a
+			 * real escape worth recording; owned blocks are not escapes. */
+			if (p && !in_range(p) && !gh_va_lookup(p, 0))
+				gh_floor_note(ret, p, n);
+		}
+		return p;
+	}
+	p = r_floor_halloc ? r_floor_halloc(heap, flags, n) : HeapAlloc(heap, flags, n);
+	/* The block lands on whatever heap the game passed - foreign to us. This is
+	 * the leaf where the 0ED6BEB0-class decoder object is born when it is NOT
+	 * redirected, so the watch has to see it here, not just on the arena paths. */
+	gh_watch(p, n, gh_site_of(ret), 0xFFFFFFFFu, "heap-fwd");
+	if (g_floor_on) {
+		InterlockedIncrement(&g_floor_a_calls);
+		gh_floor_note(ret, p, n);
+	}
+	return p;
+}
+
+static LPVOID WINAPI gh_floor_heaprealloc(HANDLE heap, DWORD flags, LPVOID q, SIZE_T n)
+{
+	void *ret = __builtin_return_address(0);
+	LPVOID p;
+
+	/* A realloc of a dedicated VA block: this game never reallocs the floor's
+	 * blocks, but never hand a VA pointer to the runtime's realloc either. Grow
+	 * by hand - allocate the new size, copy, release the old reservation. */
+	if (g_floor_va && q) {
+		unsigned long vb = gh_va_lookup(q, 0);
+
+		if (vb) {
+			p = gh_floor_arena(n, 0, gh_site_of(ret));
+			if (p) {
+				CopyMemory(p, q, (size_t)vb < n ? (size_t)vb : n);
+				gh_va_lookup(q, 1); /* release the old VA */
+			}
+			if (g_floor_on)
+				InterlockedIncrement(&g_floor_r_calls);
+			return p;
+		}
+	}
+	/* Never hand an arena pointer to the runtime; in redirect mode serve a fresh
+	 * block from the arena too. An arena q always goes through gh_realloc_at,
+	 * whatever the mode, because forwarding it to the real heap would corrupt. */
+	if (g_ready && ((q && in_range(q)) || (g_floor_redirect && !q))) {
+		p = gh_realloc_at(q, n, gh_site_of(ret));
+		if (g_floor_on) {
+			InterlockedIncrement(&g_floor_r_calls);
+			gh_floor_note(ret, p, n);
+		}
+		return p;
+	}
+	p = r_floor_ralloc ? r_floor_ralloc(heap, flags, q, n) : HeapReAlloc(heap, flags, q, n);
+	gh_watch(p, n, gh_site_of(ret), 0xFFFFFFFFu, "heaprealloc-fwd");
+	if (g_floor_on) {
+		InterlockedIncrement(&g_floor_r_calls);
+		/* Only on success: a failed realloc leaves the old block live. */
+		if (p) {
+			if (q)
+				floor_live_take(q);
+			gh_floor_note(ret, p, n);
+		}
+	}
+	return p;
 }
 
 static int on(void)
@@ -1056,6 +1504,7 @@ int gameheap_install(void)
 	/* Before any allocation is served, because the free path reads the result
 	 * and the block we most want to watch is freed during startup. */
 	gh_peek_parse();
+	gh_watch_parse();
 
 	/* Look before touching anything. */
 	for (i = 0; i < GH_SITES; i++) {
@@ -1131,6 +1580,18 @@ int gameheap_install(void)
 		VirtualFree(pool, 0, MEM_RELEASE);
 		return 0;
 	}
+	gh_create_laa_region(); /* opt-in; no-op unless D3D9SW_LAA_FALSE is set */
+	if (gh_wholesale()) {
+		/* Before a single allocation, so the LFH never gets a foothold and every
+		 * block this heap serves is placed by the standard front end whose state
+		 * lives entirely inside the region we rewind. */
+		gh_make_selfcontained(g_heap);
+		if (g_laa_heap)
+			gh_make_selfcontained(g_laa_heap);
+		ss_log("gameheap: WHOLESALE - LFH disabled on the owned heap(s); the "
+		       "savestate engine may now restore their whole region atomically, "
+		       "freelist and all, instead of block by block\n");
+	}
 	InitializeCriticalSection(&g_cs);
 
 	/* Always, not only under GHTRACE: the tag table names blocks for a
@@ -1198,6 +1659,44 @@ int gameheap_install(void)
 		       "every freer in the executable, the three that are not "
 		       "allocators included%s\n",
 		       n, n ? "" : " - the census below cannot measure what it claims");
+	}
+	{
+		char floorv[16];
+
+		if (savestate_getenv("D3D9SW_GHFLOOR", floorv, sizeof(floorv)) > 0 &&
+		    floorv[0] >= '1' && floorv[0] <= '9') {
+			void *prev = NULL;
+			int na, nr;
+
+			InitializeCriticalSection(&g_floor_cs);
+			g_floor_cs_ready = 1;
+			g_floor_on = 1;
+			g_floor_redirect = floorv[0] >= '2';
+			g_floor_va = floorv[0] >= '3';
+			na = savestate_patch_iat_named(exe, "KERNEL32.dll", "HeapAlloc",
+						       (void *)gh_floor_heapalloc, &prev);
+			if (!na)
+				na = savestate_patch_iat_named(exe, NULL, "HeapAlloc",
+							       (void *)gh_floor_heapalloc, &prev);
+			r_floor_halloc = na ? (LPVOID(WINAPI *)(HANDLE, DWORD, SIZE_T))prev : NULL;
+			prev = NULL;
+			nr = savestate_patch_iat_named(exe, "KERNEL32.dll", "HeapReAlloc",
+						       (void *)gh_floor_heaprealloc, &prev);
+			if (!nr)
+				nr = savestate_patch_iat_named(exe, NULL, "HeapReAlloc",
+							       (void *)gh_floor_heaprealloc, &prev);
+			r_floor_ralloc = nr ? (LPVOID(WINAPI *)(HANDLE, DWORD, LPVOID, SIZE_T))prev
+					    : NULL;
+			ss_log("gameheap: allocation floor %s%s - HeapAlloc %d slot(s), "
+			       "HeapReAlloc %d slot(s) patched. %s\n",
+			       g_floor_redirect ? "REDIRECT" : "LOG-ONLY",
+			       g_floor_va ? " + VA-BIG (experimental, not >1-save safe)" : "",
+			       na, nr,
+			       g_floor_redirect
+				       ? "off-arena HeapAlloc is served from the pinned arena; "
+					 "escape count should fall to zero"
+				       : "nothing is redirected; the outline prints in the report");
+		}
 	}
 	clock_probe_install(exe);
 	savestate_game_heap(g_heap);
@@ -1277,6 +1776,7 @@ static HANDLE gh_create_heap(void)
 	HMODULE nt;
 	HANDLE h;
 
+	g_pin_mb = 0; /* set below only if the pin actually succeeds */
 	if (!want)
 		return HeapCreate(0, 1u << 20, 0);
 	/* 1 means "pin it, you pick"; anything larger is an address. */
@@ -1322,7 +1822,118 @@ static HANDLE gh_create_heap(void)
 		ss_log("gameheap: NOTE the handle %p is not the base %08lX we asked "
 		       "for - offsets are measured from the handle\n",
 		       (void *)h, (unsigned long)base);
+	g_pin_mb = mb; /* the pin held; report the real, pinned size */
+	g_heap_lo = (uintptr_t)h;
+	g_heap_hi = (uintptr_t)h + size;
 	return h;
+}
+
+/* D3D9SW_LAA_FALSE - the "own a region the game does not know about" experiment.
+ *
+ * Reserve a second block and, once on, the redirect and floor serve every new
+ * allocation from it (gh_serving_heap), so the game runs out of memory we hold.
+ * The point is to see whether a region we control, off to one side, can back the
+ * game's own state without the game or Steam noticing - and, on a 32-bit non-LAA
+ * exe, to find the wall: there is no space above 2 GB, so this competes with the
+ * game's ~1.4 GB and is EXPECTED to hit an allocation failure or a crash. That is
+ * the reading, not a bug. On an exe patched LAA (tools/laa.ps1) the >2 GB band
+ * exists and we try to land there first, where the game never allocates.
+ *
+ * Called after gh_create_heap so RtlCreateHeap is resolved; it re-resolves if the
+ * arena was a plain HeapCreate and never went down the pin path. */
+static void gh_create_laa_region(void)
+{
+	unsigned mb = gh_knob("D3D9SW_LAA_MB", 512);
+	SIZE_T size = (SIZE_T)mb * 1024u * 1024u;
+	void *res;
+
+	if (!gh_knob("D3D9SW_LAA_FALSE", 0))
+		return;
+	g_laa_mb = mb;
+	if (!p_RtlCreateHeap) {
+		HMODULE nt = GetModuleHandleA("ntdll.dll");
+
+		p_RtlCreateHeap = nt ? (PVOID(NTAPI *)(ULONG, PVOID, SIZE_T, SIZE_T, PVOID,
+						       PVOID))GetProcAddress(nt, "RtlCreateHeap")
+				     : NULL;
+	}
+	if (!p_RtlCreateHeap) {
+		ss_log("gameheap: LAA_FALSE asked for but RtlCreateHeap is unavailable\n");
+		return;
+	}
+	/* The >2 GB band only exists if the exe is LAA; try it first so a patched exe
+	 * puts our region where the game's own allocator never reaches. */
+	res = VirtualAlloc((LPVOID)0x80000000u, size, MEM_RESERVE, PAGE_READWRITE);
+	g_laa_high = (res != NULL);
+	if (!res)
+		res = VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_READWRITE); /* OS places it */
+	if (!res) {
+		ss_log("gameheap: LAA_FALSE could not reserve %u MB anywhere (error %lu) - "
+		       "no hole this large exists; that is the 2 GB ceiling talking, and "
+		       "is itself the answer\n",
+		       mb, GetLastError());
+		return;
+	}
+	g_laa_heap = (HANDLE)p_RtlCreateHeap(0, res, size, 1u << 20, NULL, NULL);
+	if (!g_laa_heap) {
+		ss_log("gameheap: LAA_FALSE reserved %u MB at %08lX but RtlCreateHeap "
+		       "refused it (error %lu)\n",
+		       mb, (unsigned long)(uintptr_t)res, GetLastError());
+		VirtualFree(res, 0, MEM_RELEASE);
+		return;
+	}
+	g_laa_lo = (uintptr_t)res;
+	g_laa_hi = (uintptr_t)res + size;
+	g_laa_on = 1;
+	ss_log("gameheap: LAA_FALSE region PINNED at %08lX, %u MB, %s. Every "
+	       "redirected allocation from here on comes out of it - memory we own "
+	       "and the game does not know exists. Any crash past this line is the "
+	       "experiment reporting, not a regression\n",
+	       (unsigned long)(uintptr_t)res, mb,
+	       g_laa_high ? "in the >2 GB band, so the exe really is LAA"
+			  : "inside the shared 2 GB - it competes with the game");
+}
+
+/* D3D9SW_WHOLESALE - the owned-heap wholesale-restore probe.
+ *
+ * Block-by-block restore leaves the allocator's free lists alone on purpose,
+ * because rewinding them on the process default heap desynchronises from the
+ * allocator state that lives OUTSIDE the region (the LFH's per-processor buckets
+ * above all) and kills the process. But a heap WE created can be made to keep all
+ * of its bookkeeping inside its own region: turn the Low Fragmentation Heap off
+ * and the free lists, headers and lookaside all live in the bytes we rewind. Then
+ * the region can be restored whole - freelist and all - and a block the game
+ * allocated after the save simply ceases to exist, which is the address-reuse
+ * crash's actual cure. This is opt-in and separate from the working config. */
+static int gh_wholesale(void)
+{
+	static int v = -1;
+
+	if (v < 0)
+		v = (int)gh_knob("D3D9SW_WHOLESALE", 0);
+	return v;
+}
+
+static void gh_make_selfcontained(HANDLE h)
+{
+	ULONG std = 0; /* HeapCompatibilityInformation: 0 = standard heap, no LFH */
+
+	if (h)
+		HeapSetInformation(h, HeapCompatibilityInformation, &std, sizeof(std));
+}
+
+int gameheap_owned_heap(uintptr_t base)
+{
+	if (!gh_wholesale())
+		return 0;
+	/* Range, not equality: a heap's committed memory can surface as several
+	 * VirtualQuery regions at different bases within its reservation, and every
+	 * one of them must be restored whole for the freelist to come back intact. */
+	if (g_heap_hi && base >= g_heap_lo && base < g_heap_hi)
+		return 1;
+	if (g_laa_hi && base >= g_laa_lo && base < g_laa_hi)
+		return 1;
+	return 0;
 }
 
 /* Written from the census rather than from the allocator, because this opens a
@@ -1683,6 +2294,141 @@ static void gh_peek_free(void *u)
 	}
 }
 
+/* -------------------------------------------------- the allocation watch
+ *
+ * GHVORBIS names the moment a track loads; this names the block a track load
+ * hands back. Set D3D9SW_GHWATCH to the size(s) of the block being chased - the
+ * 0ED6BEB0-class Vorbis decoder object is ~3.6 KB - and/or D3D9SW_GHWATCHSITE to
+ * a call-site RVA, and every matching allocation prints, at the instant it is
+ * served: the allocator operation number it lands at (the SAME clock GHVORBIS
+ * prints its landmark on, so the two line up directly), the call site as
+ * rabiribi.exe+RVA, the returned address, and whether that address is in our
+ * arena or on a heap we do not own.
+ *
+ * The point is provenance across a restore. The block that faults after a
+ * restore-across-a-track-change is read through a pointer that came back wrong;
+ * to fix it we first need to know which code allocates it and where in the load
+ * sequence, so a second run can confirm the site is deterministic. If the watch
+ * stays silent for a size known to crash, that is itself the answer: the block
+ * is born on a path we never owned (foreign heap, no redirect, no tag), which is
+ * exactly why a restore cannot keep it consistent.
+ *
+ * Sizes are matched exactly, because the trace has shown block sizes are
+ * deterministic to the byte at a fixed point in the sequence. One ss_log per
+ * match, capped; on a miss the only cost is the size compare, and every path
+ * this sits on is already handing back a pointer - it allocates nothing. */
+#define GH_WATCH_MAX 8
+#define GH_WATCH_LINES 256
+static unsigned g_watch_sz[GH_WATCH_MAX];
+static int g_watch_sz_n;
+static unsigned g_watch_site[GH_WATCH_MAX];
+static int g_watch_site_n;
+static LONG g_watch_said;
+
+/* Comma/space separated, each token decimal or 0x-hex. Parsed once at install so
+ * the hot path only ever reads the parsed array, never a config string. */
+static int gh_watch_list(const char *knob, unsigned *out, int max)
+{
+	char v[96];
+	unsigned n = savestate_getenv(knob, v, sizeof(v));
+	unsigned k, cur = 0;
+	int got = 0, any = 0, hex = 0;
+
+	if (!n || n >= sizeof(v))
+		return 0;
+	for (k = 0; k <= n; k++) {
+		char c = (k < n) ? v[k] : 0;
+
+		if (c == 'x' || c == 'X') {
+			hex = 1; /* a 0x prefix; drop the leading 0 already taken */
+			cur = 0;
+		} else if (c >= '0' && c <= '9') {
+			cur = cur * (hex ? 16u : 10u) + (unsigned)(c - '0');
+			any = 1;
+		} else if (hex && c >= 'a' && c <= 'f') {
+			cur = cur * 16u + (unsigned)(c - 'a') + 10u;
+			any = 1;
+		} else if (hex && c >= 'A' && c <= 'F') {
+			cur = cur * 16u + (unsigned)(c - 'A') + 10u;
+			any = 1;
+		} else {
+			if (any && got < max)
+				out[got++] = cur;
+			cur = 0;
+			any = 0;
+			hex = 0;
+		}
+	}
+	return got;
+}
+
+static void gh_watch_parse(void)
+{
+	char line[192];
+	char *o = line;
+	int i;
+
+	g_watch_sz_n = gh_watch_list("D3D9SW_GHWATCH", g_watch_sz, GH_WATCH_MAX);
+	g_watch_site_n = gh_watch_list("D3D9SW_GHWATCHSITE", g_watch_site, GH_WATCH_MAX);
+	if (!g_watch_sz_n && !g_watch_site_n)
+		return;
+	o += wsprintfA(o, "gameheap: watch armed -");
+	for (i = 0; i < g_watch_sz_n; i++)
+		o += wsprintfA(o, " size %lu(0x%lX)", (unsigned long)g_watch_sz[i],
+			       (unsigned long)g_watch_sz[i]);
+	for (i = 0; i < g_watch_site_n; i++)
+		o += wsprintfA(o, " site+%08lX", (unsigned long)g_watch_site[i]);
+	ss_log("%s\n", line);
+}
+
+static void gh_watch(const void *u, size_t n, unsigned site, unsigned ord,
+		     const char *how)
+{
+	char base[64];
+	int i, hit = 0;
+
+	if ((g_watch_sz_n <= 0 && g_watch_site_n <= 0) || !u)
+		return;
+	for (i = 0; i < g_watch_sz_n && !hit; i++)
+		if (g_watch_sz[i] == (unsigned)n)
+			hit = 1;
+	for (i = 0; i < g_watch_site_n && !hit; i++)
+		if (site != 0xFFFFFFFFu && g_watch_site[i] == site)
+			hit = 1;
+	if (!hit)
+		return;
+	/* Cap like the vorbis witness so a size that recurs cannot bury the log. */
+	if (InterlockedIncrement(&g_watch_said) > GH_WATCH_LINES)
+		return;
+
+	if (in_range(u)) {
+		wsprintfA(base, "arena +%08lX",
+			  (unsigned long)((uintptr_t)u - (uintptr_t)g_heap));
+	} else {
+		MEMORY_BASIC_INFORMATION mbi;
+
+		/* Only on a match, so the VirtualQuery is off the hot path. Naming the
+		 * allocation base tells arena from a foreign heap at a glance - the
+		 * whole point being to catch the block born where we do not own it. */
+		if (VirtualQuery(u, &mbi, sizeof(mbi)))
+			wsprintfA(base, "foreign, base %08lX",
+				  (unsigned long)(uintptr_t)mbi.AllocationBase);
+		else
+			wsprintfA(base, "foreign");
+	}
+	if (ord == 0xFFFFFFFFu)
+		ss_log("gameheap: WATCH op %ld  %-16s  %lu byte(s) (0x%lX)  "
+		       "site rabiribi.exe+%08lX  -> %08lX  [%s]\n",
+		       (long)g_tr_n, how, (unsigned long)n, (unsigned long)n,
+		       (unsigned long)site, (unsigned long)(uintptr_t)u, base);
+	else
+		ss_log("gameheap: WATCH op %ld  %-16s  %lu byte(s) (0x%lX)  "
+		       "site rabiribi.exe+%08lX ord %lu  -> %08lX  [%s]\n",
+		       (long)g_tr_n, how, (unsigned long)n, (unsigned long)n,
+		       (unsigned long)site, (unsigned long)ord,
+		       (unsigned long)(uintptr_t)u, base);
+}
+
 /* Numbered as well as named, because a run can now be cut at several frames and
  * the comparison is per cut: gh_trace2.txt from one session against gh_trace2.txt
  * from another. gh_trace.txt keeps holding the latest, so anything that already
@@ -1709,6 +2455,79 @@ static void gh_trace_dump(void)
 	gh_peek();
 }
 
+/* Read-only sibling of gh_tag_take for the fault reporter: names the block an
+ * address belongs to WITHOUT retiring the tag. The tag table lives in our own
+ * image, not the game's heap, so a restore that rewinds the block to zeroes
+ * leaves its birth certificate - call site, size, ordinal - intact. That is
+ * exactly the object we want named: one the game allocated after a save and the
+ * restore then zeroed, whose own contents can no longer say what it was.
+ *
+ * Returns 1 when p is a tagged block's start, 2 when p falls inside one (a field
+ * pointer, not the head), 0 when it matches nothing we served. site is an exe
+ * RVA, size is bytes, ord is the n-th block that call site produced, and base -
+ * when asked - is the block's start. Safe from a fault handler: reads only, no
+ * lock, and it rejects anything outside our regions before the wider scan. */
+int gameheap_whatis(const void *p, unsigned *site, unsigned *size, unsigned *ord,
+		    uintptr_t *base)
+{
+	uintptr_t a = (uintptr_t)p;
+	unsigned h, i;
+
+	if (!g_tag || !p || !in_range(p))
+		return 0;
+	/* Exact first: one hashed probe chain, which is the common case when the
+	 * faulting pointer is the object the game passed a method as `this`. */
+	h = gh_mix((unsigned)a) & GH_TAG_MASK;
+	for (i = 0; i < GH_PROBE; i++) {
+		unsigned s = (h + i) & GH_TAG_MASK;
+		LONG ad = g_tag[s].addr;
+
+		if (ad == 0)
+			break; /* chain ended without a hit; try the interior scan */
+		if (ad == (LONG)a) {
+			*site = g_tag[s].site;
+			*size = g_tag[s].size;
+			*ord = g_tag[s].ord;
+			if (base)
+				*base = a;
+			return 1;
+		}
+	}
+	/* Interior: the address is a field inside a block. There is no range index,
+	 * so walk the table once and take the tightest block that contains it. This
+	 * only ever runs from a one-shot fault report, never on the hot path. */
+	{
+		uintptr_t best_base = 0;
+		unsigned best_size = 0, best_i = 0;
+		int hit = 0;
+
+		for (i = 0; i < GH_TAG_SLOTS; i++) {
+			LONG ad = g_tag[i].addr;
+			uintptr_t b;
+
+			if (ad == 0 || ad == GH_TAG_DEAD)
+				continue;
+			b = (uintptr_t)ad;
+			if (a >= b && a - b < g_tag[i].size &&
+			    (!hit || g_tag[i].size < best_size)) {
+				best_base = b;
+				best_size = g_tag[i].size;
+				best_i = i;
+				hit = 1;
+			}
+		}
+		if (hit) {
+			*site = g_tag[best_i].site;
+			*size = g_tag[best_i].size;
+			*ord = g_tag[best_i].ord;
+			if (base)
+				*base = best_base;
+			return 2;
+		}
+	}
+	return 0;
+}
+
 void gameheap_report(void)
 {
 	gh_trace_dump();
@@ -1727,6 +2546,12 @@ void gameheap_report(void)
 		       "gave up searching - the sidetable is too small or too "
 		       "full of tombstones\n",
 		       (long)g_busy_full, (long)g_busy_congested);
+	if (g_laa_on)
+		ss_log("gameheap: LAA_FALSE region %08lX..%08lX (%u MB, %s) served the "
+		       "game; %lu allocation(s) fell back because it was full (0 = it "
+		       "held the whole session)\n",
+		       (unsigned long)g_laa_lo, (unsigned long)g_laa_hi, g_laa_mb,
+		       g_laa_high ? ">2 GB band" : "shared 2 GB", g_laa_fell);
 	/* The number two design notes wanted before anything was armed. Zero says
 	 * the runtime's allocator and the executable's other Heap callers never
 	 * traded a block; anything else says they do, and says we caught it. */
@@ -1746,6 +2571,48 @@ void gameheap_report(void)
 		       "any of the three is a hole worth reading about before trusting "
 		       "this\n",
 		       g_fellback, g_regfull, g_stale);
+	if (g_floor_on) {
+		HMODULE exe = GetModuleHandleA(NULL);
+		uintptr_t base = (uintptr_t)exe;
+		LONG i, n = g_floor_n;
+
+		const char *fit;
+
+		if (n > GH_FLOOR_SITES)
+			n = GH_FLOOR_SITES;
+		if (g_pin_mb && g_floor_peak_kb > (unsigned long)g_pin_mb * 1024)
+			fit = " <<< PEAK EXCEEDS THE ARENA - it would need to grow to own this";
+		else if (g_pin_mb)
+			fit = " - fits the arena, so this site is redirectable as-is";
+		else
+			fit = "";
+		ss_log("gameheap: allocation floor - %ld HeapAlloc + %ld HeapReAlloc "
+		       "call(s) through the floor; OFF-ARENA live now %lu KB, PEAK %lu KB "
+		       "(0 = every call owned) vs %u MB pinned arena%s\n",
+		       (long)g_floor_a_calls, (long)g_floor_r_calls, g_floor_live_kb,
+		       g_floor_peak_kb, g_pin_mb, fit);
+		if (g_floor_live_kb)
+			ss_log("gameheap: allocation floor - %lu KB still live at report: held "
+			       "across, or freed by a route we do not intercept\n",
+			       g_floor_live_kb);
+		if (g_va_total)
+			ss_log("gameheap: allocation floor - big blocks on dedicated "
+			       "VirtualAlloc: %lu served, %ld live, %lu KB live, PEAK %lu KB. "
+			       "Owned and freed on free, off the arena - so the arena can stay "
+			       "small\n",
+			       g_va_total, (long)g_va_n, g_va_live_kb, g_va_peak_kb);
+		if (!n)
+			ss_log("gameheap: allocation floor - no off-arena call site recorded\n");
+		else {
+			ss_log("gameheap: allocation floor - %ld game call site(s) outside the "
+			       "arena%s:\n",
+			       (long)n, g_floor_over ? ", plus more after the table filled" : "");
+			for (i = 0; i < n; i++)
+				ss_log("    rabiribi.exe+%08X  %ld alloc(s), %lu byte(s) cumulative\n",
+				       (unsigned)((uintptr_t)g_floor[i].ret - base),
+				       (long)g_floor[i].count, g_floor[i].bytes);
+		}
+	}
 }
 
 /* HEAPBLOCKS for this heap under Wine, without HeapWalk. Wine has no Windows

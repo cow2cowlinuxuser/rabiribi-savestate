@@ -118,6 +118,7 @@ struct SwVoice {
 	const void **vtbl; /* first: this is a COM-shaped object */
 	int kind;	   /* 0 source, 1 mastering, 2 submix */
 	int alive;
+	int epoch;	   /* the restore generation this voice was born in */
 	XA2Callback *cb;
 	UINT32 channels, rate, bits, block;
 	float freq_ratio, volume;
@@ -229,6 +230,26 @@ static SIZE_T g_chunk_left;
 static unsigned long g_voices, g_submits, g_starved, g_overflow;
 static int g_over_said;
 
+/* The restore generation - the voice-generation valve.
+ *
+ * g_epoch is a static in this DLL, so it is held in the present and NOT rewound;
+ * SwVoice.epoch lives in the arena and IS rewound with the game. A voice records
+ * the epoch it was born in. On a restore we bump g_epoch, so every voice that
+ * outlived the restore now reads an epoch behind the current one, while any voice
+ * the game creates afterwards reads the new one. That difference is the signal
+ * cb_callable never had: a structurally-valid callback can still be driving the
+ * game's audio state machine across a track change that happened after the save,
+ * and delivering it walks the game into an object the restore left dangling
+ * (the rabiribi.exe+4F2AA null-`this` virtual call). When the valve is on, a
+ * callback whose voice predates the current generation is refused, which both
+ * stops that crash and is the mechanism by which the game must re-create voices
+ * to hear anything again - exactly the "tear it down cleanly" the notes wanted. */
+static volatile LONG g_epoch;
+static int g_gen_valve = -1;	    /* D3D9SW_XA2_GEN: -1 unread, 0 off, 1 on */
+static unsigned long g_gen_refused; /* callbacks the generation valve stopped */
+
+unsigned savestate_getenv(const char *name, char *buf, unsigned cap);
+
 /* Same arena rule as ds_sw: ordinary private read-write memory, captured by the
  * snapshot, not on the wrapper's CRT heap and not excluded. The queue, the
  * sample count and the timestamp it was anchored to have to come back from one
@@ -292,6 +313,7 @@ typedef struct {
 	XA2Callback *cb;
 	int slot;
 	void *ctx;
+	int epoch; /* the generation the posting voice was born in */
 } Pending;
 
 static Pending g_pend[XA2_PEND];
@@ -365,17 +387,21 @@ static int cb_callable(XA2Callback *c, int slot)
 	return 1;
 }
 
-static void cb_post(XA2Callback *c, int slot, void *ctx)
+static void cb_post(SwVoice *v, int slot, void *ctx)
 {
-	if (!c || !c->vtbl)
+	int at;
+
+	if (!v || !v->cb || !v->cb->vtbl)
 		return;
 	if (g_pend_n >= XA2_PEND) {
 		g_pend_full++;
 		return;
 	}
-	g_pend[(g_pend_head + g_pend_n) % XA2_PEND].cb = c;
-	g_pend[(g_pend_head + g_pend_n) % XA2_PEND].slot = slot;
-	g_pend[(g_pend_head + g_pend_n) % XA2_PEND].ctx = ctx;
+	at = (g_pend_head + g_pend_n) % XA2_PEND;
+	g_pend[at].cb = v->cb;
+	g_pend[at].slot = slot;
+	g_pend[at].ctx = ctx;
+	g_pend[at].epoch = v->epoch; /* the generation to check when it is drained */
 	g_pend_n++;
 }
 
@@ -425,6 +451,22 @@ static void cb_flush(void)
 				       (void *)(p.cb ? (void *)p.cb->vtbl : NULL));
 			continue;
 		}
+		/* The generation valve. cb_callable passed - the object is structurally
+		 * callable - but a voice born before the current restore generation is
+		 * being driven across a save/restore boundary, and the game's own audio
+		 * state on the far side of it may point at objects the restore left
+		 * dangling. Delivering it is the rabiribi.exe+4F2AA null-`this` crash.
+		 * Refuse it; the game re-creates a voice in the current generation to
+		 * hear anything again, which is the clean teardown we could not force. */
+		if (g_gen_valve > 0 && p.epoch != g_epoch) {
+			if (!g_gen_refused++)
+				ss_log("xa2_sw: generation valve refused callback %p slot %d "
+				       "- its voice was born in generation %d, we are now in "
+				       "%ld. A callback across a restore boundary; delivering "
+				       "it was the track-change crash\n",
+				       (void *)p.cb, p.slot, p.epoch, (long)g_epoch);
+			continue;
+		}
 		if (p.slot == CB_STREAM_END || p.slot == CB_PASS_END)
 			((PFN_CB_VOID)p.cb->vtbl[p.slot])(p.cb);
 		else
@@ -432,14 +474,14 @@ static void cb_flush(void)
 	}
 }
 
-static void cb_ctx(XA2Callback *c, int slot, void *ctx)
+static void cb_ctx(SwVoice *v, int slot, void *ctx)
 {
-	cb_post(c, slot, ctx);
+	cb_post(v, slot, ctx);
 }
 
-static void cb_void(XA2Callback *c, int slot)
+static void cb_void(SwVoice *v, int slot)
 {
-	cb_post(c, slot, NULL);
+	cb_post(v, slot, NULL);
 }
 
 /* ---------------------------------------------------------------- clock */
@@ -490,14 +532,14 @@ static void advance(SwVoice *v)
 		b = &v->q[v->head];
 		total = buf_samples(v, b);
 		if (!total) {
-			cb_ctx(v->cb, CB_BUFFER_END, b->pContext);
+			cb_ctx(v, CB_BUFFER_END, b->pContext);
 			v->head = (v->head + 1) % XA2_MAX_QUEUED;
 			v->n--;
 			v->pos = 0;
 			continue;
 		}
 		if (v->pos == 0)
-			cb_ctx(v->cb, CB_BUFFER_START, b->pContext);
+			cb_ctx(v, CB_BUFFER_START, b->pContext);
 
 		/* A looping buffer ends at the loop point, not at the buffer end. BGM
 		 * lives on this path, and getting it wrong would retire the music
@@ -515,19 +557,19 @@ static void advance(SwVoice *v)
 		if (v->pos < end)
 			break;
 		if (b->LoopCount == XA2_LOOP_INFINITE) {
-			cb_ctx(v->cb, CB_LOOP_END, b->pContext);
+			cb_ctx(v, CB_LOOP_END, b->pContext);
 			v->pos = b->LoopBegin;
 			continue;
 		}
 		if (b->LoopCount) {
 			b->LoopCount--;
-			cb_ctx(v->cb, CB_LOOP_END, b->pContext);
+			cb_ctx(v, CB_LOOP_END, b->pContext);
 			v->pos = b->LoopBegin;
 			continue;
 		}
-		cb_ctx(v->cb, CB_BUFFER_END, b->pContext);
+		cb_ctx(v, CB_BUFFER_END, b->pContext);
 		if (b->Flags & XA2_END_OF_STREAM)
-			cb_void(v->cb, CB_STREAM_END);
+			cb_void(v, CB_STREAM_END);
 		v->head = (v->head + 1) % XA2_MAX_QUEUED;
 		v->n--;
 		v->pos = 0;
@@ -554,10 +596,9 @@ static void advance(SwVoice *v)
  *
  * Output is fixed at 44100/16/stereo because every format in the survey
  * resamples into it cleanly and a fixed sink is one less thing that can change
- * underneath a restore. waveOut rather than XAudio2's own mixer: winmm needs
- * no COM from us. On Windows that stops at winmm. Under Wine, waveOutOpen is
- * mmdevapi's audio_client_main, and quiesce does not waveOutPause, so that
- * thread stays inside __wine_unix_call across the copy. */
+ * underneath a restore. waveOut rather than anything newer: winmm is already in
+ * the process, it needs no COM, no device enumeration and no session
+ * management, and it brings none of AUDIOSES or MMDevApi with it. */
 #define OUT_RATE 44100
 #define OUT_CH 2
 #define OUT_FRAMES 1024 /* about 23 ms; four of these is a comfortable buffer */
@@ -632,12 +673,12 @@ static void mix_voice(SwVoice *v, int *acc, unsigned frames)
 			if (total && b->LoopCount) {
 				if (b->LoopCount != XA2_LOOP_INFINITE)
 					b->LoopCount--;
-				cb_ctx(v->cb, CB_LOOP_END, b->pContext);
+				cb_ctx(v, CB_LOOP_END, b->pContext);
 				v->pos = b->LoopBegin;
 			} else {
-				cb_ctx(v->cb, CB_BUFFER_END, b->pContext);
+				cb_ctx(v, CB_BUFFER_END, b->pContext);
 				if (b->Flags & XA2_END_OF_STREAM)
-					cb_void(v->cb, CB_STREAM_END);
+					cb_void(v, CB_STREAM_END);
 				v->head = (v->head + 1) % XA2_MAX_QUEUED;
 				v->n--;
 				v->pos = 0;
@@ -647,7 +688,7 @@ static void mix_voice(SwVoice *v, int *acc, unsigned frames)
 			continue;
 		}
 		if (v->pos == 0 && v->frac == 0)
-			cb_ctx(v->cb, CB_BUFFER_START, b->pContext);
+			cb_ctx(v, CB_BUFFER_START, b->pContext);
 
 		idx = b->PlayBegin + v->pos;
 		s16 = (const short *)b->pAudioData;
@@ -721,9 +762,9 @@ static void pass_callbacks(unsigned frames)
 			if (have >= need)
 				break;
 		}
-		cb_post(v->cb, CB_PASS_START,
+		cb_post(v, CB_PASS_START,
 			(void *)(UINT_PTR)(have >= need ? 0 : (need - have) * v->block));
-		cb_post(v->cb, CB_PASS_END, NULL);
+		cb_post(v, CB_PASS_END, NULL);
 	}
 }
 
@@ -814,18 +855,12 @@ static void out_start(void)
 	wf.nAvgBytesPerSec = OUT_RATE * wf.nBlockAlign;
 	wf.cbSize = 0;
 
-	MMRESULT mr;
-	UINT ndev;
-
 	g_mix_wake = CreateEventA(NULL, FALSE, FALSE, NULL);
-	ndev = waveOutGetNumDevs();
-	mr = waveOutOpen(&g_wo, WAVE_MAPPER, &wf, (DWORD_PTR)g_mix_wake, 0, CALLBACK_EVENT);
-	if (mr != MMSYSERR_NOERROR) {
+	if (waveOutOpen(&g_wo, WAVE_MAPPER, &wf, (DWORD_PTR)g_mix_wake, 0, CALLBACK_EVENT) !=
+	    MMSYSERR_NOERROR) {
 		g_wo = NULL;
-		ss_log("xa2_sw: waveOut would not open (mmresult %u, %u device(s)), so the "
-		       "engine stays silent - everything else about the restore is "
-		       "unaffected\n",
-		       (unsigned)mr, (unsigned)ndev);
+		ss_log("xa2_sw: waveOut would not open, so the engine stays silent - "
+		       "everything else about the restore is unaffected\n");
 		return;
 	}
 	for (i = 0; i < OUT_BLOCKS; i++) {
@@ -874,14 +909,15 @@ static void cb_drop(void)
 }
 
 /* User-mode only: drop pending callbacks and idle the mix thread. No
- * waveOutPause - that waits on wineserver under Proton. */
+ * waveOutPause - that waits on wineserver under Proton, so park_audio_gpu
+ * calls this and returns when ss_under_wine(). */
 void xa2_sw_quiesce(void)
 {
-	LARGE_INTEGER pf, t0, now;
+	int spins;
 
 	/* g_cs exists only after XAudio2Create. A save with no engine must not
 	 * enter it: that critical section is uninitialized, and the wait never
-	 * ends. The logical harness path is that save. */
+	 * ends. */
 	if (!g_ready)
 		return;
 	cb_drop();
@@ -889,14 +925,8 @@ void xa2_sw_quiesce(void)
 		return;
 	InterlockedExchange(&g_mix_park, 1);
 	SetEvent(g_mix_wake);
-	QueryPerformanceFrequency(&pf);
-	QueryPerformanceCounter(&t0);
-	while (!g_mix_idle) {
-		QueryPerformanceCounter(&now);
-		if ((now.QuadPart - t0.QuadPart) * 1000 > pf.QuadPart * 200)
-			break;
-		YieldProcessor();
-	}
+	for (spins = 0; spins < 200 && !g_mix_idle; spins++)
+		Sleep(1);
 	if (!g_mix_idle)
 		ss_log("xa2_sw: the mixer did not park within 200 ms - the copy is "
 		       "going ahead anyway, so treat any audio corruption in this "
@@ -918,6 +948,45 @@ void xa2_sw_resume(void)
 	waveOutRestart(g_wo);
 	InterlockedExchange(&g_mix_park, 0);
 	SetEvent(g_mix_wake);
+}
+
+/* Called by the savestate engine after a restore has written memory, before the
+ * mixer is let run again. Bumps the held-in-present generation so every voice
+ * that survived the rewind now reads an epoch behind the current one, and reports
+ * the gap: how many voices carried across, and (with the valve on) that their
+ * callbacks will be refused until the game builds fresh ones. This is the signal
+ * cb_callable never had - "structurally callable" versus "belongs to the world we
+ * are now in." The knob is read here rather than per-callback so the hot drain
+ * stays a single compare. */
+void xa2_sw_restored(void)
+{
+	LONG e;
+	int i, alive = 0, carried = 0;
+
+	if (!g_ready)
+		return;
+	if (g_gen_valve < 0) {
+		char v[8];
+		unsigned n = savestate_getenv("D3D9SW_XA2_GEN", v, sizeof(v));
+
+		g_gen_valve = (n && v[0] != '0') ? 1 : 0;
+	}
+	e = InterlockedIncrement(&g_epoch);
+	for (i = 0; i < g_vn; i++) {
+		SwVoice *v = g_vtab[i];
+
+		if (!v || !v->alive)
+			continue;
+		alive++;
+		if (v->epoch != e)
+			carried++;
+	}
+	ss_log("xa2_sw: restore generation %ld - %d voice(s) alive, %d carried across "
+	       "this restore%s\n",
+	       (long)e, alive, carried,
+	       g_gen_valve > 0
+		       ? " (their callbacks will be refused until the game re-creates them)"
+		       : " (generation valve OFF - set D3D9SW_XA2_GEN=1 to refuse their callbacks)");
 }
 
 /* ---------------------------------------------------------------- voice */
@@ -1292,6 +1361,7 @@ static SwVoice *voice_new(int kind, UINT32 channels, UINT32 rate, UINT32 bits, X
 	v->vtbl = kind == 0 ? g_src_vt : (kind == 1 ? g_mst_vt : g_sub_vt);
 	v->kind = kind;
 	v->alive = 1;
+	v->epoch = g_epoch; /* the generation it is born in; rewinds with the arena */
 	v->cb = cb;
 	v->channels = channels ? channels : 2;
 	v->rate = rate ? rate : 44100;
@@ -1553,6 +1623,12 @@ void xa2_sw_report(void)
 	       g_pend_full ? " <<< the second number is audio going quiet" : "",
 	       g_cb_refused,
 	       g_cb_refused ? " <<< each of those would have been a crash" : "");
+	if (g_epoch || g_gen_refused)
+		ss_log("xa2_sw: restore generation %ld, %lu callback(s) refused by the "
+		       "generation valve as born before the current one%s\n",
+		       (long)g_epoch, g_gen_refused,
+		       g_gen_refused ? " <<< each would have driven the game's audio "
+				       "across a restore boundary" : "");
 	for (i = 0; i < M_MAX; i++)
 		if (g_calls[i])
 			ss_log("  %-22s %lu call(s)\n", g_mname[i], g_calls[i]);
