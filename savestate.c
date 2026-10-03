@@ -2361,6 +2361,7 @@ void gameheap_busy_rewind(void);
  * the knob is set. Defined in gameheap.c. */
 int gameheap_owned_heap(uintptr_t base);
 int gameheap_import_mode(void);
+HANDLE gameheap_rt_heap(void);
 /* Owned-heap base anchors (arena, then LAA region) for relocatable cross-session
  * restore: writes up to `max` {base,size} pairs, returns the count. Defined in
  * gameheap.c. The exe and DLLs are anchored separately by the module table. */
@@ -4916,6 +4917,9 @@ typedef struct Control {
 	 * save it returns to predates them. */
 	DWORD spare_taken[100];
 	int nspare_taken;
+	/* What the slot's manifest says the load will find: rewound threads with
+	 * no live thread in their role. -1 when the slot has no manifest. */
+	int mf_short;
 } Control;
 
 static Control *g_ctl;
@@ -5260,6 +5264,7 @@ static const char *const g_knobs[] = {
 	"D3D9SW_REWIND_GUARD",	  "D3D9SW_LOCKS",
 	"D3D9SW_FNTAB",		  "D3D9SW_HEAPCHECK",
 	"D3D9SW_VERIFY",	  "D3D9SW_DRIFT",
+	"D3D9SW_INVENTORY",
 	"D3D9SW_SETTLE",	  "D3D9SW_REACH_AUDIT",
 	"D3D9SW_REACH_GRAN",	  "D3D9SW_HEAPBLOCKS",
 	"D3D9SW_BLKOWNER",	  "D3D9SW_SYSROOT",
@@ -7867,7 +7872,7 @@ static void heaps_partition(void)
 				       "own state. Set D3D9SW_REWIND_GAMEHEAP=0 to try the "
 				       "other trade\n",
 				       g_ctl->heap_ours[k] ? "on" : "off");
-		} else if (h == game) {
+		} else if (h == game || (h && h == gameheap_rt_heap())) {
 			g_ctl->heap_ours[k] = (char)game_heap_rewound();
 			who = "the game's runtime";
 		} else if (h == mine) {
@@ -7892,7 +7897,7 @@ static void heaps_partition(void)
 			 * a 15 MB heap voted to launcher.exe was rewound under
 			 * wrap_oal.dll's mixer thread, which resumed into a string in
 			 * dsound's data section. */
-			else if (gameheap_import_mode()) {
+			else if (gameheap_import_mode() && !gameheap_rt_heap()) {
 				g_ctl->heap_ours[k] = 0;
 				who = m >= 0 ? g_ctl->mod_name[m] : "no clear owner";
 			} else
@@ -10990,9 +10995,13 @@ static void ss_inventory(Slot *s)
 	DWORD nlive, i;
 	int k;
 
+	char v[8];
+
 	if (told || !g_ctl)
 		return;
 	told = 1;
+	if (!ss_getenv("D3D9SW_INVENTORY", v, sizeof(v)) || v[0] == '0')
+		return;
 
 	ss_log("\n===== inventory: what this wrapper can observe =====\n");
 
@@ -12016,6 +12025,33 @@ static int drift_mode(void)
 	return v[0] == '0' ? 0 : atoi(v);
 }
 
+/* Reservations ensure_committed made for the load under way. A refused load
+ * releases them: left behind, they sit at the saved addresses, and a module the
+ * game loads later - DDPR's dat12.bin at its fixed base - is pushed elsewhere,
+ * which refuses every load after it. */
+#define SS_RSV_CAP 1024
+static uintptr_t g_rsv[SS_RSV_CAP];
+static int g_rsv_n;
+
+static void rsv_note(uintptr_t base)
+{
+	if (g_rsv_n < SS_RSV_CAP)
+		g_rsv[g_rsv_n++] = base;
+}
+
+static void rsv_release(void)
+{
+	int i, n = 0;
+
+	for (i = 0; i < g_rsv_n; i++)
+		n += VirtualFree((LPVOID)g_rsv[i], 0, MEM_RELEASE) != 0;
+	if (g_rsv_n)
+		ss_log("  released %d of %d reservation(s) the refused load made at saved "
+		       "addresses\n",
+		       n, g_rsv_n);
+	g_rsv_n = 0;
+}
+
 static int ensure_committed(uintptr_t base, uintptr_t size, uintptr_t alloc_base,
 			    uintptr_t alloc_end)
 {
@@ -12067,8 +12103,10 @@ static int ensure_committed(uintptr_t base, uintptr_t size, uintptr_t alloc_base
 			uintptr_t rend = alloc_end > end ? alloc_end : end;
 
 			rend = (rend + gran - 1) & ~(gran - 1);
-			if (!VirtualAlloc((LPVOID)rbase, (SIZE_T)(rend - rbase), MEM_RESERVE,
-					  PAGE_NOACCESS)) {
+			if (VirtualAlloc((LPVOID)rbase, (SIZE_T)(rend - rbase), MEM_RESERVE,
+					 PAGE_NOACCESS)) {
+				rsv_note(rbase);
+			} else {
 				/* Some of the allocation may already be back, and
 				 * then only the free run itself is ours to take.
 				 *
@@ -12086,8 +12124,10 @@ static int ensure_committed(uintptr_t base, uintptr_t size, uintptr_t alloc_base
 				uintptr_t fbase = p & ~(gran - 1);
 				uintptr_t fend = (run + page - 1) & ~(page - 1);
 
-				if (!VirtualAlloc((LPVOID)fbase, (SIZE_T)(fend - fbase),
-						  MEM_RESERVE, PAGE_NOACCESS))
+				if (VirtualAlloc((LPVOID)fbase, (SIZE_T)(fend - fbase),
+						 MEM_RESERVE, PAGE_NOACCESS))
+					rsv_note(fbase);
+				else
 					ss_log("  reserve %p+%lx and %p+%lx both refused, "
 					       "err=%lu, state %lx\n",
 					       (void *)rbase, (unsigned long)(rend - rbase),
@@ -12277,7 +12317,7 @@ static int verify_mode(void)
 		char v[16];
 		DWORD n = ss_getenv("D3D9SW_VERIFY", v, sizeof(v));
 
-		cached = (n && n < sizeof(v)) ? atoi(v) : 1;
+		cached = (n && n < sizeof(v)) ? atoi(v) : 0;
 	}
 	return cached;
 }
@@ -13819,6 +13859,449 @@ static void cfg_fault_note(void)
 		ss_raw("       settings differ from the loaded save: %s\n", g_ctl->cfg_diff);
 }
 
+/* The slot manifest, d3d9sw_slotN.json: JSON Lines, one object per line with a
+ * "k" kind, describing the save in words that survive a relaunch - addresses
+ * inside a module are written as module+offset. Written beside .meta; for now a
+ * load only compares it with what it works out for itself and logs where the
+ * two disagree (docs/slot-manifest-proposal.md, phase 1). Fixed buffers, no
+ * heap, because the save writes it with the game frozen. */
+static char g_mf_buf[16384];
+static int g_mf_n, g_mf_lines;
+static HANDLE g_mf_f;
+
+static void mf_flush(void)
+{
+	DWORD wrote = 0;
+
+	if (g_mf_n && g_mf_f != INVALID_HANDLE_VALUE)
+		WriteFile(g_mf_f, g_mf_buf, (DWORD)g_mf_n, &wrote, NULL);
+	g_mf_n = 0;
+}
+
+static void mf_put(const char *fmt, ...)
+{
+	char line[1100];
+	va_list ap;
+	int n;
+
+	va_start(ap, fmt);
+	n = wvsprintfA(line, fmt, ap);
+	va_end(ap);
+	if (n <= 0)
+		return;
+	if (g_mf_n + n + 2 > (int)sizeof(g_mf_buf))
+		mf_flush();
+	memcpy(g_mf_buf + g_mf_n, line, (size_t)n);
+	g_mf_n += n;
+	g_mf_buf[g_mf_n++] = '\r';
+	g_mf_buf[g_mf_n++] = '\n';
+	g_mf_lines++;
+}
+
+static const char *mf_esc(const char *src, char *dst, int cap)
+{
+	int n = 0;
+
+	for (; *src && n < cap - 3; src++) {
+		if (*src == '\\' || *src == '"')
+			dst[n++] = '\\';
+		dst[n++] = (unsigned char)*src < ' ' ? '?' : *src;
+	}
+	dst[n] = 0;
+	return dst;
+}
+
+static const char *mf_base(const char *path)
+{
+	const char *b = path;
+
+	for (; *path; path++)
+		if (*path == '\\' || *path == '/')
+			b = path + 1;
+	return b;
+}
+
+/* Module+offset when the address is inside a saved module, else the address. */
+static const char *mf_key(const Slot *s, uintptr_t a, char *out)
+{
+	int i;
+
+	for (i = 0; i < s->nmods; i++)
+		if (a >= s->mod_lo[i] && a < s->mod_hi[i]) {
+			wsprintfA(out, "%s+%lX", s->mod_name[i], (unsigned long)(a - s->mod_lo[i]));
+			return out;
+		}
+	wsprintfA(out, "%08lX", (unsigned long)a);
+	return out;
+}
+
+/* The same key for an address in this process, from the loader's own list. */
+static const char *mf_live_key(uintptr_t a, char *out)
+{
+	HMODULE m = NULL;
+	char path[MAX_PATH];
+
+	if (a && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+					    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				    (LPCSTR)a, &m) &&
+	    m && GetModuleFileNameA(m, path, sizeof(path))) {
+		wsprintfA(out, "%s+%lX", mf_base(path), (unsigned long)(a - (uintptr_t)m));
+		return out;
+	}
+	wsprintfA(out, "%08lX", (unsigned long)a);
+	return out;
+}
+
+static void mf_self_name(char *out, int cap)
+{
+	HMODULE m = NULL;
+	char path[MAX_PATH];
+
+	out[0] = 0;
+	if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+				       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			       (LPCSTR)mf_self_name, &m) &&
+	    GetModuleFileNameA(m, path, sizeof(path)))
+		lstrcpynA(out, mf_base(path), cap);
+}
+
+static const ThreadState *mf_ctx_of(const Slot *s, DWORD tid)
+{
+	int i;
+
+	for (i = 0; i < s->nthreads; i++)
+		if (s->threads[i].tid == tid)
+			return &s->threads[i];
+	return NULL;
+}
+
+static const char *mf_region_kind(const Slot *s, const Region *r)
+{
+	uintptr_t a = r->base;
+	int i;
+
+	for (i = 0; i < s->nmods; i++)
+		if (a >= s->mod_lo[i] && a < s->mod_hi[i])
+			return "image";
+	for (i = 0; i < s->nthreads; i++)
+		if (s->threads[i].stack_base && a >= s->threads[i].stack_limit - 0x100000 &&
+		    a < s->threads[i].stack_base)
+			return "stack";
+	if (g_ctl)
+		for (i = 0; i < g_ctl->nheaps; i++)
+			if (a >= g_ctl->heap_lo[i] && a < g_ctl->heap_hi[i])
+				return "heap";
+	return "private";
+}
+
+static void mf_write(int slotno, const Slot *s)
+{
+	static char snap[SS_CFGSNAP_MAX + 1];
+	char path[MAX_PATH], k1[64], e1[600], e2[600], self[64];
+	LARGE_INTEGER t0, t1, f;
+	unsigned long long off = 0;
+	int i, j, n, nctx = 0;
+
+	QueryPerformanceCounter(&t0);
+	slotfile_path(path, sizeof(path), slotno, "json");
+	g_mf_f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+			     NULL);
+	if (g_mf_f == INVALID_HANDLE_VALUE)
+		return;
+	g_mf_n = g_mf_lines = 0;
+	n = cfg_snapshot(snap);
+	mf_self_name(self, sizeof(self));
+	for (i = 0; i < s->nids; i++)
+		if (mf_ctx_of(s, s->ids[i]))
+			nctx++;
+	{
+		char build[64] = "", exe[MAX_PATH] = "";
+
+		cfg_text_get(snap, n, "WRAPPER_BUILD", build, sizeof(build));
+		GetModuleFileNameA(NULL, exe, sizeof(exe));
+		mf_put("{\"k\":\"header\",\"v\":1,\"slot\":%d,\"game\":\"%s\",\"wrapper\":\"%s\","
+		       "\"wrapper_build\":\"%s\",\"pid\":%lu,\"created\":\"%08lX%08lX\","
+		       "\"boot\":\"%08lX%08lX\",\"regions\":%d,\"bytes\":%lu,\"threads\":%d,"
+		       "\"rewound\":%d,\"modules\":%d}",
+		       slotno, mf_esc(mf_base(exe), e1, sizeof(e1)), mf_esc(self, e2, sizeof(e2)),
+		       build, (unsigned long)s->save_pid,
+		       (unsigned long)(s->save_created >> 32), (unsigned long)s->save_created,
+		       (unsigned long)(s->save_boot >> 32), (unsigned long)s->save_boot,
+		       s->nregs, (unsigned long)s->bytes, s->nids, nctx, s->nmods);
+	}
+	for (i = 0; i < n;) {
+		int b = i, e;
+		char name[48], val[64];
+
+		while (i < n && snap[i] != '\n')
+			i++;
+		e = i;
+		if (i < n)
+			i++;
+		for (j = 0; b + j < e && j < (int)sizeof(name) - 1 && snap[b + j] != '='; j++)
+			name[j] = snap[b + j];
+		name[j] = 0;
+		if (!j || !lstrcmpA(name, "WRAPPER_BUILD") ||
+		    !cfg_text_get(snap, n, name, val, sizeof(val)))
+			continue;
+		mf_put("{\"k\":\"cfg\",\"name\":\"%s\",\"val\":\"%s\"}", mf_esc(name, e1, 100),
+		       mf_esc(val, e2, 140));
+	}
+	for (i = 0; i < s->nmods; i++)
+		mf_put("{\"k\":\"module\",\"name\":\"%s\",\"base\":\"%08lX\",\"size\":\"%lX\","
+		       "\"stamp\":\"%08lX\",\"path\":\"%s\"}",
+		       mf_esc(s->mod_name[i], e1, 80), (unsigned long)s->mod_lo[i],
+		       (unsigned long)(s->mod_hi[i] - s->mod_lo[i]), (unsigned long)s->mod_stamp[i],
+		       mf_esc(s->mod_path[i], e2, sizeof(e2)));
+	for (i = 0; i < s->nids; i++) {
+		const ThreadState *t = mf_ctx_of(s, s->ids[i]);
+		int ord = 0;
+
+		for (j = 0; j < i; j++)
+			if (s->starts[j] == s->starts[i])
+				ord++;
+		mf_key(s, (uintptr_t)s->starts[i], k1);
+		if (t)
+			mf_put("{\"k\":\"thread\",\"tid\":%lu,\"entry\":\"%s\",\"role\":\"%s#%d\","
+			       "\"rewound\":1,\"stack\":[\"%08lX\",\"%08lX\"],\"teb\":\"%08lX\"}",
+			       (unsigned long)s->ids[i], mf_esc(k1, e1, 80), e1, ord,
+			       (unsigned long)t->stack_limit, (unsigned long)t->stack_base,
+			       (unsigned long)t->teb);
+		else
+			mf_put("{\"k\":\"thread\",\"tid\":%lu,\"entry\":\"%s\",\"role\":\"%s#%d\","
+			       "\"rewound\":0}",
+			       (unsigned long)s->ids[i], mf_esc(k1, e1, 80), e1, ord);
+	}
+	for (i = 0; i < s->nregs; i++) {
+		const Region *r = &s->regs[i];
+
+		mf_put("{\"k\":\"region\",\"base\":\"%08lX\",\"size\":\"%lX\",\"off\":\"%lX\","
+		       "\"prot\":\"%lX\",\"kind\":\"%s\",\"in\":\"%s\"}",
+		       (unsigned long)r->base, (unsigned long)r->size, (unsigned long)off,
+		       (unsigned long)r->prot, mf_region_kind(s, r), mf_key(s, r->base, k1));
+		off += r->size;
+	}
+	mf_put("{\"k\":\"end\",\"lines\":%d}", g_mf_lines + 1);
+	mf_flush();
+	CloseHandle(g_mf_f);
+	g_mf_f = INVALID_HANDLE_VALUE;
+	QueryPerformanceCounter(&t1);
+	QueryPerformanceFrequency(&f);
+	ss_log("  slotfile: %s written, %d line(s), %d ms\n", path, g_mf_lines,
+	       (int)((t1.QuadPart - t0.QuadPart) * 1000 / f.QuadPart));
+}
+
+/* A string field of one manifest line, unescaped. */
+static int mf_str(const char *l, int len, const char *key, char *out, int cap)
+{
+	char pat[40];
+	int pl = wsprintfA(pat, "\"%s\":\"", key), i, n = 0;
+
+	for (i = 0; i + pl <= len; i++)
+		if (!memcmp(l + i, pat, (size_t)pl))
+			break;
+	if (i + pl > len)
+		return 0;
+	for (i += pl; i < len && l[i] != '"' && n < cap - 1; i++) {
+		if (l[i] == '\\' && i + 1 < len)
+			i++;
+		out[n++] = l[i];
+	}
+	out[n] = 0;
+	return 1;
+}
+
+static long mf_num(const char *l, int len, const char *key, long dflt)
+{
+	char pat[40];
+	int pl = wsprintfA(pat, "\"%s\":", key), i;
+	long v = 0, neg = 0;
+
+	for (i = 0; i + pl <= len; i++)
+		if (!memcmp(l + i, pat, (size_t)pl))
+			break;
+	if (i + pl >= len)
+		return dflt;
+	i += pl;
+	if (l[i] == '-')
+		neg = 1, i++;
+	if (i >= len || l[i] < '0' || l[i] > '9')
+		return dflt;
+	while (i < len && l[i] >= '0' && l[i] <= '9')
+		v = v * 10 + (l[i++] - '0');
+	return neg ? -v : v;
+}
+
+#define SS_MF_ROLES 128
+
+/* Before the restore, like the config comparison: reads the slot's manifest
+ * and checks it against the .meta the load is about to use and against the
+ * threads and modules of this process. Logs only. */
+static void mf_check(int slotno, const Slot *s)
+{
+	static char roles[SS_MF_ROLES][64];
+	static int saved_n[SS_MF_ROLES], live_n[SS_MF_ROLES];
+	char path[MAX_PATH], self[64], v[600], w[64];
+	LARGE_INTEGER t0, t1, f;
+	HANDLE fh, snap;
+	DWORD size, got = 0, me = GetCurrentThreadId(), pid = GetCurrentProcessId();
+	char *buf;
+	int nroles = 0, i, k, lines = 0, end = 0, bad = 0, nshort = 0, said = 0;
+	int mods = 0, moved = 0, gone = 0, rebuilt = 0;
+
+	g_ctl->mf_short = -1;
+	QueryPerformanceCounter(&t0);
+	slotfile_path(path, sizeof(path), slotno, "json");
+	fh = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+			 FILE_ATTRIBUTE_NORMAL, NULL);
+	if (fh == INVALID_HANDLE_VALUE) {
+		ss_log("  manifest: none with this save (older build)\n");
+		return;
+	}
+	size = GetFileSize(fh, NULL);
+	buf = size && size != INVALID_FILE_SIZE
+		      ? (char *)VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+		      : NULL;
+	if (!buf || !ReadFile(fh, buf, size, &got, NULL) || got != size) {
+		CloseHandle(fh);
+		if (buf)
+			VirtualFree(buf, 0, MEM_RELEASE);
+		ss_log("  manifest: %s could not be read\n", path);
+		return;
+	}
+	CloseHandle(fh);
+	mf_self_name(self, sizeof(self));
+	for (i = 0; i < (int)size;) {
+		const char *l = buf + i;
+		int len = 0;
+
+		while (i < (int)size && buf[i] != '\n')
+			i++, len++;
+		if (i < (int)size)
+			i++;
+		if (len < 8)
+			continue;
+		lines++;
+		if (!mf_str(l, len, "k", w, sizeof(w)))
+			continue;
+		if (!lstrcmpA(w, "header")) {
+			long r = mf_num(l, len, "regions", -1), t = mf_num(l, len, "threads", -1);
+			long b = mf_num(l, len, "bytes", -1);
+
+			if (r != s->nregs || t != s->nids || (unsigned long)b != (unsigned long)s->bytes) {
+				ss_log("  manifest: DISAGREES with .meta - %ld region(s), %ld "
+				       "thread(s), %ld byte(s) against %d, %d, %lu\n",
+				       r, t, b, s->nregs, s->nids, (unsigned long)s->bytes);
+				bad++;
+			}
+		} else if (!lstrcmpA(w, "end")) {
+			end = 1;
+		} else if (!lstrcmpA(w, "module")) {
+			char name[64], base[16], stamp[16];
+			HMODULE m;
+
+			mods++;
+			if (!mf_str(l, len, "name", name, sizeof(name)) ||
+			    !mf_str(l, len, "base", base, sizeof(base)) ||
+			    !mf_str(l, len, "stamp", stamp, sizeof(stamp)))
+				continue;
+			m = GetModuleHandleA(name);
+			if (!m) {
+				gone++;
+				continue;
+			}
+			wsprintfA(v, "%08lX", (unsigned long)(uintptr_t)m);
+			if (lstrcmpA(v, base))
+				moved++;
+			{
+				IMAGE_DOS_HEADER *dh = (IMAGE_DOS_HEADER *)m;
+				IMAGE_NT_HEADERS *nh = (IMAGE_NT_HEADERS *)((char *)m + dh->e_lfanew);
+
+				wsprintfA(v, "%08lX", (unsigned long)nh->FileHeader.TimeDateStamp);
+				if (lstrcmpA(v, stamp)) {
+					rebuilt++;
+					if (said++ < 8)
+						ss_log("  manifest: %s is a different build now "
+						       "(stamp %s at the save, %s now)\n",
+						       name, stamp, v);
+				}
+			}
+		} else if (!lstrcmpA(w, "thread") && mf_num(l, len, "rewound", 0) == 1) {
+			char *hash;
+
+			if (!mf_str(l, len, "entry", v, sizeof(v)))
+				continue;
+			hash = v;
+			{
+				int sl = lstrlenA(self);
+				char pre[64];
+
+				lstrcpynA(pre, v, sl + 1 < (int)sizeof(pre) ? sl + 1 : (int)sizeof(pre));
+				if (sl && v[sl] == '+' && !lstrcmpiA(pre, self))
+					continue;
+			}
+			for (k = 0; k < nroles; k++)
+				if (!lstrcmpiA(roles[k], hash))
+					break;
+			if (k == nroles) {
+				if (nroles == SS_MF_ROLES)
+					continue;
+				lstrcpynA(roles[nroles], hash, sizeof(roles[0]));
+				saved_n[nroles] = live_n[nroles] = 0;
+				nroles++;
+			}
+			saved_n[k]++;
+		}
+	}
+	VirtualFree(buf, 0, MEM_RELEASE);
+	if (!end) {
+		ss_log("  manifest: %s ends early (%d line(s)) - written by a save that did "
+		       "not finish\n",
+		       path, lines);
+		bad++;
+	}
+	snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+	if (snap != INVALID_HANDLE_VALUE) {
+		THREADENTRY32 te;
+
+		te.dwSize = sizeof(te);
+		if (Thread32First(snap, &te))
+			do {
+				HANDLE h;
+
+				if (te.th32OwnerProcessID != pid || te.th32ThreadID == me ||
+				    te.th32ThreadID == g_ctl->wd_tid || xs_spare_idx(te.th32ThreadID) >= 0)
+					continue;
+				h = OpenThread(THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+				if (!h)
+					continue;
+				mf_live_key((uintptr_t)start_of(h), v);
+				CloseHandle(h);
+				for (k = 0; k < nroles; k++)
+					if (!lstrcmpiA(roles[k], v)) {
+						live_n[k]++;
+						break;
+					}
+			} while (Thread32Next(snap, &te));
+		CloseHandle(snap);
+	}
+	for (k = 0; k < nroles; k++)
+		if (live_n[k] < saved_n[k]) {
+			nshort += saved_n[k] - live_n[k];
+			ss_log("  manifest: role %s - %d rewound at the save, %d live now\n",
+			       roles[k], saved_n[k], live_n[k]);
+		}
+	g_ctl->mf_short = nshort;
+	QueryPerformanceCounter(&t1);
+	QueryPerformanceFrequency(&f);
+	ss_log("  manifest: %d line(s), %s; %d module(s): %d moved, %d not loaded, %d a "
+	       "different build; %d rewound role(s), %d thread(s) with no live thread in "
+	       "their role; %d ms\n",
+	       lines, bad ? "DISAGREES with the save it sits beside" : "agrees with .meta",
+	       mods, moved, gone, rebuilt, nroles, nshort,
+	       (int)((t1.QuadPart - t0.QuadPart) * 1000 / f.QuadPart));
+}
+
 /* Never a local copy of a Slot. SS_MAX_REGIONS is 65536 and every one of 256
  * thread slots carries a CONTEXT, so the struct runs to several megabytes and a
  * stack copy of it is an immediate C00000FD - which is exactly how the first
@@ -13849,6 +14332,7 @@ static void slotfile_write_meta(int slotno, Slot *s)
 	       path, s->nregs, s->nthreads, (double)s->bytes / (1024.0 * 1024.0));
 	slotfile_write_index(slotno, s);
 	cfg_write_for_slot(slotno);
+	mf_write(slotno, s);
 }
 
 /* Fills an empty slot from the pair of files, so Shift+F5 in a fresh session
@@ -16582,7 +17066,23 @@ static int lfh_hold(void);
  * segments are deliberately exempt: those are handled block by block, and
  * marking them here would switch heap restore off altogether. */
 static uintptr_t g_lfh_at[SS_POKE_CAP];
+static char g_lfh_keep[SS_POKE_CAP];
 static int g_lfh_n;
+static int lfh_hold(void);
+
+/* Holding a heap's bookkeeping is right when its blocks stay in the present or
+ * come back block by block under live metadata. A rewound heap with block
+ * restore off has every segment written back whole, and then holding the
+ * bookkeeping is the split: present metadata over past blocks, which divides
+ * by a zero BlockCount in ntdll (DDPR, 2026-10-02). */
+static int lfh_keep_for(int k)
+{
+	int h = lfh_hold();
+
+	if (h != 2)
+		return h;
+	return !g_ctl->heap_ours[k] || blk_mode();
+}
 
 static void lfh_find_regions(Slot *s)
 {
@@ -16643,6 +17143,7 @@ static void lfh_find_regions(Slot *s)
 				}
 				if (poke_hit(g_lfh_at, g_lfh_n, b) || g_lfh_n >= SS_POKE_CAP)
 					break;
+				g_lfh_keep[g_lfh_n] = (char)lfh_keep_for(k);
 				g_lfh_at[g_lfh_n++] = b;
 				/* Says what will happen, not what used to happen. This
 				 * line claimed "left in the present" on a run where
@@ -16651,9 +17152,10 @@ static void lfh_find_regions(Slot *s)
 				ss_log("  LFH: region %d at %p is bookkeeping for heap %p and "
 				       "sits outside its segments - %s, %llu bytes\n",
 				       i, (void *)b, (void *)g_ctl->heap_h[k],
-				       lfh_hold() ? "left in the present"
-						  : "restored with everything else "
-						    "(D3D9SW_LFHHOLD=0)",
+				       g_lfh_keep[g_lfh_n - 1]
+					       ? "left in the present"
+					       : "restored with its heap, whose segments "
+						 "all come back whole",
 				       (unsigned long long)s->regs[i].size);
 				break;
 			}
@@ -16672,7 +17174,7 @@ static void lfh_find_regions(Slot *s)
  * exactly the C0000094 in ntdll that replaced the access violation the moment
  * the segment split was closed.
  *
- * Default unchanged, so this only moves if it is asked to. */
+ * 1 always holds, 0 never does, unset (2) decides per heap in lfh_keep_for. */
 static int lfh_hold(void)
 {
 	static int cached = -1;
@@ -16681,15 +17183,18 @@ static int lfh_hold(void)
 		char v[8];
 		DWORD n = ss_getenv("D3D9SW_LFHHOLD", v, sizeof(v));
 
-		cached = (n > 0 && n < sizeof(v) && v[0] == '0') ? 0 : 1;
+		cached = (n > 0 && n < sizeof(v)) ? (v[0] == '0' ? 0 : 1) : 2;
 	}
 	return cached;
 }
 
 static int poke_skipped(uintptr_t base)
 {
-	if (lfh_hold() && poke_hit(g_lfh_at, g_lfh_n, base))
-		return 1;
+	int i;
+
+	for (i = 0; i < g_lfh_n; i++)
+		if (g_lfh_at[i] == base && g_lfh_keep[i])
+			return 1;
 	if (g_skip_auto)
 		return poke_hit(g_revert_at, g_revert_n, base);
 	return poke_hit(g_skip_list, g_skip_n, base);
@@ -17065,6 +17570,14 @@ static int win_read(Window *w, unsigned long long pos, void *dst, size_t n)
 /* Copy saved bytes into live memory, but do not rewrite a page a LEFT RUNNING
  * peer currently holds. pos still advances across a hole so the slot mapping
  * stays aligned. */
+static int page_committed(uintptr_t p)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+
+	return VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) == sizeof(mbi) &&
+	       mbi.State == MEM_COMMIT;
+}
+
 static int win_copy_except_live(Window *w, unsigned long long pos, void *mem, size_t n)
 {
 	unsigned char *p = mem;
@@ -17076,6 +17589,10 @@ static int win_copy_except_live(Window *w, unsigned long long pos, void *mem, si
 		if (page > n - done)
 			page = n - done;
 		if (g_copy_excl && region_excluded((uintptr_t)p + done, page)) {
+			g_excl_skip_bytes += page;
+		} else if (g_copy_excl && !page_committed((uintptr_t)p + done)) {
+			/* The check pass never recommits a partly excluded region, and
+			 * the rest of it may not exist in this process. */
 			g_excl_skip_bytes += page;
 		} else if (live_page_held((uintptr_t)p + done)) {
 			g_live_skip_bytes += page;
@@ -17546,7 +18063,7 @@ static unsigned long reloc_scan(uintptr_t base, size_t size, RelocEnt *map, int 
  * process has freed it and handed the addresses out again it cannot be put
  * back: Haydee's thread pool did that after one room change and three restores
  * in a row were refused over 32 KB nobody would read. */
-static int g_dead_reg[64], g_ndead_reg;
+static int g_dead_reg[256], g_ndead_reg;
 
 static int dead_reg_has(int i)
 {
@@ -18060,6 +18577,10 @@ static int xs_spares_topup(const Slot *s)
 	for (k = 0; k < SS_SPARE_CAP; k++)
 		if (g_ctl->spare_tid[k])
 			idle++;
+	if (g_ctl->mf_short >= 0 && g_ctl->mf_short != need)
+		ss_log("  manifest: predicted %d rewound thread(s) with no live thread in their "
+		       "role, the stand-in count finds %d - the two disagree\n",
+		       g_ctl->mf_short, need);
 	if (need <= idle)
 		return 1;
 	if (need > SS_SPARE_CAP) {
@@ -19828,6 +20349,15 @@ static void arena_put_back(void *const *keep)
 		       put + sized);
 }
 
+/* A refused load wrote nothing, so the audio it parked goes back to playing the
+ * present, exactly as the end of a save does. */
+static void load_refused_resume(void)
+{
+	resume_all(0);
+	dsh_play();
+	xa2_sw_resume();
+}
+
 static int do_load(int slotno)
 {
 	Slot *s = &g_ctl->slots[slotno];
@@ -19856,8 +20386,12 @@ static int do_load(int slotno)
 	ss_log("  provenance: saved by pid %lu, loading in pid %lu - %s\n",
 	       (unsigned long)s->save_pid, (unsigned long)GetCurrentProcessId(),
 	       prov_name(g_ctl->load_prov));
+	g_ctl->mf_short = -1;
+	g_rsv_n = 0;
 	if (slotfile_mode())
 		cfg_compare_with_slot(slotno);
+	if (slotfile_mode() && slotno != SS_SCRATCH)
+		mf_check(slotno, s);
 	/* Sampled here, before a single byte moves, because this is the only moment
 	 * that answers the question. A heap created after the snapshot exists right
 	 * now and will not exist in a moment; if the record of it is not taken on
@@ -20072,7 +20606,7 @@ static int do_load(int slotno)
 			ss_log("load: refused, %d thread(s) newer than the save "
 			       "(D3D9SW_REWIND_NEWTHREADS=hold or run to override)\n",
 			       fresh);
-			resume_all(0);
+			load_refused_resume();
 			return 0;
 		}
 		if (xs_foreign_load() && transplant_mode()) {
@@ -20080,7 +20614,7 @@ static int do_load(int slotno)
 
 			if (why) {
 				ss_log("load: refused - %s. Nothing was written\n", why);
-				resume_all(0);
+				load_refused_resume();
 				return 0;
 			}
 		}
@@ -20143,7 +20677,9 @@ static int do_load(int slotno)
 			 * regenerable region and let the load go ahead. This is the bulk of
 			 * the cross-session "belongs elsewhere" set: private at save, mapped
 			 * now. D3D9SW_MAPSKIP=0 goes back to counting it as unrestorable. */
-			if (mbi.Type == MEM_MAPPED && mapskip_mode()) {
+			if (mbi.Type == MEM_MAPPED && mapskip_mode() &&
+			    g_ndead_reg < (int)(sizeof(g_dead_reg) / sizeof(g_dead_reg[0]))) {
+				g_dead_reg[g_ndead_reg++] = i;
 				ss_log("  region %p+%lx is a live file mapping now (was type "
 				       "%lx) - the game re-maps it, held out\n",
 				       (void *)base, (unsigned long)size,
@@ -20418,7 +20954,8 @@ static int do_load(int slotno)
 		} else {
 			ss_log("load: refused, %d of %d regions unrestorable\n", skipped,
 			       s->nregs);
-			resume_all(0);
+			rsv_release();
+			load_refused_resume();
 			return 0;
 		}
 	}

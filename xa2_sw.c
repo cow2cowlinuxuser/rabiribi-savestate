@@ -296,11 +296,49 @@ static XaHead *g_xa = &g_xa_boot;
 #define g_pend_head (g_xa->pend_head)
 #define g_pend_n (g_xa->pend_n)
 
-/* Set once waveOut is running. Declared here because `advance` has to know to
- * stand aside well before the mixer that sets it is defined. */
-static int g_out_live;
+#define OUT_RATE 44100
+#define OUT_CH 2
+#define OUT_FRAMES 1024 /* about 23 ms; four of these is a comfortable buffer */
+#define OUT_BLOCKS 4
 
-static CRITICAL_SECTION g_cs;
+typedef struct {
+	WAVEHDR hdr[OUT_BLOCKS];
+	short pcm[OUT_BLOCKS][OUT_FRAMES * OUT_CH];
+	int acc[OUT_FRAMES * OUT_CH];
+} MixOut;
+
+/* Everything that belongs to this process rather than to the game's moment:
+ * the lock, the waveOut device, the mixer thread and the blocks the driver
+ * holds. A restore writes this DLL's data back, and from another launch these
+ * would come back as the old process's handles and pointers; so they live in a
+ * fixed home excluded from every snapshot, and the one pointer to it that the
+ * data section holds is the same in every launch. */
+#define XA2_NOW_HOME 0x5FED0000u
+
+typedef struct {
+	CRITICAL_SECTION cs;
+	HWAVEOUT wo;
+	HANDLE thr, wake;
+	volatile LONG quit, park, idle;
+	int out_live; /* set once waveOut is running */
+	int wo_paused, wo_discard;
+	MixOut out;
+} XaNow;
+
+static XaNow g_now_boot;
+static XaNow *g_now = &g_now_boot;
+#define g_cs (g_now->cs)
+#define g_wo (g_now->wo)
+#define g_out (&g_now->out)
+#define g_mix_thr (g_now->thr)
+#define g_mix_wake (g_now->wake)
+#define g_mix_quit (g_now->quit)
+#define g_mix_park (g_now->park)
+#define g_mix_idle (g_now->idle)
+#define g_out_live (g_now->out_live)
+#define g_wo_paused (g_now->wo_paused)
+#define g_wo_discard (g_now->wo_discard)
+
 static int g_ready;
 static LONGLONG g_qpf;
 static unsigned long g_voices, g_submits, g_starved, g_overflow;
@@ -353,13 +391,39 @@ static int arena_commit(unsigned char *p, SIZE_T n)
 	return 1;
 }
 
+/* Decimal, or hex with 0x. */
+static UINT_PTR xa2_knob(const char *name, UINT_PTR def)
+{
+	char v[24];
+	unsigned n = savestate_getenv(name, v, sizeof(v)), i = 0, hex = 0;
+	UINT_PTR r = 0;
+
+	if (!n || n >= sizeof(v))
+		return def;
+	if (v[0] == '0' && (v[1] == 'x' || v[1] == 'X'))
+		i = 2, hex = 1;
+	for (; v[i]; i++) {
+		char c = v[i];
+		unsigned d = c >= '0' && c <= '9'   ? (unsigned)(c - '0')
+			     : hex && c >= 'a' && c <= 'f' ? (unsigned)(c - 'a' + 10)
+			     : hex && c >= 'A' && c <= 'F' ? (unsigned)(c - 'A' + 10)
+							   : 99u;
+		if (d == 99u)
+			break;
+		r = r * (hex ? 16u : 10u) + d;
+	}
+	return r;
+}
+
+/* D3D9SW_XA2_ARENA / D3D9SW_XA2_ARENA_MB move it for a game whose own pinned
+ * spans already cover the default. */
 static int arena_open(void)
 {
 	unsigned char *base;
-	SIZE_T size = XA2_ARENA_SIZE;
+	UINT_PTR at = xa2_knob("D3D9SW_XA2_ARENA", XA2_ARENA_BASE);
+	SIZE_T size = (SIZE_T)xa2_knob("D3D9SW_XA2_ARENA_MB", XA2_ARENA_SIZE >> 20) << 20;
 
-	base = (unsigned char *)VirtualAlloc((void *)(UINT_PTR)XA2_ARENA_BASE, size,
-					     MEM_RESERVE, PAGE_READWRITE);
+	base = (unsigned char *)VirtualAlloc((void *)at, size, MEM_RESERVE, PAGE_READWRITE);
 	if (base) {
 		gameheap_va_unhold(base);
 		ss_log("xa2_sw: voice arena reserved at %p, %u MB - the same address "
@@ -373,7 +437,7 @@ static int arena_open(void)
 		gameheap_va_unhold(base);
 		ss_log("xa2_sw: %p was taken, voice arena at %p instead - voices will "
 		       "not survive a load from another launch\n",
-		       (void *)(UINT_PTR)XA2_ARENA_BASE, base);
+		       (void *)at, base);
 	}
 	if (!arena_commit(base, sizeof(XaHead)))
 		return 0;
@@ -738,21 +802,6 @@ static void advance(SwVoice *v)
  * underneath a restore. waveOut rather than anything newer: winmm is already in
  * the process, it needs no COM, no device enumeration and no session
  * management, and it brings none of AUDIOSES or MMDevApi with it. */
-#define OUT_RATE 44100
-#define OUT_CH 2
-#define OUT_FRAMES 1024 /* about 23 ms; four of these is a comfortable buffer */
-#define OUT_BLOCKS 4
-
-typedef struct {
-	WAVEHDR hdr[OUT_BLOCKS];
-	short pcm[OUT_BLOCKS][OUT_FRAMES * OUT_CH];
-	int acc[OUT_FRAMES * OUT_CH];
-} MixOut;
-
-static HWAVEOUT g_wo;
-static MixOut *g_out;
-static HANDLE g_mix_thr, g_mix_wake;
-static volatile LONG g_mix_quit, g_mix_park, g_mix_idle;
 static unsigned long g_blocks_out;
 
 static int voice_playing(const SwVoice *v)
@@ -987,11 +1036,6 @@ static void out_start(void)
 
 	if (g_out_live)
 		return;
-	g_out = (MixOut *)VirtualAlloc(NULL, sizeof(MixOut), MEM_COMMIT | MEM_RESERVE,
-				       PAGE_READWRITE);
-	if (!g_out)
-		return;
-	savestate_exclude(g_out, sizeof(MixOut));
 
 	wf.wFormatTag = WAVE_FORMAT_PCM;
 	wf.nChannels = OUT_CH;
@@ -1066,8 +1110,6 @@ void xa2_sw_quiesce(void)
 		       "going ahead anyway, so treat any audio corruption in this "
 		       "restore as explained\n");
 }
-
-static int g_wo_paused, g_wo_discard;
 
 void xa2_sw_park(void)
 {
@@ -1194,6 +1236,13 @@ void xa2_sw_restored(void)
 static const void *g_src_vt[29];
 static const void *g_mst_vt[20];
 static const void *g_sub_vt[19];
+/* The same voices as XAudio2 2.7 shapes them, for a game that asks COM for the
+ * 2.7 engine. Only GetVoiceDetails (no ActiveFlags) and GetState (no Flags)
+ * differ; the trailing 2.8 slots are never called by a 2.7 caller. */
+static const void *g_src27_vt[29];
+static const void *g_mst27_vt[20];
+static const void *g_sub27_vt[19];
+static int g_v27;
 
 /* IXAudio2Voice is not IUnknown-derived: the first slot is GetVoiceDetails, and
  * a voice is released with DestroyVoice rather than Release. */
@@ -1205,6 +1254,22 @@ static void WINAPI V_GetVoiceDetails(SwVoice *v, XA2_VOICE_DETAILS *d)
 		return;
 	d->CreationFlags = 0;
 	d->ActiveFlags = 0;
+	d->InputChannels = v->channels;
+	d->InputSampleRate = v->rate;
+}
+
+typedef struct {
+	UINT32 CreationFlags;
+	UINT32 InputChannels;
+	UINT32 InputSampleRate;
+} XA27_VOICE_DETAILS;
+
+static void WINAPI V27_GetVoiceDetails(SwVoice *v, XA27_VOICE_DETAILS *d)
+{
+	g_calls[M_DETAILS]++;
+	if (!d)
+		return;
+	d->CreationFlags = 0;
 	d->InputChannels = v->channels;
 	d->InputSampleRate = v->rate;
 }
@@ -1552,6 +1617,11 @@ static void WINAPI S_GetState(SwVoice *v, XA2_VOICE_STATE *st, UINT32 flags)
 	cb_flush();
 }
 
+static void WINAPI S27_GetState(SwVoice *v, XA2_VOICE_STATE *st)
+{
+	S_GetState(v, st, 0);
+}
+
 static HRESULT WINAPI S_SetFrequencyRatio(SwVoice *v, float ratio, UINT32 op)
 {
 	(void)op;
@@ -1601,7 +1671,10 @@ static SwVoice *voice_new(int kind, UINT32 channels, UINT32 rate, UINT32 bits, X
 	if (!v)
 		return NULL;
 	ZeroMemory(v, sizeof(*v));
-	v->vtbl = kind == 0 ? g_src_vt : (kind == 1 ? g_mst_vt : g_sub_vt);
+	if (g_v27)
+		v->vtbl = kind == 0 ? g_src27_vt : (kind == 1 ? g_mst27_vt : g_sub27_vt);
+	else
+		v->vtbl = kind == 0 ? g_src_vt : (kind == 1 ? g_mst_vt : g_sub_vt);
 	v->kind = kind;
 	v->alive = 1;
 	v->epoch = g_epoch; /* the generation it is born in; rewinds with the arena */
@@ -1775,7 +1848,62 @@ static HRESULT WINAPI E_SetDebugConfiguration(SwEngine *e, const void *cfg, void
 	return S_OK;
 }
 
+/* XAudio2 2.7 is a COM class: created uninitialised, then Initialize, and it
+ * enumerates devices by index. XAudio2.h of that era is pack(1), so the device
+ * details are 1068 bytes: two 256-WCHAR strings, the role, then a
+ * WAVEFORMATEXTENSIBLE. */
+static HRESULT WINAPI E27_GetDeviceCount(SwEngine *e, UINT32 *n)
+{
+	(void)e;
+	if (n)
+		*n = 1;
+	return S_OK;
+}
+
+static HRESULT WINAPI E27_GetDeviceDetails(SwEngine *e, UINT32 i, BYTE *d)
+{
+	static const BYTE pcm[16] = { 0x01, 0, 0, 0, 0, 0, 0x10, 0,
+				      0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71 };
+	WAVEFORMATEX *wf;
+
+	(void)e;
+	if (i != 0 || !d)
+		return E_INVALIDARG;
+	ZeroMemory(d, 1068);
+	lstrcpyW((WCHAR *)d, L"xa2_sw");
+	lstrcpyW((WCHAR *)(d + 512), L"xa2_sw");
+	*(UINT32 *)(d + 1024) = 0xF; /* GlobalDefaultDevice */
+	wf = (WAVEFORMATEX *)(d + 1028);
+	wf->wFormatTag = 0xFFFE;
+	wf->nChannels = 2;
+	wf->nSamplesPerSec = 44100;
+	wf->wBitsPerSample = 16;
+	wf->nBlockAlign = 4;
+	wf->nAvgBytesPerSec = 44100 * 4;
+	wf->cbSize = 22;
+	*(WORD *)(d + 1028 + 18) = 16;	  /* valid bits */
+	*(DWORD *)(d + 1028 + 20) = 0x3; /* front left and right */
+	CopyMemory(d + 1028 + 24, pcm, 16);
+	return S_OK;
+}
+
+static HRESULT WINAPI E27_Initialize(SwEngine *e, UINT32 flags, UINT32 processor)
+{
+	(void)e;
+	tr("Initialize (2.7) flags=%u processor=%u", flags, processor);
+	return S_OK;
+}
+
+static HRESULT WINAPI E27_CreateMasteringVoice(SwEngine *e, void **out, UINT32 channels,
+					       UINT32 rate, UINT32 flags, UINT32 device,
+					       const void *chain)
+{
+	(void)device;
+	return E_CreateMasteringVoice(e, out, channels, rate, flags, NULL, chain, 0);
+}
+
 static const void *g_eng_vt[13];
+static const void *g_eng27_vt[16];
 
 static void vt_init(void)
 {
@@ -1828,6 +1956,31 @@ static void vt_init(void)
 	g_src_vt[26] = (const void *)S_SetFrequencyRatio;
 	g_src_vt[27] = (const void *)S_GetFrequencyRatio;
 	g_src_vt[28] = (const void *)S_SetSourceSampleRate;
+
+	g_eng27_vt[0] = (const void *)E_QueryInterface;
+	g_eng27_vt[1] = (const void *)E_AddRef;
+	g_eng27_vt[2] = (const void *)E_Release;
+	g_eng27_vt[3] = (const void *)E27_GetDeviceCount;
+	g_eng27_vt[4] = (const void *)E27_GetDeviceDetails;
+	g_eng27_vt[5] = (const void *)E27_Initialize;
+	g_eng27_vt[6] = (const void *)E_RegisterForCallbacks;
+	g_eng27_vt[7] = (const void *)E_UnregisterForCallbacks;
+	g_eng27_vt[8] = (const void *)E_CreateSourceVoice;
+	g_eng27_vt[9] = (const void *)E_CreateSubmixVoice;
+	g_eng27_vt[10] = (const void *)E27_CreateMasteringVoice;
+	g_eng27_vt[11] = (const void *)E_StartEngine;
+	g_eng27_vt[12] = (const void *)E_StopEngine;
+	g_eng27_vt[13] = (const void *)E_CommitChanges;
+	g_eng27_vt[14] = (const void *)E_GetPerformanceData;
+	g_eng27_vt[15] = (const void *)E_SetDebugConfiguration;
+
+	CopyMemory(g_sub27_vt, g_sub_vt, sizeof(g_sub_vt));
+	g_sub27_vt[0] = (const void *)V27_GetVoiceDetails;
+	CopyMemory(g_mst27_vt, g_mst_vt, sizeof(g_mst_vt));
+	g_mst27_vt[0] = (const void *)V27_GetVoiceDetails;
+	CopyMemory(g_src27_vt, g_src_vt, sizeof(g_src_vt));
+	g_src27_vt[0] = (const void *)V27_GetVoiceDetails;
+	g_src27_vt[25] = (const void *)S27_GetState;
 }
 
 /* ---------------------------------------------------------------- entry */
@@ -1881,18 +2034,46 @@ void xa2_sw_report(void)
 			ss_log("  %-22s never called\n", g_mname[i]);
 }
 
+static HRESULT engine_new(void **out, UINT32 flags, int v27);
+
 __declspec(dllexport) HRESULT WINAPI xa2_sw_create(void **out, UINT32 flags, UINT32 processor)
+{
+	(void)processor;
+	return engine_new(out, flags, 0);
+}
+
+/* What CoCreateInstance(CLSID_XAudio2) hands a 2.7 game: our engine with the
+ * 2.7 vtables, and every voice it makes shaped the same way. */
+HRESULT xa2_sw_create27(void **out)
+{
+	return engine_new(out, 0, 1);
+}
+
+static HRESULT engine_new(void **out, UINT32 flags, int v27)
 {
 	SwEngine *e;
 	LARGE_INTEGER f;
 
 	(void)flags;
-	(void)processor;
 	if (!out)
 		return E_INVALIDARG;
 	*out = NULL;
-	tr("XAudio2Create flags=%u", flags);
+	tr("XAudio2Create flags=%u%s", flags, v27 ? " (2.7, through COM)" : "");
 	if (!g_ready) {
+		XaNow *now = (XaNow *)VirtualAlloc((void *)XA2_NOW_HOME, sizeof(XaNow),
+						   MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+		if (!now) {
+			ss_log("xa2_sw: present-tense home %08lX taken (error %lu) - placed by "
+			       "the OS, so a load from another launch will point at the old one\n",
+			       (unsigned long)XA2_NOW_HOME, GetLastError());
+			now = (XaNow *)VirtualAlloc(NULL, sizeof(XaNow), MEM_COMMIT | MEM_RESERVE,
+						    PAGE_READWRITE);
+		}
+		if (now) {
+			savestate_exclude(now, sizeof(XaNow));
+			g_now = now;
+		}
 		InitializeCriticalSection(&g_cs);
 		QueryPerformanceFrequency(&f);
 		g_qpf = f.QuadPart ? f.QuadPart : 1;
@@ -1908,8 +2089,12 @@ __declspec(dllexport) HRESULT WINAPI xa2_sw_create(void **out, UINT32 flags, UIN
 	if (!e)
 		return E_OUTOFMEMORY;
 	ZeroMemory(e, sizeof(*e));
-	e->vtbl = g_eng_vt;
+	g_v27 = v27;
+	e->vtbl = v27 ? g_eng27_vt : g_eng_vt;
 	e->ref = 1;
+	if (v27)
+		ss_log("xa2_sw: answering CoCreateInstance(XAudio2 2.7) - the real "
+		       "XAudio2_7.dll is never loaded\n");
 	*out = e;
 	out_start();
 	return S_OK;

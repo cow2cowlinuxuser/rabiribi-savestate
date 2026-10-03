@@ -61,6 +61,11 @@ void *savestate_game_import_hook(const char *fn);
 /* Defined further down with the note on why a fixed base is what makes a layout
  * reproducible. Declared here because the installer runs above it. */
 static HANDLE gh_create_heap(void);
+static void gh_heapcreate_hook(HMODULE mod);
+static void gh_heapcreate_arm(void);
+static void ct_arm(void);
+static void ct_hook(HMODULE mod, const WCHAR *path);
+static void ct_report(void);
 static void clock_probe_install(HMODULE exe);
 static int gh_wholesale(void);
 static void gh_make_selfcontained(HANDLE h);
@@ -1002,16 +1007,29 @@ static GhBigArena *chunk_add(size_t need)
 	n = g_nbig;
 	if (n >= GH_BIG_CHUNKS)
 		return NULL;
+	/* The span's last stretch is still a fixed address: a block that fits in
+	 * what is left takes all of it rather than going OS-placed. */
+	if (g_bigpin_base && g_bigpin_used + cap > g_bigpin_size &&
+	    g_bigpin_used + need + GH_BIG_GRAIN <= g_bigpin_size)
+		cap = g_bigpin_size - g_bigpin_used;
 	if (g_bigpin_base && g_bigpin_used + cap <= g_bigpin_size) {
 		res = (void *)(g_bigpin_base + g_bigpin_used);
 		if (!VirtualAlloc(res, GH_BIG_GRAIN, MEM_COMMIT, PAGE_READWRITE))
 			return NULL;
 		g_bigpin_used += cap;
 	} else {
-		if (g_bigpin_base)
-			ss_log("gameheap: the pinned big-block span is full - chunk %ld goes "
-			       "OS-placed\n",
-			       (long)n);
+		/* Past the span, a chunk is only as big as the block that asked for
+		 * it: under a 2 GB ceiling a spare 64 MB reservation is what the next
+		 * allocation fails for. */
+		if (g_bigpin_base) {
+			static LONG said;
+
+			cap = (need + GH_BIG_GRAIN + 0xFFFFu) & ~(SIZE_T)0xFFFFu;
+			if (!InterlockedExchange(&said, 1))
+				ss_log("gameheap: the pinned big-block span is full - chunk %ld "
+				       "and later go OS-placed, sized to their block\n",
+				       (long)n);
+		}
 		res = VirtualAlloc(NULL, cap, MEM_RESERVE, PAGE_READWRITE);
 		if (!res)
 			return NULL;
@@ -2871,6 +2889,22 @@ static SIZE_T(WINAPI *r_crt_hsz)(HANDLE, DWORD, LPCVOID);
 static WCHAR g_game_dir[MAX_PATH];
 static int g_game_dir_n;
 static HMODULE g_self;
+static const char *g_rt_name = "ucrtbase";
+
+static int gh_exe_imports(const char *dll)
+{
+	unsigned char *base = (unsigned char *)GetModuleHandleA(NULL);
+	IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+	DWORD rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+	IMAGE_IMPORT_DESCRIPTOR *imp;
+
+	if (!rva)
+		return 0;
+	for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + rva); imp->Name; imp++)
+		if (!lstrcmpiA((const char *)(base + imp->Name), dll))
+			return 1;
+	return 0;
+}
 static unsigned long g_mods_patched, g_slots_patched, g_mods_unbound;
 
 /* ucrtbase's layout, reproduced exactly: the block the allocator issued, stored
@@ -2933,6 +2967,34 @@ static SIZE_T WINAPI gh_crt_heapsize(HANDLE heap, DWORD flags, LPCVOID p)
 		return 0;
 	}
 	return r_crt_hsz(heap, flags, p);
+}
+
+/* D3D9SW_GHRT_ALLOC=1: the runtime's own HeapAlloc on its own heap - the
+ * allocations it makes for itself and for MSVCP100 - is served from our arena
+ * too. That heap is made before this DLL loads, moves between launches, and
+ * grows segments wherever there is room. The floor above already frees, resizes
+ * and sizes these blocks. */
+static LPVOID(WINAPI *r_rt_halloc)(HANDLE, DWORD, SIZE_T);
+static HANDLE g_rt_crtheap;
+static volatile LONG g_rt_served, g_rt_passed;
+
+static LPVOID WINAPI gh_rt_heapalloc(HANDLE heap, DWORD flags, SIZE_T n)
+{
+	if (g_ready && heap == g_rt_crtheap) {
+		void *raw = n >= GH_BIG && g_big_chunk
+				    ? big_alloc(n + sizeof(GhHead))
+				    : gh_halloc(gh_serving_heap(), flags & HEAP_ZERO_MEMORY,
+						n + sizeof(GhHead));
+
+		if (raw) {
+			if ((flags & HEAP_ZERO_MEMORY) && n >= GH_BIG)
+				memset((char *)raw + sizeof(GhHead), 0, n);
+			InterlockedIncrement(&g_rt_served);
+			return give(raw, n);
+		}
+	}
+	InterlockedIncrement(&g_rt_passed);
+	return r_rt_halloc(heap, flags, n);
 }
 
 /* One import slot by name. Unlike savestate_patch_iat_named this records the
@@ -3004,9 +3066,19 @@ static const struct {
 	{ "_expand", (void *)gh_expand },
 	{ "_aligned_malloc", (void *)gh_aligned_malloc },
 	{ "_aligned_free", (void *)gh_aligned_free },
+	/* MSVCR100 exports operator new and delete, and DDPR's modules import them
+	 * along with _malloc_crt; ucrt games link them statically instead. */
+	{ "_malloc_crt", (void *)gh_malloc },
+	{ "??2@YAPAXI@Z", (void *)gh_malloc },
+	{ "??_U@YAPAXI@Z", (void *)gh_malloc },
+	{ "??3@YAXPAX@Z", (void *)gh_free },
+	{ "??_V@YAXPAX@Z", (void *)gh_free },
 };
 
-static const char *const kImpDlls[] = { "api-ms-win-crt-heap-l1-1-0.dll", "ucrtbase.dll" };
+/* The runtime whose imports are redirected: ucrtbase by default, MSVCR100 when
+ * the executable links it. Only the chosen runtime's names are patched, because
+ * a block we do not own is handed back to that runtime's free. */
+static const char *kImpDlls[] = { "api-ms-win-crt-heap-l1-1-0.dll", "ucrtbase.dll" };
 
 /* Our other wrappers sit in the game folder too and keep the runtime's heap.
  * This one does not: its GL object tables describe the same moment the game's
@@ -3361,6 +3433,7 @@ void gameheap_res_saved(void)
 	unsigned i;
 	LONG n = 0;
 
+	ct_report();
 	if (!g_res)
 		return;
 	for (i = 1; i < 65536; i++)
@@ -5423,11 +5496,42 @@ static void gh_steam_hook(HMODULE mod)
 		    NULL);
 }
 
+/* D3D9SW_XA27=1: a game that asks COM for XAudio2 2.7 gets the software engine
+ * instead. Its voices then live in xa2_sw's fixed arena and rewind with the
+ * game, where the real engine's heap moved between launches and its mixer
+ * thread called into state a restore had replaced. */
+HRESULT xa2_sw_create27(void **out);
+static HRESULT(WINAPI *r_xa_cocreate)(const GUID *, void *, DWORD, const GUID *, void **);
+static const GUID k_clsid_xa27 = { 0x5A508685, 0xA254, 0x4FBA,
+				   { 0x9B, 0x82, 0x9A, 0x24, 0xB0, 0x03, 0x06, 0xAF } };
+static const GUID k_clsid_xa27d = { 0xDB05EA35, 0x0329, 0x4D4B,
+				    { 0xA5, 0x3A, 0x6D, 0xEA, 0xD0, 0x3D, 0x38, 0x52 } };
+
+static HRESULT WINAPI gh_xa_cocreate(const GUID *clsid, void *outer, DWORD ctx, const GUID *iid,
+				     void **out)
+{
+	if (clsid && !outer && (!memcmp(clsid, &k_clsid_xa27, sizeof(GUID)) ||
+				!memcmp(clsid, &k_clsid_xa27d, sizeof(GUID))))
+		return xa2_sw_create27(out);
+	return r_xa_cocreate(clsid, outer, ctx, iid, out);
+}
+
+static void gh_xa27_hook(HMODULE mod, const WCHAR *path)
+{
+	if (mod == g_self || !gh_knob("D3D9SW_XA27", 0))
+		return;
+	if (gh_iat_swap(mod, "ole32.dll", "CoCreateInstance", (void *)gh_xa_cocreate,
+			(void **)&r_xa_cocreate) > 0)
+		ss_log("gameheap: %ls - CoCreateInstance(XAudio2 2.7) goes to xa2_sw\n", path);
+}
+
 static void gh_patch_module(HMODULE mod, const WCHAR *path)
 {
 	unsigned f, d;
 	int total = 0, unbound = 0;
 
+	gh_heapcreate_hook(mod);
+	ct_hook(mod, path);
 	if (!gh_is_game_module(mod, path))
 		return;
 	gh_physx_hook(mod, path);
@@ -5437,6 +5541,7 @@ static void gh_patch_module(HMODULE mod, const WCHAR *path)
 	gh_di_hook(mod, path);
 	gh_handle_hook(mod);
 	gh_steam_hook(mod);
+	gh_xa27_hook(mod, path);
 	if (g_vaj && mod != g_self) {
 		gh_iat_swap(mod, NULL, "VirtualAlloc", (void *)gh_va_j, NULL);
 		gh_iat_swap(mod, NULL, "VirtualFree", (void *)gh_vf_j, NULL);
@@ -5542,6 +5647,21 @@ int gameheap_import_mode(void)
 	return g_ready && g_imports;
 }
 
+/* MSVCR100's own heap when import mode redirected MSVCR100, else NULL. Unlike
+ * ucrtbase it is the game's alone, and it still holds what the game allocated
+ * before the redirect went in. */
+HANDLE gameheap_rt_heap(void)
+{
+	HMODULE m;
+	intptr_t(__cdecl * get)(void);
+
+	if (!g_ready || !g_imports || lstrcmpA(g_rt_name, "MSVCR100"))
+		return NULL;
+	m = GetModuleHandleA("MSVCR100.dll");
+	get = m ? (intptr_t(__cdecl *)(void))(void *)GetProcAddress(m, "_get_heap_handle") : NULL;
+	return get ? (HANDLE)get() : NULL;
+}
+
 /* The wrapper's own allocator (sw_malloc), served from the private heap in
  * import mode. Its usual home is a growable HeapCreate heap, and a growable heap
  * turns the low-fragmentation front end on, whose bookkeeping lives outside the
@@ -5607,6 +5727,11 @@ int gameheap_install_imports(void)
 		return 0;
 	g_early_on = 1;
 	g_imports = 1;
+	if (gh_exe_imports("MSVCR100.dll") && GetModuleHandleA("MSVCR100.dll")) {
+		ucrt = GetModuleHandleA("MSVCR100.dll");
+		kImpDlls[0] = kImpDlls[1] = "MSVCR100.dll";
+		g_rt_name = "MSVCR100";
+	}
 	if (!ucrt) {
 		ss_log("gameheap: import mode asked for, but ucrtbase is not loaded - "
 		       "this game does not take its runtime from a DLL\n");
@@ -5667,11 +5792,11 @@ int gameheap_install_imports(void)
 	floor += gh_iat_swap(ucrt, NULL, "HeapSize", (void *)gh_crt_heapsize,
 			     (void **)&r_crt_hsz) > 0;
 	if (floor != 3) {
-		ss_log("gameheap: only %d of ucrtbase's 3 heap imports could be "
+		ss_log("gameheap: only %d of %s's 3 heap imports could be "
 		       "patched - without the floor a block of ours freed inside the "
 		       "runtime would reach the process heap, so nothing is "
 		       "redirected\n",
-		       floor);
+		       floor, g_rt_name);
 		return 0;
 	}
 	g_ready = 1;
@@ -5695,14 +5820,26 @@ int gameheap_install_imports(void)
 		g_ntlog = 1;
 		nt_hooks_install(0);
 	}
+	if (gh_knob("D3D9SW_GHRT_ALLOC", 0) && (g_rt_crtheap = gameheap_rt_heap()) != NULL) {
+		int n = gh_iat_swap(ucrt, NULL, "HeapAlloc", (void *)gh_rt_heapalloc,
+				    (void **)&r_rt_halloc);
+
+		ss_log("gameheap: %s's own HeapAlloc on its heap %p %s\n", g_rt_name,
+		       (void *)g_rt_crtheap,
+		       n > 0 ? "now served from the private heap" : "could NOT be patched");
+		if (n <= 0)
+			g_rt_crtheap = NULL;
+	}
+	gh_heapcreate_arm();
+	ct_arm();
 	gh_patch_loaded();
 	reg = nt ? (LONG(NTAPI *)(ULONG, PVOID, PVOID, PVOID *))(void *)GetProcAddress(
 			   nt, "LdrRegisterDllNotification")
 		 : NULL;
 	ss_log("gameheap: IMPORT MODE - %lu module(s), %lu import slot(s) on a private "
-	       "heap at %p (%u MB); ucrtbase's HeapFree/HeapReAlloc/HeapSize are the "
+	       "heap at %p (%u MB); %s's HeapFree/HeapReAlloc/HeapSize are the "
 	       "floor; later loads %s\n",
-	       g_mods_patched, g_slots_patched, (void *)g_heap, g_pin_mb,
+	       g_mods_patched, g_slots_patched, (void *)g_heap, g_pin_mb, g_rt_name,
 	       (reg && reg(0, (PVOID)gh_dll_loaded, NULL, &cookie) >= 0)
 		       ? "patched as they arrive"
 		       : "NOT WATCHED - LdrRegisterDllNotification failed");
@@ -5877,6 +6014,486 @@ static HANDLE gh_create_heap(void)
 	g_heap_lo = (uintptr_t)h;
 	g_heap_hi = (uintptr_t)h + size;
 	return h;
+}
+
+/* D3D9SW_GHHEAPS=<address>: Windows heaps created by the game, its runtime or
+ * this DLL are put in fixed slots from that address, in creation order, instead
+ * of wherever HeapCreate puts them. A rewound heap that moves between launches
+ * is a region a cross-session load cannot restore. Each slot is
+ * D3D9SW_GHHEAPS_MB (default 8) and the heap cannot grow past it, which also
+ * keeps the low-fragmentation front end off. Every creation is logged with its
+ * caller, pinned or not. */
+#define GH_HP_SLOTS 6
+static HANDLE(WINAPI *r_heapcreate)(DWORD, SIZE_T, SIZE_T);
+static uintptr_t g_hp_base;
+static SIZE_T g_hp_slot;
+static LONG g_hp_n;
+
+static HANDLE WINAPI gh_heapcreate(DWORD opts, SIZE_T init, SIZE_T max)
+{
+	void *ret = __builtin_return_address(0);
+	HMODULE from = NULL;
+	WCHAR path[MAX_PATH];
+	const WCHAR *leaf;
+	HANDLE h = NULL;
+	int pin, i;
+
+	GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+				   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			   (LPCWSTR)ret, &from);
+	path[0] = 0;
+	if (from)
+		GetModuleFileNameW(from, path, MAX_PATH);
+	leaf = path;
+	for (i = 0; path[i]; i++)
+		if (path[i] == '\\' || path[i] == '/')
+			leaf = path + i + 1;
+	pin = g_hp_base && from &&
+	      (gh_is_game_module(from, path) || from == GetModuleHandleA("MSVCR100.dll"));
+	if (pin && p_RtlCreateHeap) {
+		LONG k = InterlockedIncrement(&g_hp_n) - 1;
+		uintptr_t at = g_hp_base + (uintptr_t)k * g_hp_slot;
+		SIZE_T commit = (init + 0xFFFu) & ~(SIZE_T)0xFFFu;
+
+		if (commit < 0x10000u)
+			commit = 0x10000u;
+		if (commit > g_hp_slot)
+			commit = g_hp_slot;
+		if (k < GH_HP_SLOTS)
+			h = (HANDLE)p_RtlCreateHeap(
+				opts & (HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS |
+					HEAP_CREATE_ENABLE_EXECUTE),
+				(void *)at, g_hp_slot, commit, NULL, NULL);
+		ss_log("gameheap: HeapCreate from %ls (%p) - %s slot %ld at %08lX%s\n", leaf,
+		       ret, h ? "PINNED in" : "could not pin in", (long)k,
+		       (unsigned long)at, h ? "" : ", left to Windows");
+	}
+	if (!h) {
+		h = r_heapcreate(opts, init, max);
+		if (!pin)
+			ss_log("gameheap: HeapCreate from %ls (%p) at %p, not pinned\n",
+			       path[0] ? leaf : L"?", ret, (void *)h);
+	}
+	return h;
+}
+
+static void gh_heapcreate_hook(HMODULE mod)
+{
+	if (g_hp_base && mod)
+		gh_iat_swap(mod, NULL, "HeapCreate", (void *)gh_heapcreate,
+			    (void **)&r_heapcreate);
+}
+
+static void gh_heapcreate_arm(void)
+{
+	HMODULE nt = GetModuleHandleA("ntdll.dll");
+
+	static const char *const rts[] = { "msvcrt.dll", "MSVCR100.dll", "MSVCP100.dll" };
+	unsigned r;
+
+	for (r = 0; r < sizeof(rts) / sizeof(rts[0]); r++) {
+		HMODULE m = GetModuleHandleA(rts[r]);
+		intptr_t(__cdecl * get)(void) =
+			m ? (intptr_t(__cdecl *)(void))(void *)GetProcAddress(m, "_get_heap_handle")
+			  : NULL;
+
+		ss_log("gameheap: before us, %s's heap is %p (process heap %p)\n", rts[r],
+		       get ? (void *)get() : NULL, (void *)GetProcessHeap());
+	}
+	g_hp_base = gh_knob("D3D9SW_GHHEAPS", 0);
+	g_hp_slot = (SIZE_T)gh_knob("D3D9SW_GHHEAPS_MB", 8) << 20;
+	if (!p_RtlCreateHeap && nt)
+		p_RtlCreateHeap = (PVOID(NTAPI *)(ULONG, PVOID, SIZE_T, SIZE_T, PVOID,
+						  PVOID))GetProcAddress(nt, "RtlCreateHeap");
+	if (!g_hp_base || !g_hp_slot) {
+		g_hp_base = 0;
+		return;
+	}
+	/* Reserved whole and now, before anything else in this DLL allocates, so a
+	 * heap created late (ours is made at the first save) still finds its slot. */
+	{
+		int k;
+
+		for (k = 0; k < GH_HP_SLOTS; k++) {
+			void *at = (void *)(g_hp_base + (uintptr_t)k * g_hp_slot);
+
+			if (VirtualAlloc(at, g_hp_slot, MEM_RESERVE, PAGE_READWRITE) != at) {
+				ss_log("gameheap: cannot reserve heap slot %d at %p (error "
+				       "%lu) - heaps are left to Windows\n",
+				       k, at, GetLastError());
+				while (k-- > 0)
+					VirtualFree((void *)(g_hp_base + (uintptr_t)k * g_hp_slot), 0,
+						    MEM_RELEASE);
+				g_hp_base = 0;
+				return;
+			}
+		}
+	}
+	ss_log("gameheap: heaps from the game, its runtime and this DLL pinned in "
+	       "%d slot(s) of %lu MB from %08lX\n",
+	       GH_HP_SLOTS, (unsigned long)(g_hp_slot >> 20), (unsigned long)g_hp_base);
+}
+
+/* D3D9SW_CRTTAP: the msvcrt allocator imports of the Microsoft DLLs the game
+ * calls - D3DX, its shader compiler, XAudio2 2.7. msvcrt's heap is made before
+ * this DLL loads and lands somewhere else every launch. 1 counts every call per
+ * module and passes it through; 2 also serves them from a heap at
+ * D3D9SW_CRTTAP_AT (D3D9SW_CRTTAP_MB, default 32), and a block it did not make
+ * goes back to msvcrt. The tally is logged at every save. */
+enum { CT_MALLOC, CT_CALLOC, CT_REALLOC, CT_FREE, CT_STRDUP, CT_NEW, CT_DELETE, CT_AMALLOC,
+       CT_AFREE, CT_NFN };
+static const char *const kCtFn[CT_NFN] = { "malloc",	   "calloc",	     "realloc",
+					   "free",	   "_strdup",	     "??2@YAPAXI@Z",
+					   "??3@YAXPAX@Z", "_aligned_malloc", "_aligned_free" };
+static const char *const kCtMod[] = { "d3dx9_43.dll", "d3dcompiler_43.dll", "XAudio2_7.dll" };
+#define CT_NMOD 3
+
+typedef struct {
+	uintptr_t lo, hi;
+	volatile LONG calls[CT_NFN];
+	volatile LONG live, bytes, foreign, spill;
+} CtMod;
+
+static CtMod g_ct[CT_NMOD + 1]; /* the last row is any other caller */
+static int g_ct_mode;
+static HANDLE g_ct_heap;
+static uintptr_t g_ct_lo, g_ct_hi;
+static void *(__cdecl *rc_malloc)(size_t);
+static void *(__cdecl *rc_calloc)(size_t, size_t);
+static void *(__cdecl *rc_realloc)(void *, size_t);
+static void(__cdecl *rc_free)(void *);
+static size_t(__cdecl *rc_msize)(void *);
+static void *(__cdecl *rc_new)(size_t);
+static void *(__cdecl *rc_amalloc)(size_t, size_t);
+static void(__cdecl *rc_afree)(void *);
+
+static CtMod *ct_mod(void *ra)
+{
+	int i;
+
+	for (i = 0; i < CT_NMOD; i++)
+		if ((uintptr_t)ra >= g_ct[i].lo && (uintptr_t)ra < g_ct[i].hi)
+			return &g_ct[i];
+	return &g_ct[CT_NMOD];
+}
+
+static int ct_ours(const void *p)
+{
+	return (uintptr_t)p >= g_ct_lo && (uintptr_t)p < g_ct_hi;
+}
+
+static void *ct_alloc(CtMod *m, size_t n, int zero)
+{
+	void *p;
+
+	if (g_ct_heap) {
+		p = HeapAlloc(g_ct_heap, zero ? HEAP_ZERO_MEMORY : 0, n ? n : 1);
+		if (p) {
+			InterlockedIncrement(&m->live);
+			InterlockedExchangeAdd(&m->bytes, (LONG)HeapSize(g_ct_heap, 0, p));
+			return p;
+		}
+		InterlockedIncrement(&m->spill);
+	}
+	p = zero ? rc_calloc(1, n) : rc_malloc(n);
+	if (p) {
+		InterlockedIncrement(&m->live);
+		InterlockedExchangeAdd(&m->bytes, (LONG)rc_msize(p));
+	}
+	return p;
+}
+
+static void ct_release(CtMod *m, void *p)
+{
+	if (!p)
+		return;
+	InterlockedDecrement(&m->live);
+	if (ct_ours(p)) {
+		InterlockedExchangeAdd(&m->bytes, -(LONG)HeapSize(g_ct_heap, 0, p));
+		HeapFree(g_ct_heap, 0, p);
+		return;
+	}
+	if (g_ct_heap)
+		InterlockedIncrement(&m->foreign);
+	InterlockedExchangeAdd(&m->bytes, -(LONG)rc_msize(p));
+	rc_free(p);
+}
+
+#define CT_ENTER(fn)                                                \
+	CtMod *m = ct_mod(__builtin_return_address(0)); \
+	InterlockedIncrement(&m->calls[fn])
+
+static void *__cdecl ct_malloc(size_t n)
+{
+	CT_ENTER(CT_MALLOC);
+	return ct_alloc(m, n, 0);
+}
+
+static void *__cdecl ct_calloc(size_t c, size_t s)
+{
+	CT_ENTER(CT_CALLOC);
+	if (s && c > (size_t)-1 / s)
+		return NULL;
+	return ct_alloc(m, c * s, 1);
+}
+
+static void *__cdecl ct_new(size_t n)
+{
+	void *p;
+	CT_ENTER(CT_NEW);
+	p = ct_alloc(m, n, 0);
+	return p ? p : rc_new(n);
+}
+
+static void __cdecl ct_free(void *p)
+{
+	CT_ENTER(CT_FREE);
+	ct_release(m, p);
+}
+
+static void __cdecl ct_delete(void *p)
+{
+	CT_ENTER(CT_DELETE);
+	ct_release(m, p);
+}
+
+static char *__cdecl ct_strdup(const char *s)
+{
+	size_t n;
+	char *p;
+	CT_ENTER(CT_STRDUP);
+	if (!s)
+		return NULL;
+	n = (size_t)lstrlenA(s) + 1;
+	p = (char *)ct_alloc(m, n, 0);
+	if (p)
+		memcpy(p, s, n);
+	return p;
+}
+
+static void *__cdecl ct_realloc(void *p, size_t n)
+{
+	size_t o;
+	void *q;
+	CT_ENTER(CT_REALLOC);
+	if (!p)
+		return ct_alloc(m, n, 0);
+	if (!n) {
+		ct_release(m, p);
+		return NULL;
+	}
+	if (ct_ours(p)) {
+		o = HeapSize(g_ct_heap, 0, p);
+		q = HeapReAlloc(g_ct_heap, 0, p, n);
+		if (q) {
+			InterlockedExchangeAdd(&m->bytes, (LONG)HeapSize(g_ct_heap, 0, q) - (LONG)o);
+			return q;
+		}
+	} else if (g_ct_heap) {
+		o = rc_msize(p);
+	} else {
+		o = rc_msize(p);
+		q = rc_realloc(p, n);
+		if (q)
+			InterlockedExchangeAdd(&m->bytes, (LONG)rc_msize(q) - (LONG)o);
+		return q;
+	}
+	q = ct_alloc(m, n, 0);
+	if (!q)
+		return NULL;
+	memcpy(q, p, o < n ? o : n);
+	ct_release(m, p);
+	return q;
+}
+
+static void *__cdecl ct_amalloc(size_t n, size_t a)
+{
+	void *p;
+	CT_ENTER(CT_AMALLOC);
+	if (g_ct_heap && a && !(a & (a - 1))) {
+		void *raw;
+
+		if (a < sizeof(void *))
+			a = sizeof(void *);
+		raw = HeapAlloc(g_ct_heap, 0, n + a + sizeof(void *));
+		if (raw) {
+			uintptr_t u = ((uintptr_t)raw + sizeof(void *) + a - 1) & ~(uintptr_t)(a - 1);
+
+			((void **)u)[-1] = raw;
+			InterlockedIncrement(&m->live);
+			InterlockedExchangeAdd(&m->bytes, (LONG)HeapSize(g_ct_heap, 0, raw));
+			return (void *)u;
+		}
+		InterlockedIncrement(&m->spill);
+	}
+	p = rc_amalloc(n, a);
+	if (p)
+		InterlockedIncrement(&m->live);
+	return p;
+}
+
+static void __cdecl ct_afree(void *p)
+{
+	CT_ENTER(CT_AFREE);
+	if (!p)
+		return;
+	InterlockedDecrement(&m->live);
+	if (ct_ours(p)) {
+		void *raw = ((void **)p)[-1];
+
+		InterlockedExchangeAdd(&m->bytes, -(LONG)HeapSize(g_ct_heap, 0, raw));
+		HeapFree(g_ct_heap, 0, raw);
+		return;
+	}
+	if (g_ct_heap)
+		InterlockedIncrement(&m->foreign);
+	rc_afree(p);
+}
+
+static void ct_arm(void)
+{
+	HMODULE crt = GetModuleHandleA("msvcrt.dll");
+	uintptr_t at;
+	SIZE_T size;
+
+	g_ct_mode = (int)gh_knob("D3D9SW_CRTTAP", 0);
+	if (!g_ct_mode)
+		return;
+	if (crt) {
+		rc_malloc = (void *(__cdecl *)(size_t))(void *)GetProcAddress(crt, "malloc");
+		rc_calloc = (void *(__cdecl *)(size_t, size_t))(void *)GetProcAddress(crt, "calloc");
+		rc_realloc = (void *(__cdecl *)(void *, size_t))(void *)GetProcAddress(crt, "realloc");
+		rc_free = (void(__cdecl *)(void *))(void *)GetProcAddress(crt, "free");
+		rc_msize = (size_t(__cdecl *)(void *))(void *)GetProcAddress(crt, "_msize");
+		rc_new = (void *(__cdecl *)(size_t))(void *)GetProcAddress(crt, "??2@YAPAXI@Z");
+		rc_amalloc = (void *(__cdecl *)(size_t, size_t))(void *)GetProcAddress(
+			crt, "_aligned_malloc");
+		rc_afree = (void(__cdecl *)(void *))(void *)GetProcAddress(crt, "_aligned_free");
+	}
+	if (!rc_malloc || !rc_calloc || !rc_realloc || !rc_free || !rc_msize || !rc_new ||
+	    !rc_amalloc || !rc_afree) {
+		ss_log("gameheap: crttap off - msvcrt.dll or one of its allocators is missing\n");
+		g_ct_mode = 0;
+		return;
+	}
+	at = gh_knob("D3D9SW_CRTTAP_AT", 0);
+	size = (SIZE_T)gh_knob("D3D9SW_CRTTAP_MB", 32) << 20;
+	if (g_ct_mode >= 2 && p_RtlCreateHeap) {
+		DWORD err = 0;
+
+		/* Without an address of its own it takes the next D3D9SW_GHHEAPS
+		 * slot, already reserved and in the same order every launch. */
+		if (!at && g_hp_base && g_hp_n < GH_HP_SLOTS) {
+			LONG k = InterlockedIncrement(&g_hp_n) - 1;
+
+			at = g_hp_base + (uintptr_t)k * g_hp_slot;
+			size = g_hp_slot;
+			g_ct_heap = (HANDLE)p_RtlCreateHeap(0, (void *)at, size, 0x10000, NULL,
+							    NULL);
+			if (!g_ct_heap)
+				err = GetLastError();
+		} else if (at) {
+			if (VirtualAlloc((void *)at, size, MEM_RESERVE, PAGE_READWRITE) == (void *)at) {
+				g_ct_heap = (HANDLE)p_RtlCreateHeap(0, (void *)at, size, 0x10000, NULL,
+								    NULL);
+				if (!g_ct_heap) {
+					err = GetLastError();
+					VirtualFree((void *)at, 0, MEM_RELEASE);
+				}
+			} else {
+				err = GetLastError();
+			}
+		}
+		if (g_ct_heap) {
+			g_ct_lo = at;
+			g_ct_hi = at + size;
+		} else {
+			ss_log("gameheap: crttap heap not made at %08lX, error %lu\n",
+			       (unsigned long)at, err);
+		}
+	}
+	ss_log("gameheap: crttap %d - msvcrt allocators of d3dx9_43, d3dcompiler_43 and "
+	       "XAudio2_7 %s\n",
+	       g_ct_mode,
+	       g_ct_heap ? "served from our heap" : "counted and passed through to msvcrt");
+	if (g_ct_mode >= 2)
+		ss_log("gameheap: crttap heap %s at %08lX (%lu MB)\n",
+		       g_ct_heap ? "made" : "NOT made", (unsigned long)at,
+		       (unsigned long)(size >> 20));
+}
+
+static void ct_hook(HMODULE mod, const WCHAR *path)
+{
+	const WCHAR *leaf = path;
+	char base[64];
+	int i, k, n = 0;
+
+	if (!g_ct_mode || !mod || !path)
+		return;
+	for (i = 0; path[i]; i++)
+		if (path[i] == '\\' || path[i] == '/')
+			leaf = path + i + 1;
+	for (i = 0; leaf[i] && i < (int)sizeof(base) - 1; i++)
+		base[i] = (char)leaf[i];
+	base[i] = 0;
+	for (k = 0; k < CT_NMOD; k++)
+		if (!lstrcmpiA(base, kCtMod[k]))
+			break;
+	if (k == CT_NMOD)
+		return;
+	{
+		IMAGE_NT_HEADERS *nt =
+			(IMAGE_NT_HEADERS *)((unsigned char *)mod +
+					     ((IMAGE_DOS_HEADER *)mod)->e_lfanew);
+
+		g_ct[k].lo = (uintptr_t)mod;
+		g_ct[k].hi = (uintptr_t)mod + nt->OptionalHeader.SizeOfImage;
+	}
+	{
+		void *const ours[CT_NFN] = { (void *)ct_malloc, (void *)ct_calloc,
+					     (void *)ct_realloc, (void *)ct_free,
+					     (void *)ct_strdup, (void *)ct_new,
+					     (void *)ct_delete, (void *)ct_amalloc,
+					     (void *)ct_afree };
+
+		for (i = 0; i < CT_NFN; i++) {
+			int r = gh_iat_swap(mod, "msvcrt.dll", kCtFn[i], ours[i], NULL);
+
+			if (r > 0)
+				n += r;
+		}
+	}
+	ss_log("gameheap: crttap on %s at %p - %d import slot(s)\n", kCtMod[k], (void *)mod, n);
+}
+
+static void ct_report(void)
+{
+	int k, f;
+	char line[512];
+
+	if (g_rt_crtheap)
+		ss_log("  runtime HeapAlloc: %ld served from the private heap, %ld passed to "
+		       "the runtime's heap\n",
+		       (long)g_rt_served, (long)g_rt_passed);
+	if (!g_ct_mode)
+		return;
+	ss_log("  crttap: msvcrt allocations by the Microsoft DLLs since launch%s\n",
+	       g_ct_heap ? "" : " (passed through)");
+	for (k = 0; k <= CT_NMOD; k++) {
+		CtMod *m = &g_ct[k];
+		int o = 0;
+
+		if (k < CT_NMOD && !m->lo)
+			continue;
+		for (f = 0; f < CT_NFN; f++)
+			if (m->calls[f])
+				o += wsprintfA(line + o, " %s %ld", kCtFn[f], (long)m->calls[f]);
+		if (!o)
+			lstrcpyA(line, " no calls");
+		ss_log("    %-18s live %ld, %ld KB; freed elsewhere-made %ld, spilled %ld;%s\n",
+		       k < CT_NMOD ? kCtMod[k] : "other caller", (long)m->live,
+		       (long)m->bytes / 1024, (long)m->foreign, (long)m->spill, line);
+	}
 }
 
 /* D3D9SW_LAA_FALSE - the "own a region the game does not know about" experiment.

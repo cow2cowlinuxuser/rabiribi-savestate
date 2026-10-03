@@ -1128,7 +1128,7 @@ static void prof_frame(void)
 					   "present_ms,flushes,tris,"
 					   "binned,area_px,bbox_px,tw,th,"
 					   "m_tex,m_bilin,m_over,m_add,m_blendoth,m_atest,"
-					   "m_ztest,m_flat,m_linv\n");
+					   "m_ztest,m_flat,m_linv,guard_ms,audio_ms\n");
 			}
 			QueryPerformanceFrequency(&fq);
 			QueryPerformanceCounter(&prev);
@@ -1158,9 +1158,11 @@ static void prof_frame(void)
 		fprintf(f, "%u,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%.0f,%.0f,%d,%d", frame,
 			total_ms, raster_ms, total_ms - raster_ms, cpu_ms, g_present_ms,
 			flushes, tris, bins, area, bbox, tw, th);
+		double guard_ms, audio_ms;
 		for (i = 0; i < 9; i++)
 			fprintf(f, ",%.0f", mix[i]);
-		fprintf(f, "\n");
+		savestate_perf_take(&guard_ms, &audio_ms);
+		fprintf(f, ",%.3f,%.3f\n", guard_ms, audio_ms);
 	}
 	if ((frame & 63) == 0)
 		fflush(f);
@@ -6727,6 +6729,19 @@ IDirect3D9 *WINAPI Direct3DCreate9(UINT sdk)
 	d->iface.lpVtbl = &kD3DVtbl;
 	d->ref = 1;
 	return &d->iface;
+}
+
+int gameheap_install_imports(void);
+
+/* At attach, not at Direct3DCreate9: the game imports this DLL, so its modules
+ * are bound but have not allocated yet. Does nothing unless D3D9SW_GAMEHEAP=2. */
+BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
+{
+	(void)inst;
+	(void)reserved;
+	if (reason == DLL_PROCESS_ATTACH)
+		gameheap_install_imports();
+	return TRUE;
 }
 
 /* test.exe --dump uses this to read pixels without going through COM. */
