@@ -1,0 +1,4 @@
+{
+  "name": "rabiribi-savestate (Linux/zig/Wine)",
+  "install": "./.cursor/install.sh"
+}
