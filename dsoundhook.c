@@ -142,7 +142,7 @@ typedef struct {
 	void *p[DSH_MAX];
 } PresentSet;
 
-static PresentSet *g_present;
+static PresentSet *g_present SS_PRESENT;
 
 static int present_has(void *p)
 {
@@ -240,7 +240,7 @@ static void where(void *a, char *out, int n)
  * dsh_save reads every buffer's cursor through the same vtable slot the game
  * uses, so without this the loudest caller of GetCurrentPosition would be us,
  * and the census would report the observer instead of the subject. */
-static HMODULE g_self_mod;
+static HMODULE g_self_mod SS_PRESENT;
 
 static HMODULE self_mod(void)
 {
@@ -1056,6 +1056,7 @@ void dsh_install(void)
 		return;
 	}
 	InitializeCriticalSection(&g_cs);
+	savestate_own_cs(&g_cs);
 	vtbl = *(void ***)dev;
 	g_real_create = (PFN_CREATEBUF)slot_swap(vtbl, DS_CREATE_BUFFER, (void *)hook_create);
 	g_real_dup = (PFN_DUP)slot_swap(vtbl, DS_DUPLICATE, (void *)hook_dup);

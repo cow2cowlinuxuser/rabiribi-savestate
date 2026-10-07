@@ -1124,18 +1124,11 @@ void xa2_sw_resume(void)
 {
 	if (!g_out_live)
 		return;
-	/* After a load, the blocks still queued in waveOut are up to 93 ms of the
-	 * moment before it, and restarting would play them ahead of the restored
-	 * audio. Reset hands them all back as done, and the mixer refills from
-	 * the restored voices. Only when we paused it ourselves: a reset waits on
-	 * wineserver just as a pause does. */
-	if (g_wo_discard && g_wo_paused) {
-		int i;
-
-		waveOutReset(g_wo);
-		for (i = 0; i < OUT_BLOCKS; i++)
-			g_out->hdr[i].dwFlags |= WHDR_DONE;
-	}
+	/* After a load the blocks still queued in waveOut are up to 93 ms of the
+	 * moment before it, and they play out ahead of the restored audio. A
+	 * waveOutReset would drop them, but on Windows it runs as wdmaud's
+	 * CResetAudioJob, and that job faulted inside AudioSes after cross-session
+	 * loads - twice. 93 ms of stale sound is the cheaper side. */
 	g_wo_discard = 0;
 	g_wo_paused = 0;
 	waveOutRestart(g_wo);
@@ -1176,7 +1169,7 @@ void xa2_sw_restored(void)
 			carried++;
 	}
 	if (savestate_last_load_foreign()) {
-		int ok = 0, changed = 0, gone = 0, said = 0, k;
+		int ok = 0, changed = 0, gone = 0, said = 0, kept = 0, k;
 
 		EnterCriticalSection(&g_cs);
 		for (i = 0; i < g_vn; i++) {
@@ -1194,6 +1187,16 @@ void xa2_sw_restored(void)
 				if (readable &&
 				    pcm_sum(b->pAudioData, b->AudioBytes) == v->qsum[at]) {
 					ok++;
+					continue;
+				}
+				/* A game that decodes ahead into a buffer it already
+				 * submitted moves the sum on its own; bytes the load
+				 * wrote are the save's, so they play. */
+				if (readable && savestate_addr_restored(b->pAudioData) == 1 &&
+				    savestate_addr_restored((const BYTE *)b->pAudioData +
+							    b->AudioBytes - 1) == 1) {
+					v->qsum[at] = pcm_sum(b->pAudioData, b->AudioBytes);
+					kept++;
 					continue;
 				}
 				if (readable)
@@ -1219,9 +1222,10 @@ void xa2_sw_restored(void)
 		g_sub_audit = 512;
 		g_sub_ok = g_sub_held = g_sub_outside = g_sub_said = 0;
 		ss_log("xa2_sw: queued PCM after a load from another process - %d buffer(s) "
-		       "hold what was submitted, %d hold other bytes, %d unreadable. The last "
-		       "two play as silence\n",
-		       ok, changed, gone);
+		       "hold what was submitted, %d changed since but were written by the "
+		       "load and play, %d hold other bytes, %d unreadable. The last two play "
+		       "as silence\n",
+		       ok, kept, changed, gone);
 	}
 	ss_log("xa2_sw: restore generation %ld - %d voice(s) alive, %d carried across "
 	       "this restore%s\n",
@@ -1435,6 +1439,14 @@ static void WINAPI V_DestroyVoice(SwVoice *v)
 {
 	g_calls[M_DESTROY]++;
 	tr("DestroyVoice v=%08lX", (unsigned long)(UINT_PTR)v);
+	if (!v) {
+		static volatile LONG said;
+
+		if (!InterlockedExchange(&said, 1))
+			ss_log("xa2_sw: DestroyVoice on a null voice, from %p - ignored\n",
+			       __builtin_return_address(0));
+		return;
+	}
 	EnterCriticalSection(&g_cs);
 	/* Marked dead, never reused. An address that meant one sound at save time
 	 * and a different one at restore time is the entity-pool problem in
@@ -2075,6 +2087,7 @@ static HRESULT engine_new(void **out, UINT32 flags, int v27)
 			g_now = now;
 		}
 		InitializeCriticalSection(&g_cs);
+		savestate_own_cs(&g_cs);
 		QueryPerformanceFrequency(&f);
 		g_qpf = f.QuadPart ? f.QuadPart : 1;
 		vt_init();

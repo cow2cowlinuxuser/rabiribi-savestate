@@ -695,6 +695,7 @@ __declspec(dllexport) HRESULT WINAPI ds_sw_create(const GUID *dev, void **out, v
 	*out = NULL;
 	if (!g_ready) {
 		InitializeCriticalSection(&g_cs);
+		savestate_own_cs(&g_cs);
 		QueryPerformanceFrequency(&f);
 		g_qpf = f.QuadPart ? f.QuadPart : 1;
 		vt_init();

@@ -23,6 +23,9 @@
  * vector kernels are happier with. */
 void *sw_malloc(size_t n);
 void *sw_calloc(size_t count, size_t size);
+void *sw_calloc_present(size_t count, size_t size);
+/* For bytes that never hold a pointer; a cross-machine load leaves them alone. */
+void *sw_calloc_plain(size_t count, size_t size);
 void *sw_realloc(void *p, size_t n);
 void sw_free(void *p);
 HANDLE sw_heap(void);

@@ -12,6 +12,7 @@
 /* Redirects the game's clock and event imports. Idempotent, and called at the
  * first D3D entry point so events created during start-up are still seen. */
 void savestate_hooks_install(void);
+void savestate_reserve_home(void);
 
 /* Records a redirection we have installed, so the inventory can report what this
  * wrapper is in a position to observe. Declared here because the hooks are
@@ -25,6 +26,13 @@ int savestate_slot_valid(int slot);
 /* Cheap, call once per frame. Reclaims addresses the snapshot still needs
  * before another allocator can take them. */
 void savestate_guard(void);
+/* 1 once after any load: the backbuffer still holds what was drawn before it,
+ * and the game's device objects may not be the ones it saved with. */
+int savestate_merged_clear(void);
+/* A D3D9SW_ knob from the cfg beside the game, or def. */
+int savestate_knob(const char *name, int def);
+/* 1 once after a save. */
+int savestate_saved_since(void);
 /* Milliseconds spent inside savestate_guard, and inside the audio drain it
  * makes, since the last call. Both are reset by reading them. */
 void savestate_perf_take(double *guard_ms, double *audio_ms);
@@ -69,6 +77,18 @@ double savestate_live_ms(void);
  * Register before the first save. Ranges added here are permanent and survive
  * every later rebuild of the exclusion list. */
 void savestate_exclude(void *p, size_t bytes);
+
+/* A global that belongs to this process rather than to the game's moment: a
+ * pointer to an excluded or OS-placed block, a handle, a thread. These sit in a
+ * section of their own that a restore never writes, because from another launch
+ * the saved values are the old process's - the rest of this image rewinds. */
+#define SS_PRESENT __attribute__((section(".sspres")))
+
+/* A lock in this DLL's own data. It rewinds with the threads that hold it, but
+ * its debug link and wait handle belong to the process, so a load from another
+ * launch repairs them the way it repairs the game's. Call after initialising. */
+struct _RTL_CRITICAL_SECTION;
+void savestate_own_cs(struct _RTL_CRITICAL_SECTION *cs);
 
 /* Zeroed memory held in the present, allocated once per id for the life of the
  * process. The wrapper's own globals rewind with the game, so a static "already
@@ -217,6 +237,10 @@ unsigned gameheap_busy_snapshot(void);
 unsigned gameheap_busy_saved_count(void);
 int gameheap_busy_saved_at(unsigned i, void **head, size_t *total);
 void gameheap_busy_rewind(void);
+
+/* The texture pack this launch reads: contents and bytes. A save records it as
+ * an expectation; a load from a launch with a smaller pack paints magenta. */
+void savestate_note_texpack(unsigned contents, unsigned long long bytes);
 
 /* Save slots held at once. Each slot's captured BYTES live in its own section or
  * slotfile (disk-backed under D3D9SW_SLOTFILE=1), so a slot costs ~1.8 MB of

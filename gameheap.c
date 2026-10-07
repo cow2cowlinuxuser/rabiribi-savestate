@@ -50,6 +50,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "savestate.h"
+#include "logdir.h"
 
 void savestate_log_line(const char *s);
 int savestate_patch_iat(HMODULE mod, void *from, void *to);
@@ -137,7 +138,7 @@ typedef struct {
 	size_t size;
 } GhHead;
 
-static HANDLE g_heap;
+static HANDLE g_heap SS_PRESENT;
 static CRITICAL_SECTION g_cs;
 static int g_ready;
 
@@ -150,7 +151,7 @@ static volatile LONG g_nreg;
  * exe there is no space above 2 GB, so this competes with the game and is
  * EXPECTED to crash - that crash is the measurement. Reserved once and never
  * per-block freed, so it snapshots atomically like the arena. */
-static HANDLE g_laa_heap;
+static HANDLE g_laa_heap SS_PRESENT;
 static int g_laa_on;
 static unsigned g_laa_mb;
 static uintptr_t g_laa_lo, g_laa_hi;
@@ -214,6 +215,7 @@ typedef struct {
 	unsigned off; /* from the heap base, or ~0 when it is not in our heap */
 	unsigned site; /* the code that asked, as an RVA, or ~0 */
 	unsigned ord;  /* how many that site had already asked for, or ~0 */
+	unsigned tid;
 } GhTr;
 
 static GhTr *g_tr;
@@ -238,6 +240,7 @@ static void gh_trace_at(unsigned op, size_t n, const void *u, unsigned site, uns
 			      : 0xFFFFFFFFu;
 	g_tr[i].site = site;
 	g_tr[i].ord = ord;
+	g_tr[i].tid = GetCurrentThreadId();
 }
 
 static void gh_trace(unsigned op, size_t n, const void *u)
@@ -307,6 +310,40 @@ static GhTag *g_tag;
 static GhSite *g_site;
 static uintptr_t g_exe;	    /* so a site is an RVA and survives relocation */
 static volatile LONG g_tag_full, g_site_full, g_tag_congested;
+
+/* D3D9SW_GHTRACE=N. Reserved before the first allocation is served, because a
+ * trace that starts late starts after the layout it is meant to explain has
+ * already been decided; the tag tables likewise, or they cannot name the
+ * long-lived blocks allocated first. */
+static void gh_trace_arm(void)
+{
+	char v[16];
+	unsigned cap, k;
+	long want = 0;
+
+	if (g_tr)
+		return;
+	cap = savestate_getenv("D3D9SW_GHTRACE", v, sizeof(v));
+	for (k = 0; k < cap && v[k] >= '0' && v[k] <= '9'; k++)
+		want = want * 10 + (v[k] - '0');
+	if (want <= 0)
+		return;
+	g_tr = (GhTr *)VirtualAlloc(NULL, (SIZE_T)want * sizeof(GhTr), MEM_COMMIT | MEM_RESERVE,
+				    PAGE_READWRITE);
+	g_tr_cap = g_tr ? (LONG)want : 0;
+	ss_log("gameheap: tracing the first %ld allocator operation(s) into gh_trace.txt%s\n",
+	       want, g_tr ? "" : " - RESERVATION FAILED, tracing off");
+	if (!g_tr)
+		return;
+	g_exe = (uintptr_t)GetModuleHandleA(NULL);
+	g_tag = (GhTag *)VirtualAlloc(NULL, GH_TAG_SLOTS * sizeof(GhTag), MEM_COMMIT | MEM_RESERVE,
+				      PAGE_READWRITE);
+	g_site = (GhSite *)VirtualAlloc(NULL, GH_SITE_SLOTS * sizeof(GhSite),
+					MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	ss_log("gameheap: naming blocks by (call site, ordinal) against image base %08lX%s\n",
+	       (unsigned long)g_exe,
+	       (g_tag && g_site) ? "" : " - TABLE RESERVATION FAILED, blocks will be unnamed");
+}
 
 static unsigned gh_mix(unsigned x)
 {
@@ -457,9 +494,9 @@ typedef struct {
 	size_t total;
 } GhBusySnap;
 
-static GhBusy *g_busy;
+static GhBusy *g_busy SS_PRESENT;
 static volatile LONG g_busy_n, g_busy_full, g_busy_congested;
-static GhBusySnap *g_busy_snap;
+static GhBusySnap *g_busy_snap SS_PRESENT;
 static unsigned g_busy_snap_n, g_busy_snap_cap;
 
 static void gh_busy_put(const void *u, size_t n)
@@ -630,17 +667,31 @@ static int gho_init(void *base, SIZE_T size)
 	return 1;
 }
 
-static void *gho_alloc(SIZE_T n, int zero)
+static struct GhPlace *g_place;
+static unsigned gl_my_role(void);
+static GhOwnBlk *gp_take(unsigned role, unsigned site, int c, SIZE_T cap, unsigned *chute);
+static int gp_give(GhOwnBlk *b, void *p);
+
+static void *gho_alloc(SIZE_T n, int zero, unsigned site)
 {
 	SIZE_T cap;
 	int c = gho_class(n, &cap);
+	unsigned chute = 0, role = 0;
 	GhOwnBlk *b;
 
 	if (c >= GHO_NCLASS)
 		return NULL;
+	if (g_place)
+		role = gl_my_role();
 	gho_lock();
-	b = (GhOwnBlk *)g_own->free[c];
-	if (b) {
+	if (g_place) {
+		b = gp_take(role, site, c, cap, &chute);
+		if (!b) {
+			g_own->nfull++;
+			gho_unlock();
+			return NULL;
+		}
+	} else if ((b = (GhOwnBlk *)g_own->free[c]) != NULL) {
 		g_own->free[c] = *(void **)(b + 1);
 	} else {
 		uintptr_t need = sizeof(GhOwnBlk) + cap, at = g_own->top;
@@ -663,7 +714,7 @@ static void *gho_alloc(SIZE_T n, int zero)
 		b = (GhOwnBlk *)at;
 	}
 	b->magic = GHO_MAGIC ^ (uintptr_t)b;
-	b->cls = (uintptr_t)c;
+	b->cls = (uintptr_t)c | ((uintptr_t)chute << 8);
 	g_own->nalloc++;
 	gho_unlock();
 	if (zero)
@@ -675,7 +726,7 @@ static GhOwnBlk *gho_blk(void *p)
 {
 	GhOwnBlk *b = (GhOwnBlk *)p - 1;
 
-	if (!p || b->magic != (GHO_MAGIC ^ (uintptr_t)b) || b->cls >= GHO_NCLASS) {
+	if (!p || b->magic != (GHO_MAGIC ^ (uintptr_t)b) || (b->cls & 0xFF) >= GHO_NCLASS) {
 		if (g_own)
 			InterlockedIncrement((volatile LONG *)&g_own->nbad);
 		return NULL;
@@ -691,8 +742,10 @@ static BOOL gho_free(void *p)
 		return FALSE;
 	gho_lock();
 	b->magic = 0;
-	*(void **)p = g_own->free[b->cls];
-	g_own->free[b->cls] = b;
+	if (!gp_give(b, p)) {
+		*(void **)p = g_own->free[b->cls & 0xFF];
+		g_own->free[b->cls & 0xFF] = b;
+	}
 	g_own->nfree++;
 	gho_unlock();
 	return TRUE;
@@ -704,13 +757,661 @@ static void *gho_realloc(void *p, SIZE_T n)
 {
 	GhOwnBlk *b = gho_blk(p);
 
-	return b && n <= gho_cap((int)b->cls) ? p : NULL;
+	return b && n <= gho_cap((int)(b->cls & 0xFF)) ? p : NULL;
 }
 
-static LPVOID gh_halloc(HANDLE h, DWORD flags, SIZE_T n)
+/* D3D9SW_GHLEDGER=1: the arena keeps a record of every live block - who asked
+ * for it, which thread role, how many that (role, site, size) had asked for
+ * before, and when it arrived by operation, frame and millisecond. The record
+ * sits at the start of the arena, so a save carries the map of the blocks it
+ * holds and a restore puts the map back with them. Roles are named by thread
+ * start address and the count of earlier threads with the same start, because
+ * thread ids mean nothing in another launch. */
+#define GL_CAP 65536u
+#define GL_ORD 16384u
+#define GL_ROLES 64
+#define GL_DEAD 1u
+
+typedef struct {
+	unsigned addr, size, site, ord, role, arrival, role_op, frame, ms;
+} GlEnt;
+
+typedef struct {
+	unsigned key, role, site, size, next;
+} GlOrd;
+
+typedef struct {
+	char mod[32];
+	unsigned rva, idx, ops, area, main;
+} GlRole;
+
+typedef struct {
+	volatile LONG lock;
+	unsigned arrival, live, full, ord_full, nroles;
+	GlRole roles[GL_ROLES];
+	GlOrd ords[GL_ORD];
+	GlEnt ent[GL_CAP];
+} GhLedger;
+
+static GhLedger *g_led;
+static DWORD g_gp_main;
+static DWORD g_led_tls = TLS_OUT_OF_INDEXES;
+static DWORD g_led_t0;
+static volatile LONG g_led_frame SS_PRESENT;
+
+void gameheap_frame(void)
+{
+	InterlockedIncrement(&g_led_frame);
+}
+
+static void gl_lock(void)
+{
+	while (InterlockedCompareExchange(&g_led->lock, 1, 0))
+		SwitchToThread();
+}
+
+static void gl_unlock(void)
+{
+	InterlockedExchange(&g_led->lock, 0);
+}
+
+/* Every runtime thread starts in the runtime's own wrapper, so the routine it
+ * was asked to run is taken from _beginthreadex and kept by thread id until the
+ * thread first allocates. The thread is created suspended so it cannot ask
+ * before it is listed. */
+#define GL_TENT 256
+static struct {
+	volatile LONG tid;
+	void *fn;
+	unsigned seq;
+} g_tent[GL_TENT];
+static volatile LONG g_tent_n;
+static uintptr_t(__cdecl *r_beginthreadex)(void *, unsigned, unsigned(__stdcall *)(void *),
+					   void *, unsigned, unsigned *);
+
+static uintptr_t __cdecl gh_beginthreadex(void *sec, unsigned stack,
+					  unsigned(__stdcall *fn)(void *), void *arg,
+					  unsigned flags, unsigned *tid)
+{
+	unsigned t = 0, i;
+	uintptr_t h = r_beginthreadex(sec, stack, fn, arg, flags | CREATE_SUSPENDED, &t);
+
+	if (h) {
+		unsigned seq = 0;
+
+		for (i = 0; i < GL_TENT; i++)
+			if (g_tent[i].fn == (void *)fn)
+				seq++;
+		for (i = (unsigned)InterlockedIncrement(&g_tent_n) - 1; i < GL_TENT; i++)
+			if (!InterlockedCompareExchange(&g_tent[i].tid, -1, 0)) {
+				g_tent[i].fn = (void *)fn;
+				g_tent[i].seq = seq;
+				InterlockedExchange(&g_tent[i].tid, (LONG)t);
+				break;
+			}
+		if (!(flags & CREATE_SUSPENDED))
+			ResumeThread((HANDLE)h);
+	}
+	if (tid)
+		*tid = t;
+	return h;
+}
+
+/* The routine and how many threads were started on it before this one - the
+ * order they were created in, not the order they first allocate in. */
+static void *gl_entry_of_me(unsigned *seq)
+{
+	LONG me = (LONG)GetCurrentThreadId();
+	unsigned i;
+
+	for (i = 0; i < GL_TENT; i++)
+		if (g_tent[i].tid == me) {
+			*seq = g_tent[i].seq;
+			InterlockedExchange(&g_tent[i].tid, 0);
+			return g_tent[i].fn;
+		}
+	return NULL;
+}
+
+/* The thread's start as module and offset. Not under the ledger lock: the module
+ * lookups take the loader lock, and a thread holding that may be allocating. */
+static void gl_start(char *leaf_out, int cap, unsigned *rva, unsigned *seq)
+{
+	static LONG(NTAPI * qit)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+	void *start = gl_entry_of_me(seq);
+	HMODULE m = NULL;
+	char path[MAX_PATH], *leaf, *p;
+
+	if (!qit)
+		qit = (LONG(NTAPI *)(HANDLE, ULONG, PVOID, ULONG, PULONG))(void *)GetProcAddress(
+			GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread");
+	if (qit && !start)
+		qit(GetCurrentThread(), 9 /* ThreadQuerySetWin32StartAddress */, &start,
+		    sizeof(start), NULL);
+	path[0] = 0;
+	if (start && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+					       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				       (LPCSTR)start, &m))
+		GetModuleFileNameA(m, path, sizeof(path));
+	for (leaf = p = path; *p; p++)
+		if (*p == '\\')
+			leaf = p + 1;
+	lstrcpynA(leaf_out, leaf[0] ? leaf : "?", cap);
+	*rva = m ? (unsigned)((uintptr_t)start - (uintptr_t)m) : (unsigned)(uintptr_t)start;
+}
+
+/* Called with the ledger locked; leaf and rva from gl_start when the thread has
+ * no role yet. */
+static unsigned gl_role(const char *leaf, unsigned rva, unsigned seq)
+{
+	unsigned r = (unsigned)(uintptr_t)TlsGetValue(g_led_tls), i, idx = 0;
+
+	if (r)
+		return r - 1;
+	for (i = 0; i < g_led->nroles; i++)
+		if (g_led->roles[i].rva == rva && !lstrcmpiA(g_led->roles[i].mod, leaf))
+			idx++;
+	if (g_led->nroles >= GL_ROLES)
+		r = GL_ROLES - 1;
+	else {
+		r = g_led->nroles++;
+		lstrcpynA(g_led->roles[r].mod, leaf, sizeof(g_led->roles[r].mod));
+		g_led->roles[r].rva = rva;
+		g_led->roles[r].idx = seq != ~0u ? seq : idx;
+		g_led->roles[r].main = GetCurrentThreadId() == g_gp_main;
+	}
+	TlsSetValue(g_led_tls, (void *)(uintptr_t)(r + 1));
+	return r;
+}
+
+static unsigned gl_my_role(void)
+{
+	unsigned r = (unsigned)(uintptr_t)TlsGetValue(g_led_tls), rva = 0, seq = ~0u;
+	char leaf[32];
+
+	if (r)
+		return r - 1;
+	gl_start(leaf, sizeof(leaf), &rva, &seq);
+	gl_lock();
+	r = gl_role(leaf, rva, seq);
+	gl_unlock();
+	return r;
+}
+
+static unsigned gl_ord(unsigned role, unsigned site, unsigned size)
+{
+	unsigned key = gh_mix(site ^ (size * 2654435761u) ^ (role * 0x9E3779B9u)) | 1u, i;
+
+	for (i = 0; i < GL_ORD; i++) {
+		GlOrd *o = &g_led->ords[(key + i) & (GL_ORD - 1)];
+
+		if (!o->key) {
+			o->key = key;
+			o->role = role;
+			o->site = site;
+			o->size = size;
+		}
+		if (o->key == key && o->role == role && o->site == site && o->size == size)
+			return o->next++;
+	}
+	g_led->ord_full++;
+	return 0xFFFFFFFFu;
+}
+
+static GlEnt *gl_find(unsigned addr, int make)
+{
+	unsigned h = gh_mix(addr), i;
+	GlEnt *dead = NULL;
+
+	for (i = 0; i < GL_CAP; i++) {
+		GlEnt *e = &g_led->ent[(h + i) & (GL_CAP - 1)];
+
+		if (e->addr == addr)
+			return e;
+		if (e->addr == GL_DEAD && !dead)
+			dead = e;
+		if (!e->addr)
+			return make ? (dead ? dead : e) : NULL;
+	}
+	return make ? dead : NULL;
+}
+
+/* A block at an address already recorded is the same block resized in place,
+ * so it keeps its identity. */
+static void gl_put(const void *u, size_t n, unsigned site)
+{
+	GlEnt *e;
+	unsigned role;
+
+	if (!g_led || !u)
+		return;
+	role = gl_my_role();
+	gl_lock();
+	e = gl_find((unsigned)(uintptr_t)u, 1);
+	if (!e)
+		g_led->full++;
+	else if (e->addr == (unsigned)(uintptr_t)u)
+		e->size = (unsigned)n;
+	else {
+		e->addr = (unsigned)(uintptr_t)u;
+		e->size = (unsigned)n;
+		e->site = site;
+		e->role = role;
+		e->ord = gl_ord(role, site, (unsigned)n);
+		e->arrival = g_led->arrival;
+		e->role_op = g_led->roles[role].ops;
+		e->frame = (unsigned)g_led_frame;
+		e->ms = GetTickCount() - g_led_t0;
+		g_led->live++;
+	}
+	g_led->arrival++;
+	if (e)
+		g_led->roles[e->role].ops++;
+	gl_unlock();
+}
+
+static void gl_drop(const void *u)
+{
+	GlEnt *e;
+
+	if (!g_led || !u)
+		return;
+	gl_lock();
+	e = gl_find((unsigned)(uintptr_t)u, 0);
+	if (e) {
+		e->addr = GL_DEAD;
+		g_led->live--;
+	}
+	g_led->arrival++;
+	gl_unlock();
+}
+
+/* A block moved by realloc is the same block: the new address takes the old
+ * one's identity. */
+static void gl_move(const void *to, const void *from)
+{
+	GlEnt *a, *b;
+
+	if (!g_led || !to || !from || to == from)
+		return;
+	gl_lock();
+	a = gl_find((unsigned)(uintptr_t)from, 0);
+	b = gl_find((unsigned)(uintptr_t)to, 0);
+	if (a && b) {
+		unsigned addr = b->addr, size = b->size;
+
+		*b = *a;
+		b->addr = addr;
+		b->size = size;
+	}
+	gl_unlock();
+}
+
+static unsigned gh_knob(const char *name, unsigned def);
+
+/* Carved from the front of the arena before any block is served, so the arena
+ * layout with the ledger on is the same in every launch. */
+static void gl_init(void)
+{
+	uintptr_t at, end;
+
+	if (!g_own || !(gh_knob("D3D9SW_GHLEDGER", 0) || gh_knob("D3D9SW_GHPLACE", 0)))
+		return;
+	uintptr_t want;
+
+	at = (g_own->top + 4095) & ~(uintptr_t)4095;
+	end = (at + sizeof(GhLedger) + 15) & ~(uintptr_t)15;
+	want = (end + 4095) & ~(uintptr_t)4095;
+	if (end > g_own->end || (want > g_own->committed &&
+				 !VirtualAlloc((void *)g_own->committed, want - g_own->committed,
+					       MEM_COMMIT, PAGE_READWRITE))) {
+		ss_log("gameheap: no room for the block ledger in the arena\n");
+		return;
+	}
+	if (want > g_own->committed)
+		g_own->committed = want;
+	g_led_tls = TlsAlloc();
+	if (g_led_tls == TLS_OUT_OF_INDEXES)
+		return;
+	g_led = (GhLedger *)at;
+	memset(g_led, 0, sizeof(*g_led));
+	g_own->top = end;
+	g_led_t0 = GetTickCount();
+	ss_log("gameheap: block ledger at %p, %u KB, %u live block(s) at most\n", (void *)g_led,
+	       (unsigned)(sizeof(GhLedger) >> 10), GL_CAP);
+	g_gp_main = GetCurrentThreadId();
+}
+
+/* D3D9SW_GHPLACE=1: a block's address follows from who asked for it, not from
+ * when. Each thread role gets an area of the arena - the thread that loaded us
+ * the big one, the game's other threads a large slot and everyone else's a
+ * small one, picked by a hash of the role's name - and in its area each (site,
+ * size class) gets chunks of its own and a free list of its own. Another
+ * thread, or another site of the same thread, arriving earlier or later then
+ * no longer moves the block. A role whose area fills spills into a shared
+ * overflow area, which is placed by arrival again. */
+#define GP_BIG 8
+#define GP_BIG_SZ (2u << 20)
+#define GP_SMALL 16
+#define GP_SMALL_SZ (64u << 10)
+#define GP_AREAS (1 + GP_BIG + GP_SMALL)
+#define GP_CHUTES 8192u
+#define GP_CHUNK_MAX (64u << 10)
+
+typedef struct {
+	unsigned key, role, site, cls, chunk, n;
+	uintptr_t top, end;
+	void *free;
+} GpChute;
+
+typedef struct {
+	unsigned owner;
+	uintptr_t top, end;
+} GpArea;
+
+typedef struct GhPlace {
+	unsigned nchutes, chute_full, spilled, spilled_main, area_clash;
+	uintptr_t over_top, over_end;
+	GpArea area[GP_AREAS];
+	GpChute ch[GP_CHUTES];
+} GhPlace;
+
+static char g_gp_exe[32];
+
+static void gp_init(void)
+{
+	uintptr_t at, lo, avail, main_sz, rest;
+	char path[MAX_PATH], *leaf, *p;
+	unsigned i;
+
+	if (!g_led || !gh_knob("D3D9SW_GHPLACE", 0))
+		return;
+	path[0] = 0;
+	GetModuleFileNameA(NULL, path, sizeof(path));
+	for (leaf = p = path; *p; p++)
+		if (*p == '\\')
+			leaf = p + 1;
+	lstrcpynA(g_gp_exe, leaf, sizeof(g_gp_exe));
+	at = (g_own->top + 4095) & ~(uintptr_t)4095;
+	lo = (at + sizeof(GhPlace) + 0xFFFF) & ~(uintptr_t)0xFFFF;
+	if (lo >= g_own->end || !VirtualAlloc((void *)at, sizeof(GhPlace), MEM_COMMIT,
+					      PAGE_READWRITE)) {
+		ss_log("gameheap: no room for block placement in the arena\n");
+		return;
+	}
+	avail = g_own->end - lo;
+	rest = (uintptr_t)GP_BIG * GP_BIG_SZ + (uintptr_t)GP_SMALL * GP_SMALL_SZ;
+	if (avail < rest + (12u << 20)) {
+		ss_log("gameheap: arena too small for block placement\n");
+		return;
+	}
+	g_place = (GhPlace *)at;
+	memset(g_place, 0, sizeof(*g_place));
+	main_sz = (avail - rest - avail / 10) & ~(uintptr_t)0xFFFF;
+	g_place->area[0].top = lo;
+	g_place->area[0].end = lo + main_sz;
+	for (at = lo + main_sz, i = 1; i < GP_AREAS; i++) {
+		g_place->area[i].top = at;
+		at += i <= GP_BIG ? GP_BIG_SZ : GP_SMALL_SZ;
+		g_place->area[i].end = at;
+	}
+	g_place->over_top = at;
+	g_place->over_end = g_own->end;
+	g_own->top = g_own->end;
+	ss_log("gameheap: block placement on - main area %u KB at %p, %u game slot(s) of %u KB, "
+	       "%u other slot(s) of %u KB, overflow %u KB\n",
+	       (unsigned)(main_sz >> 10), (void *)lo, GP_BIG, GP_BIG_SZ >> 10, GP_SMALL,
+	       GP_SMALL_SZ >> 10, (unsigned)((g_place->over_end - g_place->over_top) >> 10));
+}
+
+static unsigned gp_area_of(unsigned role)
+{
+	GlRole *r = &g_led->roles[role];
+	unsigned h, i, k = 0, first, count;
+	const char *s;
+
+	if (r->area)
+		return r->area - 1;
+	if (r->main) {
+		r->area = 1;
+		return 0;
+	}
+	h = gh_mix(r->rva);
+	for (s = r->mod; *s; s++)
+		h = gh_mix(h ^ (unsigned char)(*s | 0x20));
+	h += r->idx;
+	if (!lstrcmpiA(r->mod, g_gp_exe)) {
+		first = 1;
+		count = GP_BIG;
+	} else {
+		first = 1 + GP_BIG;
+		count = GP_SMALL;
+	}
+	for (i = 0; i < count; i++) {
+		k = first + (h + i) % count;
+		if (!g_place->area[k].owner) {
+			g_place->area[k].owner = h | 1;
+			break;
+		}
+		if (i == 0)
+			g_place->area_clash++;
+	}
+	r->area = i < count ? k + 1 : GP_AREAS + 1;
+	return r->area - 1;
+}
+
+static uintptr_t gp_carve(unsigned role, uintptr_t size)
+{
+	unsigned a = gp_area_of(role);
+	uintptr_t at;
+
+	if (a < GP_AREAS && g_place->area[a].top + size <= g_place->area[a].end) {
+		at = g_place->area[a].top;
+		g_place->area[a].top += size;
+	} else if (g_place->over_top + size <= g_place->over_end) {
+		at = g_place->over_top;
+		g_place->over_top += size;
+		g_place->spilled++;
+	} else if (g_place->area[0].end - size >= g_place->area[0].top) {
+		/* From the far end down, so the main thread's own order is untouched. */
+		g_place->area[0].end -= size;
+		at = g_place->area[0].end;
+		g_place->spilled_main++;
+	} else
+		return 0;
+	return VirtualAlloc((void *)at, size, MEM_COMMIT, PAGE_READWRITE) ? at : 0;
+}
+
+/* Called with the arena locked. */
+static GhOwnBlk *gp_take(unsigned role, unsigned site, int c, SIZE_T cap, unsigned *chute)
+{
+	unsigned key, i;
+	uintptr_t need = sizeof(GhOwnBlk) + cap;
+	GpChute *ch = NULL;
+	GhOwnBlk *b;
+
+	key = gh_mix(site ^ ((unsigned)c * 0x9E3779B9u) ^ (role * 0x85EBCA6Bu)) | 1u;
+	for (i = 0; i < GP_CHUTES; i++) {
+		GpChute *t = &g_place->ch[(key + i) & (GP_CHUTES - 1)];
+
+		if (!t->key) {
+			t->key = key;
+			t->role = role;
+			t->site = site;
+			t->cls = (unsigned)c;
+			g_place->nchutes++;
+		}
+		if (t->key == key && t->role == role && t->site == site && t->cls == (unsigned)c) {
+			ch = t;
+			break;
+		}
+	}
+	if (!ch) {
+		uintptr_t at;
+
+		g_place->chute_full++;
+		at = gp_carve(role, need);
+		*chute = 0;
+		return (GhOwnBlk *)at;
+	}
+	*chute = (unsigned)(ch - g_place->ch) + 1;
+	ch->n++;
+	if ((b = (GhOwnBlk *)ch->free) != NULL) {
+		ch->free = *(void **)(b + 1);
+		return b;
+	}
+	if (ch->top + need > ch->end) {
+		unsigned k = ch->chunk ? ch->chunk * 2 : (unsigned)((1024 + need - 1) / need);
+		uintptr_t at;
+
+		if (k < 4)
+			k = 4;
+		if (k * need > GP_CHUNK_MAX)
+			k = need >= GP_CHUNK_MAX ? 1 : (unsigned)(GP_CHUNK_MAX / need);
+		at = gp_carve(role, k * need);
+		if (!at)
+			return NULL;
+		ch->chunk = k;
+		ch->top = at;
+		ch->end = at + k * need;
+	}
+	b = (GhOwnBlk *)ch->top;
+	ch->top += need;
+	return b;
+}
+
+/* Called with the arena locked. */
+static int gp_give(GhOwnBlk *b, void *p)
+{
+	unsigned c = (unsigned)(b->cls >> 8);
+	GpChute *ch;
+
+	if (!g_place || !c || c > GP_CHUTES)
+		return 0;
+	ch = &g_place->ch[c - 1];
+	*(void **)p = ch->free;
+	ch->free = b;
+	return 1;
+}
+
+/* D3D9SW_MERGE_SITES: the saved contents of every block from the listed sites,
+ * written into the live block with the same identity - role name, site, size
+ * and ordinal. The saved ledger is read through fetch from the save at the
+ * address the live one has, which placement makes the same in every launch.
+ * Called with the process frozen. Returns blocks written, -1 if the save
+ * holds no ledger where this launch has one. */
+int gameheap_merge_sites(const unsigned *sites, int nsites,
+			 int (*fetch)(void *ctx, uintptr_t a, void *dst, size_t n), void *ctx)
+{
+	GhLedger *sv;
+	unsigned i, j, wrote = 0, unpaired = 0;
+	int k;
+
+	if (!g_led)
+		return -1;
+	sv = (GhLedger *)VirtualAlloc(NULL, sizeof(GhLedger), MEM_COMMIT | MEM_RESERVE,
+				      PAGE_READWRITE);
+	if (!sv)
+		return -1;
+	if (!fetch(ctx, (uintptr_t)g_led, sv, sizeof(GhLedger)) || sv->nroles > GL_ROLES) {
+		VirtualFree(sv, 0, MEM_RELEASE);
+		return -1;
+	}
+	for (i = 0; i < GL_CAP; i++) {
+		const GlEnt *e = &sv->ent[i];
+		const GlRole *sr;
+		GlEnt *live = NULL;
+
+		if (e->addr <= GL_DEAD || e->role >= sv->nroles)
+			continue;
+		for (k = 0; k < nsites && sites[k] != e->site; k++)
+			;
+		if (k == nsites)
+			continue;
+		sr = &sv->roles[e->role];
+		for (j = 0; j < GL_CAP && !live; j++) {
+			GlEnt *l = &g_led->ent[j];
+			const GlRole *lr;
+
+			if (l->addr <= GL_DEAD || l->site != e->site || l->size != e->size ||
+			    l->ord != e->ord || l->role >= g_led->nroles)
+				continue;
+			lr = &g_led->roles[l->role];
+			if (lr->rva == sr->rva && lr->idx == sr->idx && !lstrcmpiA(lr->mod, sr->mod))
+				live = l;
+		}
+		if (!live) {
+			if (unpaired++ < 8)
+				ss_log("  merge: saved block %08X (site %08X, %X bytes, #%u) has "
+				       "no live twin - left alone\n",
+				       e->addr, e->site, e->size, e->ord);
+			continue;
+		}
+		if (!fetch(ctx, e->addr, (void *)(uintptr_t)live->addr, e->size)) {
+			ss_log("  merge: saved block %08X is not in the save\n", e->addr);
+			continue;
+		}
+		if (wrote++ < 16)
+			ss_log("  merge: block site %08X, %X bytes, #%u: saved %08X -> live %08X\n",
+			       e->site, e->size, e->ord, e->addr, live->addr);
+	}
+	VirtualFree(sv, 0, MEM_RELEASE);
+	if (unpaired)
+		ss_log("  merge: %u saved block(s) of the listed sites had no live twin\n",
+		       unpaired);
+	return (int)wrote;
+}
+
+static void gl_write(const char *path)
+{
+	HANDLE f;
+	char line[160];
+	DWORD wrote;
+	unsigned i;
+	int k;
+
+	if (!g_led)
+		return;
+	f = swlog_create(path, CREATE_ALWAYS);
+	if (f == INVALID_HANDLE_VALUE)
+		return;
+	gl_lock();
+	k = wsprintfA(line, "# ledger: %u live, %u operation(s), frame %ld, %u full, %u ordinal(s) unnamed\r\n",
+		      g_led->live, g_led->arrival, (long)g_led_frame, g_led->full, g_led->ord_full);
+	WriteFile(f, line, (DWORD)k, &wrote, NULL);
+	if (g_place) {
+		k = wsprintfA(line, "# placement: %u chute(s), %u without one, %u chunk(s) spilled, "
+				    "%u more into the main area's far end, %u area clash(es), "
+				    "overflow at %08X\r\n",
+			      g_place->nchutes, g_place->chute_full, g_place->spilled,
+			      g_place->spilled_main, g_place->area_clash,
+			      (unsigned)g_place->over_top);
+		WriteFile(f, line, (DWORD)k, &wrote, NULL);
+	}
+	for (i = 0; i < g_led->nroles; i++) {
+		k = wsprintfA(line, "# role R%u %s+%X#%u %u op(s) area %d\r\n", i, g_led->roles[i].mod,
+			      g_led->roles[i].rva, g_led->roles[i].idx, g_led->roles[i].ops,
+			      (int)g_led->roles[i].area - 1);
+		WriteFile(f, line, (DWORD)k, &wrote, NULL);
+	}
+	WriteFile(f, "# addr size site ordinal role arrival role_op frame ms\r\n", 56, &wrote, NULL);
+	for (i = 0; i < GL_CAP; i++) {
+		GlEnt *e = &g_led->ent[i];
+
+		if (e->addr <= GL_DEAD)
+			continue;
+		k = wsprintfA(line, "%08X %X %08X %u R%u %u %u %u %u\r\n", e->addr, e->size, e->site,
+			      e->ord, e->role, e->arrival, e->role_op, e->frame, e->ms);
+		WriteFile(f, line, (DWORD)k, &wrote, NULL);
+	}
+	gl_unlock();
+	CloseHandle(f);
+}
+
+static LPVOID gh_halloc(HANDLE h, DWORD flags, SIZE_T n, unsigned site)
 {
 	if (g_own && h == g_heap)
-		return gho_alloc(n, (flags & HEAP_ZERO_MEMORY) != 0);
+		return gho_alloc(n, (flags & HEAP_ZERO_MEMORY) != 0, site);
 	return HeapAlloc(h, flags, n);
 }
 
@@ -780,6 +1481,39 @@ static GhHead *head_of(void *u)
 	return h;
 }
 
+/* After a merge: every block the ledger now lists must carry its own header,
+ * or the ledger and the arena it describes came from different launches. */
+int gameheap_merge_proof(void)
+{
+	unsigned i, n = 0, bad = 0, gone = 0;
+
+	if (!g_led)
+		return 0;
+	for (i = 0; i < GL_CAP; i++) {
+		const GlEnt *e = &g_led->ent[i];
+		MEMORY_BASIC_INFORMATION mbi;
+		char *h;
+
+		if (e->addr <= GL_DEAD)
+			continue;
+		n++;
+		h = (char *)(uintptr_t)e->addr - sizeof(GhHead);
+		if (!VirtualQuery(h, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT ||
+		    (char *)mbi.BaseAddress + mbi.RegionSize < (char *)(uintptr_t)e->addr) {
+			if (gone++ < 8)
+				ss_log("    proof: block %08X (site %X, %X bytes) is not committed\n",
+				       e->addr, e->site, e->size);
+			continue;
+		}
+		if (!head_of((void *)(uintptr_t)e->addr) && bad++ < 8)
+			ss_log("    proof: block %08X (site %X, %X bytes, ord %u) has a foreign header\n",
+			       e->addr, e->site, e->size, e->ord);
+	}
+	ss_log("  merge check: %u ledger block(s), %u with a foreign header, %u not committed\n", n,
+	       bad, gone);
+	return (int)(bad + gone);
+}
+
 /* Two ways to not be ours, and they could not be further apart.
  *
  * A pointer outside every reservation we took belongs to somebody else and must
@@ -845,8 +1579,10 @@ typedef struct GhBigBlk {
 	uintptr_t magic;
 	size_t size; /* whole block, this header included */
 	struct GhBigBlk *next; /* free list only */
-	size_t pad;
+	size_t owner; /* GH_BIG_SW for the renderer's, 0 for the game's */
 } GhBigBlk;
+
+#define GH_BIG_SW ((size_t)0x53574258u)
 
 typedef struct {
 	volatile LONG lock;
@@ -950,6 +1686,7 @@ static GhBigBlk *chunk_alloc(GhBigArena *c, size_t need)
 	}
 	b->magic = GH_BIG_MAGIC ^ (uintptr_t)b;
 	b->next = NULL;
+	b->owner = 0;
 	c->live += b->size;
 	if (c->live > c->peak)
 		c->peak = c->live;
@@ -966,15 +1703,19 @@ static GhBigBlk *chunk_alloc(GhBigArena *c, size_t need)
 #define GH_BIGPIN_BASE 0x80000000u
 static uintptr_t g_bigpin_base;
 static SIZE_T g_bigpin_size, g_bigpin_used;
+/* D3D9SW_GHBIG2_PIN/_MB: a second fixed span, used once the first is full. */
+static uintptr_t g_bigpin2_base;
+static SIZE_T g_bigpin2_size, g_bigpin2_used;
 
-static void bigpin_reserve(void)
+static uintptr_t bigpin_one(const char *at, const char *mbk, uintptr_t def, unsigned defmb,
+			    SIZE_T *size)
 {
-	unsigned mb = gh_knob("D3D9SW_GHBIG_PIN_MB", 1792);
-	uintptr_t base = gh_knob("D3D9SW_GHBIG_PIN", 1);
+	unsigned mb = gh_knob(mbk, defmb);
+	uintptr_t base = gh_knob(at, def);
 	void *res;
 
 	if (!base || !mb)
-		return;
+		return 0;
 	if (base == 1)
 		base = GH_BIGPIN_BASE;
 	res = VirtualAlloc((LPVOID)base, (SIZE_T)mb << 20, MEM_RESERVE, PAGE_READWRITE);
@@ -985,12 +1726,21 @@ static void bigpin_reserve(void)
 		       mb, (unsigned long)base, GetLastError());
 		if (res)
 			VirtualFree(res, 0, MEM_RELEASE);
-		return;
+		return 0;
 	}
-	g_bigpin_base = base;
-	g_bigpin_size = (SIZE_T)mb << 20;
+	*size = (SIZE_T)mb << 20;
 	ss_log("gameheap: big-block chunks PINNED in %u MB at %08lX\n", mb,
 	       (unsigned long)base);
+	return base;
+}
+
+static void bigpin_reserve(void)
+{
+	g_bigpin_base = bigpin_one("D3D9SW_GHBIG_PIN", "D3D9SW_GHBIG_PIN_MB", 1, 1792,
+				   &g_bigpin_size);
+	if (g_bigpin_base)
+		g_bigpin2_base = bigpin_one("D3D9SW_GHBIG2_PIN", "D3D9SW_GHBIG2_PIN_MB", 0, 0,
+					    &g_bigpin2_size);
 }
 
 /* One more chunk, at least `need` bytes of blocks. Serialised so two threads
@@ -1017,6 +1767,14 @@ static GhBigArena *chunk_add(size_t need)
 		if (!VirtualAlloc(res, GH_BIG_GRAIN, MEM_COMMIT, PAGE_READWRITE))
 			return NULL;
 		g_bigpin_used += cap;
+	} else if (g_bigpin2_base &&
+		   g_bigpin2_used + ((need + GH_BIG_GRAIN + 0xFFFFu) & ~(SIZE_T)0xFFFFu) <=
+			   g_bigpin2_size) {
+		cap = (need + GH_BIG_GRAIN + 0xFFFFu) & ~(SIZE_T)0xFFFFu;
+		res = (void *)(g_bigpin2_base + g_bigpin2_used);
+		if (!VirtualAlloc(res, GH_BIG_GRAIN, MEM_COMMIT, PAGE_READWRITE))
+			return NULL;
+		g_bigpin2_used += cap;
 	} else {
 		/* Past the span, a chunk is only as big as the block that asked for
 		 * it: under a 2 GB ceiling a spare 64 MB reservation is what the next
@@ -1108,13 +1866,14 @@ static void big_free(void *p)
 /* Every route that returns one of our blocks to its allocator. */
 static void gh_raw_free(void *u, GhHead *h, DWORD flags)
 {
+	gl_drop(u);
 	if (in_big(u))
 		big_free(h);
 	else
 		gh_hfree(in_laa(u) ? g_laa_heap : g_heap, flags, h);
 }
 
-static void *give(void *raw, size_t n)
+static void *give(void *raw, size_t n, unsigned site)
 {
 	GhHead *h = (GhHead *)raw;
 	void *u = (char *)raw + sizeof(GhHead);
@@ -1123,6 +1882,7 @@ static void *give(void *raw, size_t n)
 	h->size = n;
 	note_region(u);
 	gh_busy_put(u, n);
+	gl_put(u, n, site);
 	g_alloc++;
 	return u;
 }
@@ -1143,7 +1903,7 @@ static void *gh_malloc_at(size_t n, unsigned site)
 		return u;
 	}
 	raw = n >= GH_BIG ? big_alloc(n + sizeof(GhHead))
-			  : gh_halloc(gh_serving_heap(), 0, n + sizeof(GhHead));
+			  : gh_halloc(gh_serving_heap(), 0, n + sizeof(GhHead), site);
 	if (!raw) {
 		g_fellback++;
 		if (g_laa_on)
@@ -1151,7 +1911,7 @@ static void *gh_malloc_at(size_t n, unsigned site)
 		return r_malloc(n);
 	}
 	{
-		void *u = give(raw, n);
+		void *u = give(raw, n, site);
 		unsigned ord = gh_ordinal(site, (unsigned)n);
 
 		gh_tag_put(u, site, (unsigned)n, ord);
@@ -1186,7 +1946,7 @@ static void *gh_calloc_at(size_t c, size_t s, unsigned site)
 		if (raw)
 			memset(raw, 0, n + sizeof(GhHead));
 	} else {
-		raw = gh_halloc(gh_serving_heap(), HEAP_ZERO_MEMORY, n + sizeof(GhHead));
+		raw = gh_halloc(gh_serving_heap(), HEAP_ZERO_MEMORY, n + sizeof(GhHead), site);
 	}
 	if (!raw) {
 		g_fellback++;
@@ -1195,7 +1955,7 @@ static void *gh_calloc_at(size_t c, size_t s, unsigned site)
 		return r_calloc(c, s);
 	}
 	{
-		void *u = give(raw, n);
+		void *u = give(raw, n, site);
 		unsigned ord = gh_ordinal(site, (unsigned)n);
 
 		gh_tag_put(u, site, (unsigned)n, ord);
@@ -1342,7 +2102,11 @@ static void *gh_realloc_at(void *p, size_t n, unsigned site)
 				void *u;
 
 				gh_busy_take(p);
-				u = give(raw, n);
+				u = give(raw, n, site);
+				if (u != p) {
+					gl_move(u, p);
+					gl_drop(p);
+				}
 
 				if (!named) {
 					osite = site;
@@ -1370,6 +2134,7 @@ static void *gh_realloc_at(void *p, size_t n, unsigned site)
 		gh_tag_take(q, &d1, &d2, &d3);
 		gh_tag_put(q, osite, osize, oord);
 	}
+	gl_move(q, p);
 	gh_free(p);
 	return q;
 }
@@ -1911,7 +2676,7 @@ static void *gh_floor_arena(size_t n, int zero, unsigned site)
 	if (g_floor_va && n >= GH_BIG)
 		return gh_va_alloc(n, site);
 	raw = gh_halloc(gh_serving_heap(), zero ? HEAP_ZERO_MEMORY : 0,
-			n + sizeof(GhHead));
+			n + sizeof(GhHead), site);
 	if (!raw) {
 		g_fellback++;
 		if (g_laa_on)
@@ -1919,7 +2684,7 @@ static void *gh_floor_arena(size_t n, int zero, unsigned site)
 		return zero ? r_calloc(1, n) : r_malloc(n);
 	}
 	{
-		void *u = give(raw, n);
+		void *u = give(raw, n, site);
 		unsigned ord = gh_ordinal(site, (unsigned)n);
 
 		gh_tag_put(u, site, (unsigned)n, ord);
@@ -2165,7 +2930,7 @@ static volatile LONG g_ourva[GH_OURVA_MAX]; /* base, 0 = free slot */
 static SIZE_T g_ourva_size[GH_OURVA_MAX];
 static volatile LONG g_ourva_hw;   /* high-water mark for iteration */
 static volatile LONG g_ourva_full; /* adds dropped because the table was full */
-static HMODULE g_ourmod;           /* this DLL (d3d11.dll) */
+static HMODULE g_ourmod SS_PRESENT;           /* this DLL (d3d11.dll) */
 static int g_swexcl;
 
 static void ourva_add(uintptr_t base, SIZE_T size)
@@ -2586,47 +3351,7 @@ int gameheap_install(void)
 		ss_log("gameheap: no memory for trampolines, error %lu\n", GetLastError());
 		return 0;
 	}
-	{
-		char v[16];
-		unsigned cap = savestate_getenv("D3D9SW_GHTRACE", v, sizeof(v));
-		long want = 0;
-		unsigned k;
-
-		for (k = 0; k < cap && v[k] >= '0' && v[k] <= '9'; k++)
-			want = want * 10 + (v[k] - '0');
-		if (want > 0) {
-			/* Reserved before the first allocation is served, because a
-			 * trace that starts late starts after the layout it is meant
-			 * to explain has already been decided. */
-			g_tr = (GhTr *)VirtualAlloc(NULL, (SIZE_T)want * sizeof(GhTr),
-						    MEM_COMMIT | MEM_RESERVE,
-						    PAGE_READWRITE);
-			g_tr_cap = g_tr ? (LONG)want : 0;
-			ss_log("gameheap: tracing the first %ld allocator operation(s) "
-			       "into gh_trace.txt%s\n",
-			       want, g_tr ? "" : " - RESERVATION FAILED, tracing off");
-		}
-		/* Armed with the trace, and reserved just as early: a tag table
-		 * that starts late cannot name the blocks allocated before it,
-		 * and those are exactly the long-lived ones worth naming. */
-		if (g_tr) {
-			g_exe = (uintptr_t)GetModuleHandleA(NULL);
-			g_tag = (GhTag *)VirtualAlloc(NULL,
-						      GH_TAG_SLOTS * sizeof(GhTag),
-						      MEM_COMMIT | MEM_RESERVE,
-						      PAGE_READWRITE);
-			g_site = (GhSite *)VirtualAlloc(NULL,
-							GH_SITE_SLOTS * sizeof(GhSite),
-							MEM_COMMIT | MEM_RESERVE,
-							PAGE_READWRITE);
-			ss_log("gameheap: naming blocks by (call site, ordinal) "
-			       "against image base %08lX%s\n",
-			       (unsigned long)g_exe,
-			       (g_tag && g_site) ? ""
-						 : " - TABLE RESERVATION FAILED, "
-						   "blocks will be unnamed");
-		}
-	}
+	gh_trace_arm();
 	g_heap = gh_create_heap();
 	if (!g_heap) {
 		ss_log("gameheap: HeapCreate failed, error %lu\n", GetLastError());
@@ -2646,6 +3371,7 @@ int gameheap_install(void)
 		       "freelist and all, instead of block by block\n");
 	}
 	InitializeCriticalSection(&g_cs);
+	savestate_own_cs(&g_cs);
 
 	/* Always, not only under GHTRACE: the tag table names blocks for a
 	 * diagnostic; this table IS the live set restore walks. Excluded so a
@@ -2722,6 +3448,8 @@ int gameheap_install(void)
 			int na, nr;
 
 			InitializeCriticalSection(&g_floor_cs);
+
+			savestate_own_cs(&g_floor_cs);
 			g_floor_cs_ready = 1;
 			g_floor_on = 1;
 			g_floor_redirect = floorv[0] >= '2';
@@ -2888,7 +3616,7 @@ static LPVOID(WINAPI *r_crt_hra)(HANDLE, DWORD, LPVOID, SIZE_T);
 static SIZE_T(WINAPI *r_crt_hsz)(HANDLE, DWORD, LPCVOID);
 static WCHAR g_game_dir[MAX_PATH];
 static int g_game_dir_n;
-static HMODULE g_self;
+static HMODULE g_self SS_PRESENT;
 static const char *g_rt_name = "ucrtbase";
 
 static int gh_exe_imports(const char *dll)
@@ -2952,6 +3680,18 @@ static LPVOID WINAPI gh_crt_heaprealloc(HANDLE heap, DWORD flags, LPVOID p, SIZE
 		gh_orphan_note("HeapReAlloc", p);
 		return NULL;
 	}
+	if (g_ntlog && n >= 0x10000) {
+		static volatile LONG left = 32;
+		char m[32];
+		uintptr_t o;
+
+		if (InterlockedDecrement(&left) >= 0)
+			ss_log("gameheap: runtime HeapReAlloc passed through - %p to %lu bytes, "
+			       "from %s+%lX\n",
+			       p, (unsigned long)n,
+			       gh_mod_of(__builtin_return_address(0), m, sizeof(m), &o),
+			       (unsigned long)o);
+	}
 	return r_crt_hra(heap, flags, p, n);
 }
 
@@ -2975,25 +3715,49 @@ static SIZE_T WINAPI gh_crt_heapsize(HANDLE heap, DWORD flags, LPCVOID p)
  * grows segments wherever there is room. The floor above already frees, resizes
  * and sizes these blocks. */
 static LPVOID(WINAPI *r_rt_halloc)(HANDLE, DWORD, SIZE_T);
-static HANDLE g_rt_crtheap;
+static HANDLE g_rt_crtheap SS_PRESENT;
 static volatile LONG g_rt_served, g_rt_passed;
 
 static LPVOID WINAPI gh_rt_heapalloc(HANDLE heap, DWORD flags, SIZE_T n)
 {
 	if (g_ready && heap == g_rt_crtheap) {
+		unsigned site = gh_site_of(__builtin_return_address(0));
 		void *raw = n >= GH_BIG && g_big_chunk
 				    ? big_alloc(n + sizeof(GhHead))
 				    : gh_halloc(gh_serving_heap(), flags & HEAP_ZERO_MEMORY,
-						n + sizeof(GhHead));
+						n + sizeof(GhHead), site);
 
 		if (raw) {
 			if ((flags & HEAP_ZERO_MEMORY) && n >= GH_BIG)
 				memset((char *)raw + sizeof(GhHead), 0, n);
 			InterlockedIncrement(&g_rt_served);
-			return give(raw, n);
+			return give(raw, n, site);
 		}
 	}
-	InterlockedIncrement(&g_rt_passed);
+	if (InterlockedIncrement(&g_rt_passed) <= 64 && g_ntlog) {
+		void *fr[4] = { 0 };
+		char m[4][32];
+		uintptr_t o[4];
+		int k, nf = RtlCaptureStackBackTrace(1, 4, fr, NULL);
+
+		for (k = 0; k < 4; k++) {
+			const char *s = "-";
+
+			o[k] = 0;
+			if (k < nf)
+				s = gh_mod_of(fr[k], m[k], 32, &o[k]);
+			if (s != m[k])
+				lstrcpynA(m[k], s, 32);
+		}
+		ss_log("gameheap: runtime HeapAlloc passed through - heap %p%s, %lu bytes, "
+		       "from %s+%lX < %s+%lX < %s+%lX < %s+%lX\n",
+		       (void *)heap,
+		       !g_ready ? " (not ready)"
+		       : heap == g_rt_crtheap ? " (ours failed)"
+					      : " (not the runtime's heap)",
+		       (unsigned long)n, m[0], (unsigned long)o[0], m[1], (unsigned long)o[1],
+		       m[2], (unsigned long)o[2], m[3], (unsigned long)o[3]);
+	}
 	return r_rt_halloc(heap, flags, n);
 }
 
@@ -3145,7 +3909,7 @@ typedef struct {
 	GhVaEv e[GH_VAJ_N];
 } GhVaJ;
 
-static GhVaJ *g_vaj;
+static GhVaJ *g_vaj SS_PRESENT;
 static int g_vaj_held;
 static LPVOID(WINAPI *r_va)(LPVOID, SIZE_T, DWORD, DWORD);
 static BOOL(WINAPI *r_vf)(LPVOID, SIZE_T, DWORD);
@@ -3211,7 +3975,7 @@ typedef struct {
 	} g[65536];
 } GhRes;
 
-static GhRes *g_res;
+static GhRes *g_res SS_PRESENT;
 _Static_assert(sizeof(GhRes) <= GH_HOME_VAJ - GH_HOME_RES, "GhRes outgrew its home");
 _Static_assert(sizeof(GhVaJ) <= GH_HOME_AL - GH_HOME_VAJ, "GhVaJ outgrew its home");
 static int g_res_held;
@@ -3548,8 +4312,8 @@ typedef struct {
 	unsigned start[PXT_TABLES];
 } PxTrace;
 
-static PxTrace *g_pxt;
-static unsigned char *g_pxt_code;
+static PxTrace *g_pxt SS_PRESENT;
+static unsigned char *g_pxt_code SS_PRESENT;
 static int g_pxt_held;
 
 static void pxt_where(void *a, char *out)
@@ -3632,7 +4396,7 @@ typedef struct {
 	unsigned slot, tid, self, caller, tick, ret, ret2, done;
 	unsigned a[6];
 } PxjRec;
-static PxjRec *g_pxj;
+static PxjRec *g_pxj SS_PRESENT;
 static volatile LONG g_pxj_n;
 static LONG g_pxj_dumped;
 static __thread unsigned t_pxj_ret[PXJ_DEPTH], t_pxj_rec[PXJ_DEPTH];
@@ -4113,7 +4877,7 @@ typedef struct {
 } AlReal;
 
 static AlTab g_al_game;
-static AlReal *g_al_real;
+static AlReal *g_al_real SS_PRESENT;
 _Static_assert(sizeof(AlReal) <= 0x5FEE0000u - GH_HOME_AL, "AlReal outgrew its home");
 static int g_al_held;
 
@@ -5136,9 +5900,10 @@ typedef struct {
 	GhDiProxy p[GH_DI_MAX];
 } GhDiHome;
 
-static GhDiHome *g_di;
+static GhDiHome *g_di SS_PRESENT;
 static int g_di_held;
-static HRESULT(WINAPI *r_di8create)(HINSTANCE, DWORD, const GUID *, void **, void *);
+static HRESULT(WINAPI *r_di8create)(HINSTANCE, DWORD, const GUID *, void **,
+				    void *) SS_PRESENT;
 
 #if defined(__i386__) || defined(_M_IX86)
 /* this is the first stdcall argument: swap the proxy for the live object and
@@ -5243,7 +6008,8 @@ static int gh_di_home(void)
 /* CLSID_DirectInput8: what the game actually asks COM for. */
 static const GUID k_clsid_di8 = { 0x25E609E4, 0xB259, 0x11CF,
 				  { 0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00 } };
-static HRESULT(WINAPI *r_cocreate)(const GUID *, void *, DWORD, const GUID *, void **);
+static HRESULT(WINAPI *r_cocreate)(const GUID *, void *, DWORD, const GUID *,
+				   void **) SS_PRESENT;
 
 static HRESULT WINAPI gh_cocreate(const GUID *clsid, void *outer, DWORD ctx, const GUID *iid,
 				  void **out)
@@ -5281,9 +6047,17 @@ static void gh_di_hook(HMODULE mod, const WCHAR *path)
 	for (i = 0; path[i]; i++)
 		if (path[i] == '\\' || path[i] == '/')
 			leaf = path + i + 1;
-	/* Only the module that asks for DirectInput: launcher.exe carries Steam's
-	 * DRM, and a hooked import there ends the process before it starts. */
-	if (mod == g_self || lstrcmpiW(leaf, L"haydee.dll") || !gh_knob("D3D9SW_DIPROXY", 0))
+	if (mod == g_self || !gh_knob("D3D9SW_DIPROXY", 0))
+		return;
+	/* A static import (DDPR's default.exe) goes straight to DINPUT8. */
+	if (gh_di_home() && gh_iat_swap(mod, "DINPUT8.dll", "DirectInput8Create",
+					(void *)gh_di8create, (void **)&r_di8create) > 0)
+		ss_log("gameheap: %ls - imported DirectInput8Create will hand out proxies\n",
+		       path);
+	/* Only the module that asks for DirectInput at run time: launcher.exe
+	 * carries Steam's DRM, and a hooked import there ends the process before
+	 * it starts. */
+	if (lstrcmpiW(leaf, L"haydee.dll"))
 		return;
 	if (gh_iat_swap(mod, NULL, "GetProcAddress", (void *)gh_getprocaddress, NULL) > 0)
 		ss_log("gameheap: %ls - DirectInput8Create will hand out proxies\n", path);
@@ -5542,6 +6316,9 @@ static void gh_patch_module(HMODULE mod, const WCHAR *path)
 	gh_handle_hook(mod);
 	gh_steam_hook(mod);
 	gh_xa27_hook(mod, path);
+	if (g_led && mod != g_self)
+		gh_iat_swap(mod, NULL, "_beginthreadex", (void *)gh_beginthreadex,
+			    (void **)&r_beginthreadex);
 	if (g_vaj && mod != g_self) {
 		gh_iat_swap(mod, NULL, "VirtualAlloc", (void *)gh_va_j, NULL);
 		gh_iat_swap(mod, NULL, "VirtualFree", (void *)gh_vf_j, NULL);
@@ -5642,6 +6419,400 @@ static void gh_add_range(uintptr_t lo, uintptr_t hi)
 	InterlockedIncrement(&g_nreg);
 }
 
+/* After a merge took the pinned big-block spans from the save, the chunks in
+ * them are the save's, but the list naming them is this launch's - made at a
+ * different moment, so it can miss chunks the save had. A block in one of those
+ * is then not ours as far as gh_free can tell, and goes to a heap that never
+ * issued it. Read the chunks back from their own headers instead. */
+static SIZE_T big_walk(uintptr_t base, SIZE_T size, LONG *n)
+{
+	SIZE_T off = 0;
+
+	while (base && off + GH_BIG_GRAIN <= size && *n < GH_BIG_CHUNKS) {
+		GhBigArena *c = (GhBigArena *)(base + off);
+		MEMORY_BASIC_INFORMATION mbi;
+		LONG k;
+
+		if (!VirtualQuery(c, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || !c->cap ||
+		    c->cap > size - off || (c->cap & 0xFFFFu) || c->top > c->cap)
+			break;
+		g_bigch[(*n)++] = c;
+		for (k = 0; k < g_nreg && !((uintptr_t)c >= g_lo[k] && (uintptr_t)c < g_hi[k]); k++)
+			;
+		if (k == g_nreg)
+			gh_add_range((uintptr_t)c, (uintptr_t)c + c->cap);
+		off += c->cap;
+	}
+	return off;
+}
+
+/* D3D9SW_SWARENA=base, D3D9SW_SWARENA_MB: the renderer's DEFAULT-pool memory -
+ * the game's render targets, depth surfaces, default textures and buffers - in
+ * a reservation of its own, excluded from every save and never taken by a
+ * merge. The device reset after a load has the game release and remake all of
+ * it, so none of it is state. A managed texture is state: the game never makes
+ * it again, so its pixels stay in the big-block span with the object naming it.
+ *
+ * Freed blocks stay committed. A rewound object can name a block until the game
+ * releases it, and its reads and the blank after a load must not fault. The
+ * table describes the present; gameheap_swa_sweep frees what nothing names. */
+#define SWA_EXT 8192u
+#define SWA_MIN (64u * 1024u)
+#define SWA_HDR 64u
+
+typedef struct {
+	unsigned off, size, used;
+} SwaExt;
+
+static struct {
+	uintptr_t base;
+	size_t size, live, peak;
+	SwaExt *ext;
+	unsigned n, fails, stale, held, sweeps, swept_n;
+	size_t swept;
+	volatile LONG lock;
+} g_swa SS_PRESENT;
+
+HANDLE sw_heap(void);
+
+static void swa_lock(void)
+{
+	while (InterlockedCompareExchange(&g_swa.lock, 1, 0))
+		Sleep(0);
+}
+
+static void swa_unlock(void)
+{
+	InterlockedExchange(&g_swa.lock, 0);
+}
+
+static void swa_reserve(void)
+{
+	uintptr_t base = gh_knob("D3D9SW_SWARENA", 0);
+	unsigned mb = gh_knob("D3D9SW_SWARENA_MB", 320);
+	void *res, *ext;
+
+	if (!base || !mb)
+		return;
+	res = VirtualAlloc((void *)base, (SIZE_T)mb << 20, MEM_RESERVE, PAGE_READWRITE);
+	ext = VirtualAlloc(NULL, SWA_EXT * sizeof(SwaExt), MEM_RESERVE | MEM_COMMIT,
+			   PAGE_READWRITE);
+	if (!res || (uintptr_t)res != base || !ext) {
+		ss_log("swarena: could not reserve %u MB at %08lX (error %lu) - DEFAULT-pool "
+		       "memory stays in the big-block span\n",
+		       mb, (unsigned long)base, GetLastError());
+		if (res)
+			VirtualFree(res, 0, MEM_RELEASE);
+		if (ext)
+			VirtualFree(ext, 0, MEM_RELEASE);
+		return;
+	}
+	g_swa.ext = (SwaExt *)ext;
+	g_swa.ext[0].off = 0;
+	g_swa.ext[0].size = mb << 20;
+	g_swa.ext[0].used = 0;
+	g_swa.n = 1;
+	g_swa.size = (size_t)mb << 20;
+	g_swa.base = base;
+	ss_log("swarena: %u MB at %08lX for DEFAULT-pool memory, held out of every save\n", mb,
+	       (unsigned long)base);
+}
+
+/* The extent holding offset `off`; the table tiles the arena in order. */
+static SwaExt *swa_find(size_t off)
+{
+	unsigned lo = 0, hi = g_swa.n;
+
+	while (lo < hi) {
+		unsigned mid = (lo + hi) / 2;
+		SwaExt *e = &g_swa.ext[mid];
+
+		if (off < e->off)
+			hi = mid;
+		else if (off >= (size_t)e->off + e->size)
+			lo = mid + 1;
+		else
+			return e;
+	}
+	return NULL;
+}
+
+/* Zeroed, or NULL to let the caller use the span. */
+void *gameheap_swa_alloc(size_t n)
+{
+	size_t want = (n + SWA_HDR + 0xFFFu) & ~(size_t)0xFFFu;
+	unsigned i;
+	unsigned char *raw = NULL;
+
+	if (!g_swa.base || n < SWA_MIN || want < n || want > g_swa.size)
+		return NULL;
+	swa_lock();
+	for (i = 0; i < g_swa.n; i++) {
+		SwaExt *e = &g_swa.ext[i];
+
+		if (e->used || e->size < want)
+			continue;
+		if (e->size > want) {
+			if (g_swa.n >= SWA_EXT)
+				continue;
+			memmove(e + 2, e + 1, (g_swa.n - i - 1) * sizeof(SwaExt));
+			e[1].off = e->off + (unsigned)want;
+			e[1].size = e->size - (unsigned)want;
+			e[1].used = 0;
+			e->size = (unsigned)want;
+			g_swa.n++;
+		}
+		raw = (unsigned char *)VirtualAlloc((void *)(g_swa.base + e->off), e->size,
+						    MEM_COMMIT, PAGE_READWRITE);
+		if (!raw)
+			break;
+		e->used = 1;
+		g_swa.live += e->size;
+		if (g_swa.live > g_swa.peak)
+			g_swa.peak = g_swa.live;
+		break;
+	}
+	if (!raw)
+		g_swa.fails++;
+	swa_unlock();
+	if (!raw)
+		return NULL;
+	memset(raw + SWA_HDR, 0, n);
+	((void **)(raw + SWA_HDR))[-1] = raw;
+	return raw + SWA_HDR;
+}
+
+static void swa_release(SwaExt *e)
+{
+	unsigned i = (unsigned)(e - g_swa.ext);
+
+	e->used = 0;
+	g_swa.live -= e->size;
+	if (i + 1 < g_swa.n && !e[1].used) {
+		e->size += e[1].size;
+		memmove(e + 1, e + 2, (g_swa.n - i - 2) * sizeof(SwaExt));
+		g_swa.n--;
+	}
+	if (i > 0 && !e[-1].used) {
+		e[-1].size += e->size;
+		memmove(e, e + 1, (g_swa.n - i - 1) * sizeof(SwaExt));
+		g_swa.n--;
+	}
+}
+
+/* 1 if p is in the arena, freed or not. The pointer decides, never the word
+ * below it: a rewound object can name a block since reused, whose header is
+ * someone else's. A pointer that is not the start of a live block is left. */
+int gameheap_swa_free(void *p)
+{
+	size_t off = (uintptr_t)p - g_swa.base;
+	SwaExt *e;
+
+	if (!g_swa.base || off >= g_swa.size)
+		return 0;
+	swa_lock();
+	e = swa_find(off);
+	if (e && e->used && (size_t)e->off + SWA_HDR == off)
+		swa_release(e);
+	else
+		g_swa.stale++;
+	swa_unlock();
+	return 1;
+}
+
+size_t gameheap_swa_size(void *p)
+{
+	size_t off = (uintptr_t)p - g_swa.base, n = 0;
+	SwaExt *e;
+
+	if (!g_swa.base || off >= g_swa.size)
+		return 0;
+	swa_lock();
+	e = swa_find(off);
+	if (e && e->used && (size_t)e->off + SWA_HDR == off)
+		n = e->size - SWA_HDR;
+	swa_unlock();
+	return n;
+}
+
+static void swa_scan(uintptr_t lo, uintptr_t hi, unsigned char *mark, const SwaExt *snap,
+		     unsigned nsnap)
+{
+	while (lo < hi) {
+		MEMORY_BASIC_INFORMATION mbi;
+		uintptr_t end, a;
+
+		if (!VirtualQuery((void *)lo, &mbi, sizeof(mbi)))
+			return;
+		end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+		if (end > hi)
+			end = hi;
+		if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+		    (mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE |
+				    PAGE_EXECUTE_WRITECOPY))) {
+			for (a = (lo + 3) & ~(uintptr_t)3; a + 4 <= end; a += 4) {
+				size_t off = *(const uintptr_t *)a - g_swa.base;
+				unsigned l = 0, h = nsnap;
+
+				if (off >= g_swa.size)
+					continue;
+				while (l < h) {
+					unsigned m = (l + h) / 2;
+
+					if (off < snap[m].off)
+						h = m;
+					else if (off >= (size_t)snap[m].off + snap[m].size)
+						l = m + 1;
+					else {
+						if (off >= (size_t)snap[m].off + SWA_HDR)
+							mark[m] = 1;
+						break;
+					}
+				}
+			}
+		}
+		lo = end;
+	}
+}
+
+/* After the device reset that follows a load: every arena block nothing names
+ * is one a rewound or replaced object held, or one made since the save that the
+ * rewound game has no handle to. The objects naming arena blocks live in the
+ * game heap (or ours, with D3D9SW_GHSW_OWN) and this image; anything named from
+ * elsewhere stays, which only ever errs toward keeping. */
+void gameheap_swa_sweep(void)
+{
+	SwaExt *snap;
+	unsigned char *mark;
+	unsigned i, nsnap, nfreed = 0;
+	size_t freed = 0;
+	DWORD t0 = GetTickCount();
+	MEMORY_BASIC_INFORMATION mbi;
+
+	if (!g_swa.base)
+		return;
+	snap = (SwaExt *)VirtualAlloc(NULL, SWA_EXT * (sizeof(SwaExt) + 1),
+				      MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if (!snap)
+		return;
+	mark = (unsigned char *)(snap + SWA_EXT);
+	swa_lock();
+	nsnap = g_swa.n;
+	memcpy(snap, g_swa.ext, nsnap * sizeof(SwaExt));
+	swa_unlock();
+	swa_scan(g_heap_lo, g_heap_hi, mark, snap, nsnap);
+	if (sw_heap() && VirtualQuery(sw_heap(), &mbi, sizeof(mbi))) {
+		uintptr_t ab = (uintptr_t)mbi.AllocationBase, e = ab;
+
+		while (VirtualQuery((void *)e, &mbi, sizeof(mbi)) &&
+		       (uintptr_t)mbi.AllocationBase == ab)
+			e = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+		swa_scan(ab, e, mark, snap, nsnap);
+	}
+	if (g_self) {
+		const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)g_self;
+		const IMAGE_NT_HEADERS *nt =
+			(const IMAGE_NT_HEADERS *)((const char *)g_self + dos->e_lfanew);
+
+		swa_scan((uintptr_t)g_self, (uintptr_t)g_self + nt->OptionalHeader.SizeOfImage,
+			 mark, snap, nsnap);
+	}
+	swa_lock();
+	for (i = 0; i < nsnap; i++) {
+		SwaExt *e;
+
+		if (!snap[i].used || mark[i])
+			continue;
+		e = swa_find(snap[i].off);
+		if (!e || !e->used || e->off != snap[i].off || e->size != snap[i].size)
+			continue;
+		nfreed++;
+		freed += e->size;
+		swa_release(e);
+	}
+	g_swa.sweeps++;
+	g_swa.swept_n += nfreed;
+	g_swa.swept += freed;
+	swa_unlock();
+	VirtualFree(snap, 0, MEM_RELEASE);
+	ss_log("swarena: sweep freed %u block(s), %lu MB nothing named; %lu MB live after, %lu ms\n",
+	       nfreed, (unsigned long)(freed >> 20), (unsigned long)(g_swa.live >> 20),
+	       (unsigned long)(GetTickCount() - t0));
+}
+
+static void swa_report(void)
+{
+	if (!g_swa.base)
+		return;
+	if (!g_swa.held) {
+		savestate_exclude((void *)g_swa.base, g_swa.size);
+		savestate_exclude(g_swa.ext, SWA_EXT * sizeof(SwaExt));
+		g_swa.held = 1;
+	}
+	ss_log("swarena: %lu MB live in %u extent(s), peak %lu MB of %lu; %u allocation(s) "
+	       "fell back to the span, %u stale free(s); %u sweep(s) freed %u block(s), %lu MB\n",
+	       (unsigned long)(g_swa.live >> 20), g_swa.n, (unsigned long)(g_swa.peak >> 20),
+	       (unsigned long)(g_swa.size >> 20), g_swa.fails, g_swa.stale, g_swa.sweeps,
+	       g_swa.swept_n, (unsigned long)(g_swa.swept >> 20));
+}
+
+/* D3D9SW_TEXPACK_BASE, D3D9SW_TEXPACK_MB: an address range taken here, before
+ * the game can place anything in it, for the renderer's texture cache. The
+ * renderer keeps it out of every save. */
+static uintptr_t g_tpk_base SS_PRESENT;
+static size_t g_tpk_size SS_PRESENT;
+
+static void tpk_reserve(void)
+{
+	uintptr_t base = gh_knob("D3D9SW_TEXPACK_BASE", 0);
+	unsigned mb = gh_knob("D3D9SW_TEXPACK_MB", 500);
+
+	if (!base || !mb)
+		return;
+	if (VirtualAlloc((void *)base, (SIZE_T)mb << 20, MEM_RESERVE, PAGE_READWRITE) !=
+	    (void *)base) {
+		ss_log("texpack: could not reserve %u MB at %08lX (error %lu) - managed textures "
+		       "stay in the big-block span\n",
+		       mb, (unsigned long)base, GetLastError());
+		return;
+	}
+	g_tpk_base = base;
+	g_tpk_size = (size_t)mb << 20;
+	ss_log("texpack: %u MB reserved at %08lX for the texture cache\n", mb,
+	       (unsigned long)base);
+}
+
+uintptr_t gameheap_texpack_region(size_t *size)
+{
+	*size = g_tpk_size;
+	return g_tpk_base;
+}
+
+void gameheap_merge_chunks(void)
+{
+	GhBigArena *old[GH_BIG_CHUNKS];
+	LONG n = 0, was = g_nbig, i;
+
+	if (!g_big_chunk || !g_bigpin_base)
+		return;
+	memcpy(old, g_bigch, sizeof(old));
+	g_bigpin_used = big_walk(g_bigpin_base, g_bigpin_size, &n);
+	g_bigpin2_used = big_walk(g_bigpin2_base, g_bigpin2_size, &n);
+	/* Chunks Windows placed were not in the spans and were not taken. */
+	for (i = 0; i < was && n < GH_BIG_CHUNKS; i++) {
+		uintptr_t a = (uintptr_t)old[i];
+
+		if (!(a >= g_bigpin_base && a < g_bigpin_base + g_bigpin_size) &&
+		    !(g_bigpin2_base && a >= g_bigpin2_base && a < g_bigpin2_base + g_bigpin2_size))
+			g_bigch[n++] = old[i];
+	}
+	InterlockedExchange(&g_nbig, n);
+	ss_log("  merge: big-block chunks read back from the save: %ld (this launch had %ld), "
+	       "%lu KB and %lu KB of the pinned spans carved\n",
+	       (long)n, (long)was, (unsigned long)(g_bigpin_used >> 10),
+	       (unsigned long)(g_bigpin2_used >> 10));
+}
+
 int gameheap_import_mode(void)
 {
 	return g_ready && g_imports;
@@ -5669,33 +6840,47 @@ HANDLE gameheap_rt_heap(void)
  * frames later inside RtlAllocateHeap on exactly that heap. Same layout as
  * sw_malloc (the issued block one word below the aligned address), and NULL
  * rather than a runtime fallback when full, so the caller can tell whose block
- * it holds from the block alone. */
-void *gameheap_sw_alloc(size_t n, size_t a)
+ * it holds from the block alone.
+ *
+ * D3D9SW_GHSW_OWN=1 declines the small ones, which then go to sw_heap - pinned
+ * by D3D9SW_GHHEAPS, so not growable. That keeps the small arena the game's
+ * alone, which D3D9SW_MERGE needs to take it whole. */
+static int g_sw_own;
+
+void *gameheap_sw_alloc(size_t n, size_t a, const void *caller)
 {
 	size_t want = n + a + sizeof(void *);
+	unsigned site = (unsigned)(uintptr_t)caller; /* our image never moves */
 	void *raw;
 	uintptr_t p;
 
 	if (!g_ready || !g_imports || want < n)
 		return NULL;
+	if (g_sw_own && want < GH_BIG)
+		return NULL;
 	raw = want >= GH_BIG ? big_alloc(want + sizeof(GhHead))
-			     : gh_halloc(g_heap, 0, want + sizeof(GhHead));
+			     : gh_halloc(g_heap, 0, want + sizeof(GhHead), site);
 	if (!raw) {
 		g_fellback++;
 		return NULL;
 	}
-	raw = give(raw, want);
+	if (want >= GH_BIG)
+		((GhBigBlk *)raw - 1)->owner = GH_BIG_SW;
+	raw = give(raw, want, site);
 	p = ((uintptr_t)raw + sizeof(void *) + a - 1) & ~(uintptr_t)(a - 1);
 	((void **)p)[-1] = raw;
 	return (void *)p;
 }
 
-/* Takes the issued block (the word below what sw_malloc returned). */
+/* Takes the issued block (the word below what sw_malloc returned). An orphan -
+ * inside our reservations, header gone, e.g. a block a restore rewound under a
+ * renderer object - is claimed too, so gh_free drops it instead of sw_free
+ * handing it to a heap that never issued it. */
 int gameheap_sw_owns(void *raw)
 {
 	int orphan;
 
-	return g_ready && g_imports && ours_why(raw, &orphan) != NULL;
+	return g_ready && g_imports && (ours_why(raw, &orphan) != NULL || orphan);
 }
 
 void gameheap_sw_free(void *raw)
@@ -5727,6 +6912,9 @@ int gameheap_install_imports(void)
 		return 0;
 	g_early_on = 1;
 	g_imports = 1;
+	g_sw_own = gh_knob("D3D9SW_GHSW_OWN", 0);
+	g_exe = (uintptr_t)GetModuleHandleA(NULL);
+	gh_trace_arm();
 	if (gh_exe_imports("MSVCR100.dll") && GetModuleHandleA("MSVCR100.dll")) {
 		ucrt = GetModuleHandleA("MSVCR100.dll");
 		kImpDlls[0] = kImpDlls[1] = "MSVCR100.dll";
@@ -5767,11 +6955,14 @@ int gameheap_install_imports(void)
 		return 0;
 	}
 	InitializeCriticalSection(&g_cs);
+	savestate_own_cs(&g_cs);
 	gh_add_range(g_heap_lo, g_heap_hi);
 	gh_gamedll_pin();
 	if (big_mb) {
 		g_big_chunk = (SIZE_T)big_mb << 20;
 		bigpin_reserve();
+		swa_reserve();
+		tpk_reserve();
 		/* Below our own image at 0x60000000: the game holds ~355 MB of these by
 		 * the title screen, more than fits above the big-block span. */
 		raw_reserve(0x40000000u, GH_HOMES);
@@ -5991,6 +7182,8 @@ static HANDLE gh_create_heap(void)
 		g_pin_mb = mb;
 		g_heap_lo = (uintptr_t)res;
 		g_heap_hi = (uintptr_t)res + size;
+		gl_init();
+		gp_init();
 		return (HANDLE)res;
 	}
 	h = (HANDLE)p_RtlCreateHeap(0, res, size, 1u << 20, NULL, NULL);
@@ -6028,6 +7221,19 @@ static HANDLE(WINAPI *r_heapcreate)(DWORD, SIZE_T, SIZE_T);
 static uintptr_t g_hp_base;
 static SIZE_T g_hp_slot;
 static LONG g_hp_n;
+/* D3D9SW_GHHEAPS_DXC=1: d3dcompiler_43's heaps in the top two slots. */
+#define GH_HP_DXC (2u << 20)
+static int g_hp_dxc;
+static LONG g_hp_dxc_n;
+#define GH_HP_LOW (GH_HP_SLOTS - (g_hp_dxc ? 2 : 0))
+
+/* A heap in the D3D9SW_GHHEAPS slots was made there by us for the game, the
+ * runtime, D3DX or the compiler, whatever module holds the most pointers into it. */
+int gameheap_slot_heap(uintptr_t h)
+{
+	return g_hp_base && g_hp_slot && h >= g_hp_base &&
+	       h < g_hp_base + (uintptr_t)GH_HP_SLOTS * g_hp_slot;
+}
 
 static HANDLE WINAPI gh_heapcreate(DWORD opts, SIZE_T init, SIZE_T max)
 {
@@ -6048,9 +7254,30 @@ static HANDLE WINAPI gh_heapcreate(DWORD opts, SIZE_T init, SIZE_T max)
 	for (i = 0; path[i]; i++)
 		if (path[i] == '\\' || path[i] == '/')
 			leaf = path + i + 1;
+	/* D3D9SW_GHHEAPS_DXC=1: the shader compiler's heaps too. D3DX's effects keep
+	 * their state there, so a save that takes the game's objects without them
+	 * has the game holding effects whose insides are this launch's. */
 	pin = g_hp_base && from &&
 	      (gh_is_game_module(from, path) || from == GetModuleHandleA("MSVCR100.dll"));
-	if (pin && p_RtlCreateHeap) {
+	/* Its heaps are small and made in their own order, so they get the top two
+	 * slots cut in 2 MB pieces and the slots below keep the order they had. */
+	if (g_hp_base && from && g_hp_dxc && from == GetModuleHandleA("d3dcompiler_43.dll") &&
+	    p_RtlCreateHeap) {
+		LONG k = InterlockedIncrement(&g_hp_dxc_n) - 1;
+		uintptr_t at = g_hp_base + (GH_HP_SLOTS - 2) * g_hp_slot + (uintptr_t)k * GH_HP_DXC;
+
+		if (k < (LONG)(2 * g_hp_slot / GH_HP_DXC))
+			h = (HANDLE)p_RtlCreateHeap(
+				opts & (HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS |
+					HEAP_CREATE_ENABLE_EXECUTE),
+				(void *)at, GH_HP_DXC, 0x10000, NULL, NULL);
+		ss_log("gameheap: HeapCreate from %ls (%p) - %s compiler slot %ld at %08lX%s\n", leaf,
+		       ret, h ? "PINNED in" : "could not pin in", (long)k, (unsigned long)at,
+		       h ? "" : ", left to Windows");
+		if (h)
+			return h;
+		pin = 1;
+	} else if (pin && p_RtlCreateHeap) {
 		LONG k = InterlockedIncrement(&g_hp_n) - 1;
 		uintptr_t at = g_hp_base + (uintptr_t)k * g_hp_slot;
 		SIZE_T commit = (init + 0xFFFu) & ~(SIZE_T)0xFFFu;
@@ -6059,7 +7286,7 @@ static HANDLE WINAPI gh_heapcreate(DWORD opts, SIZE_T init, SIZE_T max)
 			commit = 0x10000u;
 		if (commit > g_hp_slot)
 			commit = g_hp_slot;
-		if (k < GH_HP_SLOTS)
+		if (k < GH_HP_LOW)
 			h = (HANDLE)p_RtlCreateHeap(
 				opts & (HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS |
 					HEAP_CREATE_ENABLE_EXECUTE),
@@ -6102,6 +7329,7 @@ static void gh_heapcreate_arm(void)
 	}
 	g_hp_base = gh_knob("D3D9SW_GHHEAPS", 0);
 	g_hp_slot = (SIZE_T)gh_knob("D3D9SW_GHHEAPS_MB", 8) << 20;
+	g_hp_dxc = gh_knob("D3D9SW_GHHEAPS_DXC", 0) != 0;
 	if (!p_RtlCreateHeap && nt)
 		p_RtlCreateHeap = (PVOID(NTAPI *)(ULONG, PVOID, SIZE_T, SIZE_T, PVOID,
 						  PVOID))GetProcAddress(nt, "RtlCreateHeap");
@@ -6156,7 +7384,7 @@ typedef struct {
 
 static CtMod g_ct[CT_NMOD + 1]; /* the last row is any other caller */
 static int g_ct_mode;
-static HANDLE g_ct_heap;
+static HANDLE g_ct_heap SS_PRESENT;
 static uintptr_t g_ct_lo, g_ct_hi;
 static void *(__cdecl *rc_malloc)(size_t);
 static void *(__cdecl *rc_calloc)(size_t, size_t);
@@ -6182,10 +7410,34 @@ static int ct_ours(const void *p)
 	return (uintptr_t)p >= g_ct_lo && (uintptr_t)p < g_ct_hi;
 }
 
+/* A request this size makes the Windows heap map a block of its own outside
+ * the slot, wherever the address space has room - a different place on every
+ * machine, and memory no load restores. These go to the pinned big-block
+ * spans instead, which a load does take. */
+static int ct_big(const void *p)
+{
+	uintptr_t u = (uintptr_t)p;
+
+	return ((g_bigpin_base && u >= g_bigpin_base && u < g_bigpin_base + g_bigpin_size) ||
+		(g_bigpin2_base && u >= g_bigpin2_base && u < g_bigpin2_base + g_bigpin2_size)) &&
+	       gameheap_sw_owns(((void **)p)[-1]);
+}
+
 static void *ct_alloc(CtMod *m, size_t n, int zero)
 {
 	void *p;
 
+	if (g_ct_heap && n >= GH_BIG) {
+		p = gameheap_sw_alloc(n, 16, m);
+		if (p) {
+			if (zero)
+				memset(p, 0, n);
+			InterlockedIncrement(&m->live);
+			InterlockedExchangeAdd(&m->bytes, (LONG)n);
+			return p;
+		}
+		InterlockedIncrement(&m->spill);
+	}
 	if (g_ct_heap) {
 		p = HeapAlloc(g_ct_heap, zero ? HEAP_ZERO_MEMORY : 0, n ? n : 1);
 		if (p) {
@@ -6211,6 +7463,11 @@ static void ct_release(CtMod *m, void *p)
 	if (ct_ours(p)) {
 		InterlockedExchangeAdd(&m->bytes, -(LONG)HeapSize(g_ct_heap, 0, p));
 		HeapFree(g_ct_heap, 0, p);
+		return;
+	}
+	if (ct_big(p)) {
+		InterlockedExchangeAdd(&m->bytes, -(LONG)gameheap_sw_size(((void **)p)[-1]));
+		gameheap_sw_free(((void **)p)[-1]);
 		return;
 	}
 	if (g_ct_heap)
@@ -6289,6 +7546,8 @@ static void *__cdecl ct_realloc(void *p, size_t n)
 			InterlockedExchangeAdd(&m->bytes, (LONG)HeapSize(g_ct_heap, 0, q) - (LONG)o);
 			return q;
 		}
+	} else if (ct_big(p)) {
+		o = gameheap_sw_size(((void **)p)[-1]) - 16 - sizeof(void *);
 	} else if (g_ct_heap) {
 		o = rc_msize(p);
 	} else {
@@ -6310,6 +7569,14 @@ static void *__cdecl ct_amalloc(size_t n, size_t a)
 {
 	void *p;
 	CT_ENTER(CT_AMALLOC);
+	if (g_ct_heap && a && !(a & (a - 1)) && n >= GH_BIG) {
+		p = gameheap_sw_alloc(n, a, m);
+		if (p) {
+			InterlockedIncrement(&m->live);
+			InterlockedExchangeAdd(&m->bytes, (LONG)n);
+			return p;
+		}
+	}
 	if (g_ct_heap && a && !(a & (a - 1))) {
 		void *raw;
 
@@ -6343,6 +7610,10 @@ static void __cdecl ct_afree(void *p)
 
 		InterlockedExchangeAdd(&m->bytes, -(LONG)HeapSize(g_ct_heap, 0, raw));
 		HeapFree(g_ct_heap, 0, raw);
+		return;
+	}
+	if (ct_big(p)) {
+		gameheap_sw_free(((void **)p)[-1]);
 		return;
 	}
 	if (g_ct_heap)
@@ -6383,7 +7654,7 @@ static void ct_arm(void)
 
 		/* Without an address of its own it takes the next D3D9SW_GHHEAPS
 		 * slot, already reserved and in the same order every launch. */
-		if (!at && g_hp_base && g_hp_n < GH_HP_SLOTS) {
+		if (!at && g_hp_base && g_hp_n < GH_HP_LOW) {
 			LONG k = InterlockedIncrement(&g_hp_n) - 1;
 
 			at = g_hp_base + (uintptr_t)k * g_hp_slot;
@@ -6637,6 +7908,11 @@ int gameheap_pin_ranges(uintptr_t *base, uintptr_t *size, const char **what, int
 		size[n] = g_bigpin_size;
 		what[n++] = "gameheap pin: big blocks";
 	}
+	if (g_bigpin2_base && g_bigpin2_size && n < max) {
+		base[n] = g_bigpin2_base;
+		size[n] = g_bigpin2_size;
+		what[n++] = "gameheap pin: big blocks, second span";
+	}
 	return n;
 }
 
@@ -6670,8 +7946,7 @@ static void gh_trace_write(const char *path)
 		return;
 	if (n > g_tr_cap)
 		n = g_tr_cap;
-	f = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
-			FILE_ATTRIBUTE_NORMAL, NULL);
+	f = swlog_create(path, CREATE_ALWAYS);
 	if (f == INVALID_HANDLE_VALUE) {
 		ss_log("gameheap: cannot write %s, error %lu\n", path, GetLastError());
 		return;
@@ -6688,14 +7963,26 @@ static void gh_trace_write(const char *path)
 	 * the extra two are appended, not inserted. */
 	wsprintfA(line, "# image %08lX\r\n", (unsigned long)g_exe);
 	WriteFile(f, line, (DWORD)lstrlenA(line), &wrote, NULL);
-	WriteFile(f, "# op size offset site ordinal\r\n", 31, &wrote, NULL);
-	for (i = 0; i < n; i++) {
-		int k = wsprintfA(line, "%c %08lX %08lX %08lX %08lX\r\n",
-				  (char)g_tr[i].op, (unsigned long)g_tr[i].size,
-				  (unsigned long)g_tr[i].off,
-				  (unsigned long)g_tr[i].site,
-				  (unsigned long)g_tr[i].ord);
-		WriteFile(f, line, (DWORD)k, &wrote, NULL);
+	/* Threads are numbered in the order they first allocate, so the column
+	 * compares across launches where the ids themselves never match. */
+	WriteFile(f, "# op size offset site ordinal thread\r\n", 38, &wrote, NULL);
+	{
+		unsigned tids[64];
+		int nt = 0, t;
+
+		for (i = 0; i < n; i++) {
+			int k;
+
+			for (t = 0; t < nt && tids[t] != g_tr[i].tid; t++)
+				;
+			if (t == nt && nt < 64)
+				tids[nt++] = g_tr[i].tid;
+			k = wsprintfA(line, "%c %08lX %08lX %08lX %08lX T%d\r\n",
+				      (char)g_tr[i].op, (unsigned long)g_tr[i].size,
+				      (unsigned long)g_tr[i].off, (unsigned long)g_tr[i].site,
+				      (unsigned long)g_tr[i].ord, t);
+			WriteFile(f, line, (DWORD)k, &wrote, NULL);
+		}
 	}
 	CloseHandle(f);
 	ss_log("gameheap: %s written, %ld of %ld operation(s)%s\n", path, (long)n,
@@ -7250,6 +8537,8 @@ void gameheap_report(void)
 {
 	gh_early_flush();
 	gh_trace_dump();
+	gl_write("gh_ledger.txt");
+	swa_report();
 	if (g_vaj && !g_vaj_held) {
 		/* Not at attach: excluding starts the engine's helper thread, which
 		 * must not happen under the loader lock. */

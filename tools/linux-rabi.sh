@@ -78,7 +78,7 @@ cmd_build() {
 	zig="$(zig_bin)"
 	mkdir -p "$OUT"
 	warn=(-O2 -Wall -Wno-incompatible-function-pointer-types)
-	d3d11src=(d3d11_sw.c dxbc.c savestate.c swrast.c trace.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c gpuprobe.c gpu.c d3d11.def)
+	d3d11src=(d3d11_sw.c dxbc.c savestate.c swrast.c trace.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c logdir.c gpuprobe.c gpu.c d3d11.def)
 	echo "=== zig cc -target x86-windows-gnu (same flags as build.ps1) ==="
 	(cd "$ROOT" && "$zig" cc "${warn[@]}" -DD3D9SW_VARIANT=d3d11 \
 		-DSWRAST_DEFAULT_THREADS=32 -DSWRAST_THREADS_PHYSICAL \

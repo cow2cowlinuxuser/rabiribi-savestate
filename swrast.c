@@ -1,3 +1,5 @@
+/* See d3d9_sw.c: renderer statics, taken whole by a merge. */
+#pragma clang section bss = ".swbss" data = ".swdata"
 #include "swrast.h"
 
 #include <d3d9types.h>
@@ -10,6 +12,11 @@
 #include <string.h>
 
 #include "swalloc.h"
+
+#ifndef SS_PRESENT
+#define SS_PRESENT __attribute__((section(".sspres")))
+#endif
+void savestate_own_cs(CRITICAL_SECTION *cs) __attribute__((weak));
 
 static int iclamp(int v, int lo, int hi)
 {
@@ -1714,9 +1721,9 @@ typedef struct SwTile {
 	unsigned cap;
 } SwTile;
 
-static HANDLE g_wake[SWRAST_MAX_THREADS];
-static HANDLE g_thread[SWRAST_MAX_THREADS];
-static HANDLE g_done;
+static HANDLE g_wake[SWRAST_MAX_THREADS] SS_PRESENT;
+static HANDLE g_thread[SWRAST_MAX_THREADS] SS_PRESENT;
+static HANDLE g_done SS_PRESENT;
 static volatile LONG g_left;
 static volatile int g_die;
 static int g_nthreads;
@@ -2996,6 +3003,8 @@ static void osd_init_once(void)
 
 	if (InterlockedCompareExchange(&started, 1, 0) == 0) {
 		InitializeCriticalSection(&g_osd_cs);
+		if (savestate_own_cs)
+			savestate_own_cs(&g_osd_cs);
 		InterlockedExchange(&g_osd_ready, 1);
 		return;
 	}
