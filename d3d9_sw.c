@@ -3840,7 +3840,7 @@ static ULONG WINAPI Tex_AddRef(IDirect3DTexture9 *this)
  * restored from another launch can name a buffer that launch allocated outside
  * every region the load took. Freeing that reads a heap header from unmapped
  * memory, so it is leaked instead. */
-static void free_live(void *p)
+static __attribute__((always_inline)) inline void free_live(void *p)
 {
 	static volatile LONG leaked;
 	MEMORY_BASIC_INFORMATION mbi;

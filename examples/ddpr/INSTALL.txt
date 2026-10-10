@@ -1,0 +1,52 @@
+DoDonPachi Resurrection savestates - v2.0
+=========================================
+
+Install
+-------
+1. Open the game folder: Steam > DoDonPachi Resurrection > Manage >
+   Browse local files. It holds default.exe.
+2. Copy d3d9.dll and d3d9_sw.cfg into that folder.
+3. Start the game through Steam as usual.
+
+Remove both files to go back to the stock game.
+
+Keys
+----
+F5        save slot 0
+Shift+F5  load slot 0
+
+A save is d3d9sw_slot0.bin, .cfg, .json, .meta and .regions in the game
+folder. To move a save to another PC, copy those five files and the
+d3d9sw_pack folder. Both PCs need this same d3d9.dll and this same
+d3d9_sw.cfg; a save from a different d3d9.dll build is refused.
+
+What was tested
+---------------
+- Saves load in the same session, in a later launch, after a reboot, and
+  on other PCs: saves from two other Windows machines with different
+  Windows builds loaded and played on a third.
+- Loads were checked for a few hundred to about a thousand frames of play
+  afterwards. Long sessions after a load are not tested.
+
+Not covered
+-----------
+- Other games. The renderer is a general Direct3D 9 replacement, but this
+  config, and the testing, are for DDPR only. See the release notes.
+- Linux / Proton.
+- The game's own clock is not wound back on a load (REWIND_CLOCK=0).
+
+Example save and recording
+--------------------------
+The separate example download has a slot 0 save, the texture pack, and
+d3d9sw_input.rec, the input recording the save was taken from (frame 4800).
+Copy them into the game folder and press Shift+F5 in a stage to load the
+save. To watch the recording instead, add this line to d3d9_sw.cfg:
+
+    D3D9SW_INPUT=replay
+
+and remove it again to play yourself.
+
+Logs
+----
+Each launch writes logs\<date>_default_<pid>\savestate.txt in the game
+folder. Include it with any report.

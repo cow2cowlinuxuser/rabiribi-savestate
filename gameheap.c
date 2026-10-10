@@ -1734,6 +1734,24 @@ static uintptr_t bigpin_one(const char *at, const char *mbk, uintptr_t def, unsi
 	return base;
 }
 
+/* D3D9SW_GHFB_PIN/_MB: the renderer's colour and depth buffers in a span of
+ * their own. They are sized to the screen, and as the first big blocks in the
+ * game's span they moved every game block after them by the difference - a
+ * 1440p save and a 1080p save disagreed on where every pool lived. Here they
+ * are still pinned, saved and rewound with the device that names them; only
+ * the game's span stops depending on the monitor. One chunk covering the whole
+ * reservation, which big_alloc never serves the game from. */
+static uintptr_t g_fbpin_base;
+static SIZE_T g_fbpin_size;
+static GhBigArena *g_fbch;
+
+static int big_is_fb(const GhBigArena *c)
+{
+	uintptr_t a = (uintptr_t)c;
+
+	return g_fbpin_base && a >= g_fbpin_base && a < g_fbpin_base + g_fbpin_size;
+}
+
 static void bigpin_reserve(void)
 {
 	g_bigpin_base = bigpin_one("D3D9SW_GHBIG_PIN", "D3D9SW_GHBIG_PIN_MB", 1, 1792,
@@ -1741,6 +1759,9 @@ static void bigpin_reserve(void)
 	if (g_bigpin_base)
 		g_bigpin2_base = bigpin_one("D3D9SW_GHBIG2_PIN", "D3D9SW_GHBIG2_PIN_MB", 0, 0,
 					    &g_bigpin2_size);
+	if (g_bigpin_base)
+		g_fbpin_base = bigpin_one("D3D9SW_GHFB_PIN", "D3D9SW_GHFB_PIN_MB", 0, 0,
+					  &g_fbpin_size);
 }
 
 /* One more chunk, at least `need` bytes of blocks. Serialised so two threads
@@ -1806,27 +1827,58 @@ static GhBigArena *chunk_add(size_t need)
 	return c;
 }
 
+/* A block that does not lie inside its chunk's committed pages faults later, in
+ * whoever writes to it, far from here. */
+static volatile LONG g_big_outside;
+const void *volatile gh_sw_free_caller; /* set by sw_free around its free */
+
+static GhBigBlk *big_check(GhBigBlk *b, size_t need, const void *caller)
+{
+	GhBigArena *c = b ? big_chunk_of(b) : NULL;
+	uintptr_t lo, end;
+
+	if (!b)
+		return b;
+	end = (uintptr_t)b + need;
+	lo = c ? (uintptr_t)c : 0;
+	if (c && end <= lo + c->committed && end <= lo + c->top && c->top <= c->cap)
+		return b;
+	if (InterlockedIncrement(&g_big_outside) <= 8)
+		ss_log("gameheap: big block %08lX + %lu KB (to %08lX) is outside its chunk - "
+		       "chunk %08lX cap %08lX top %08lX committed %08lX, free list head %08lX, "
+		       "asked for by %p <<< read this\n",
+		       (unsigned long)(uintptr_t)b, (unsigned long)(need >> 10),
+		       (unsigned long)end, (unsigned long)lo,
+		       (unsigned long)(c ? c->cap : 0), (unsigned long)(c ? c->top : 0),
+		       (unsigned long)(c ? c->committed : 0),
+		       (unsigned long)(uintptr_t)(c ? c->free : 0), caller);
+	return b;
+}
+
 static void *big_alloc(size_t n)
 {
 	size_t need = (n + sizeof(GhBigBlk) + GH_BIG_GRAIN - 1) & ~(size_t)(GH_BIG_GRAIN - 1);
 	GhBigBlk *b = NULL;
 	GhBigArena *c;
 	LONG i, seen = g_nbig;
+	const void *caller = __builtin_return_address(0);
 
 	if (!g_big_chunk || need < n)
 		return NULL;
 	for (i = 0; i < seen && !b; i++)
-		b = chunk_alloc(g_bigch[i], need);
+		if (!big_is_fb(g_bigch[i]))
+			b = big_check(chunk_alloc(g_bigch[i], need), need, caller);
 	if (b)
 		return b + 1;
 	while (InterlockedCompareExchange(&g_big_grow, 1, 0))
 		Sleep(0);
 	for (i = seen; i < g_nbig && !b; i++)
-		b = chunk_alloc(g_bigch[i], need);
+		if (!big_is_fb(g_bigch[i]))
+			b = big_check(chunk_alloc(g_bigch[i], need), need, caller);
 	if (!b) {
 		c = chunk_add(need);
 		if (c)
-			b = chunk_alloc(c, need);
+			b = big_check(chunk_alloc(c, need), need, caller);
 		else
 			g_big_nochunk++;
 	}
@@ -1850,6 +1902,29 @@ static void big_free(void *p)
 	c->live -= b->size;
 	for (pp = &c->free; *pp && *pp < b; pp = &(*pp)->next)
 		prev = *pp;
+	if ((uintptr_t)b + b->size > (uintptr_t)c + c->top ||
+	    (prev && (char *)prev + prev->size > (char *)b) ||
+	    (*pp && (char *)b + b->size > (char *)*pp)) {
+		big_unlock(c);
+		if (InterlockedIncrement(&g_big_outside) <= 8)
+			ss_log("gameheap: freeing big block %08lX + %lu KB (owner %s) in chunk "
+			       "%08lX top %08lX overlaps the free list or runs past the top - "
+			       "free block before %08lX + %lu KB, after %08lX; freed by %p, sw_free "
+			       "called from %p; header words %08lX %08lX %08lX %08lX | %08lX "
+			       "%08lX %08lX %08lX, left out <<< read this\n",
+			       (unsigned long)(uintptr_t)b, (unsigned long)(b->size >> 10),
+			       b->owner == GH_BIG_SW ? "renderer" : "game",
+			       (unsigned long)(uintptr_t)c, (unsigned long)c->top,
+			       (unsigned long)(uintptr_t)prev,
+			       (unsigned long)(prev ? prev->size >> 10 : 0),
+			       (unsigned long)(uintptr_t)*pp, __builtin_return_address(0),
+			       gh_sw_free_caller, (unsigned long)((uintptr_t *)b)[0],
+			       (unsigned long)((uintptr_t *)b)[1], (unsigned long)((uintptr_t *)b)[2],
+			       (unsigned long)((uintptr_t *)b)[3], (unsigned long)((uintptr_t *)b)[4],
+			       (unsigned long)((uintptr_t *)b)[5], (unsigned long)((uintptr_t *)b)[6],
+			       (unsigned long)((uintptr_t *)b)[7]);
+		return;
+	}
 	b->next = *pp;
 	*pp = b;
 	if (b->next && (char *)b + b->size == (char *)b->next) {
@@ -5923,6 +5998,9 @@ GH_DI_FWD(31)
 static ULONG WINAPI gh_di_release(GhDiProxy *self);
 static HRESULT WINAPI gh_di_createdevice(GhDiProxy *self, const GUID *g, void **out,
 					 void *outer);
+static HRESULT WINAPI gh_di_getstate(GhDiProxy *self, DWORD cb, void *data);
+static HRESULT WINAPI gh_di_getdata(GhDiProxy *self, DWORD cb, void *rg, DWORD *inout,
+				    DWORD flags);
 
 /* IDirectInput8A/W: 11 methods, CreateDevice at 3. */
 static const void *const g_di_vt8[11] = {
@@ -5936,7 +6014,7 @@ static const void *const g_di_vt8[11] = {
 static const void *const g_di_vtdev[32] = {
 	(void *)gh_di_fwd0,  (void *)gh_di_fwd1,  (void *)gh_di_release, (void *)gh_di_fwd3,
 	(void *)gh_di_fwd4,  (void *)gh_di_fwd5,  (void *)gh_di_fwd6,	 (void *)gh_di_fwd7,
-	(void *)gh_di_fwd8,  (void *)gh_di_fwd9,  (void *)gh_di_fwd10,	 (void *)gh_di_fwd11,
+	(void *)gh_di_fwd8,  (void *)gh_di_getstate, (void *)gh_di_getdata, (void *)gh_di_fwd11,
 	(void *)gh_di_fwd12, (void *)gh_di_fwd13, (void *)gh_di_fwd14,	 (void *)gh_di_fwd15,
 	(void *)gh_di_fwd16, (void *)gh_di_fwd17, (void *)gh_di_fwd18,	 (void *)gh_di_fwd19,
 	(void *)gh_di_fwd20, (void *)gh_di_fwd21, (void *)gh_di_fwd22,	 (void *)gh_di_fwd23,
@@ -5985,6 +6063,225 @@ static HRESULT WINAPI gh_di_createdevice(GhDiProxy *self, const GUID *g, void **
 
 	if (SUCCEEDED(hr) && out && *out)
 		*out = gh_di_wrap(*out, g_di_vtdev, "device");
+	return hr;
+}
+
+/* D3D9SW_INPUT=record|replay: deterministic input.
+ *
+ * Recording writes down every GetDeviceState and GetDeviceData answer the game
+ * receives, in call order, with the proxy it came through and the frame it came
+ * on. Replay hands the same answers back in the same order, whatever the real
+ * devices say. Order, not time, is the key: the game asks once per tick, so the
+ * Nth question gets the Nth answer even if a tick lands on another frame. The
+ * frame is kept to say when that happens.
+ *
+ * The real device is still asked first during a replay, so its buffer keeps
+ * draining and live input picks up cleanly when the recording runs out. A call
+ * that does not match the next record - another device, method, size or
+ * request - ends the replay at that point rather than feeding the game answers
+ * to a question it did not ask.
+ *
+ * Notes go to their own file beside the recording: ss_log drops everything
+ * until a save stands up the control block, and a replay run need not save. */
+#define GH_IN_MAGIC 0x4E494444u /* "DDIN" */
+#define GH_IN_VERSION 1u
+
+typedef struct {
+	DWORD seq, frame;
+	WORD dev, method;
+	LONG hr;
+	DWORD cb, flags, in, out, len; /* len bytes of answer follow */
+} GhInRec;
+
+enum { GH_IN_OFF, GH_IN_RECORD, GH_IN_REPLAY, GH_IN_DONE };
+static int g_in_mode SS_PRESENT;
+static HANDLE g_in_file SS_PRESENT, g_in_notes SS_PRESENT;
+static unsigned char *g_in_buf SS_PRESENT;
+static DWORD g_in_size SS_PRESENT, g_in_pos SS_PRESENT, g_in_seq SS_PRESENT;
+static DWORD g_in_drift SS_PRESENT, g_in_last_note SS_PRESENT;
+static volatile LONG g_in_lock SS_PRESENT;
+
+static void gh_in_note(const char *fmt, ...)
+{
+	char line[512];
+	int n;
+	DWORD w;
+	va_list ap;
+
+	if (!g_in_notes || g_in_notes == INVALID_HANDLE_VALUE)
+		return;
+	va_start(ap, fmt);
+	n = wvsprintfA(line, fmt, ap);
+	va_end(ap);
+	if (n > 0)
+		WriteFile(g_in_notes, line, (DWORD)n, &w, NULL);
+}
+
+static void gh_in_init(void)
+{
+	char mode[16], path[MAX_PATH], notes[MAX_PATH + 8];
+	unsigned n = savestate_getenv("D3D9SW_INPUT", mode, sizeof(mode));
+	DWORD hdr[2], got;
+
+	if (!n || (lstrcmpiA(mode, "record") && lstrcmpiA(mode, "replay")))
+		return;
+	if (!savestate_getenv("D3D9SW_INPUT_FILE", path, sizeof(path))) {
+		char *slash;
+		GetModuleFileNameA(NULL, path, sizeof(path));
+		slash = strrchr(path, '\\');
+		lstrcpyA(slash ? slash + 1 : path, "d3d9sw_input.rec");
+	}
+	wsprintfA(notes, "%s.log", path);
+	g_in_notes = CreateFileA(notes, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
+				 FILE_ATTRIBUTE_NORMAL, NULL);
+	if (!lstrcmpiA(mode, "record")) {
+		g_in_file = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
+					FILE_ATTRIBUTE_NORMAL, NULL);
+		if (g_in_file == INVALID_HANDLE_VALUE) {
+			gh_in_note("input: cannot create %s (error %lu), not recording\n", path,
+				   GetLastError());
+			return;
+		}
+		hdr[0] = GH_IN_MAGIC;
+		hdr[1] = GH_IN_VERSION;
+		WriteFile(g_in_file, hdr, sizeof(hdr), &got, NULL);
+		g_in_mode = GH_IN_RECORD;
+		gh_in_note("input: recording every DirectInput answer to %s\n", path);
+		return;
+	}
+	g_in_file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL, NULL);
+	if (g_in_file == INVALID_HANDLE_VALUE) {
+		gh_in_note("input: cannot open %s (error %lu), input stays live\n", path,
+			   GetLastError());
+		return;
+	}
+	g_in_size = GetFileSize(g_in_file, NULL);
+	g_in_buf = g_in_size >= sizeof(hdr) && g_in_size != INVALID_FILE_SIZE
+			   ? VirtualAlloc(NULL, g_in_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+			   : NULL;
+	if (!g_in_buf || !ReadFile(g_in_file, g_in_buf, g_in_size, &got, NULL) ||
+	    got != g_in_size || ((DWORD *)g_in_buf)[0] != GH_IN_MAGIC ||
+	    ((DWORD *)g_in_buf)[1] != GH_IN_VERSION) {
+		gh_in_note("input: %s is not a recording this build reads, input stays live\n",
+			   path);
+		return;
+	}
+	CloseHandle(g_in_file);
+	g_in_file = NULL;
+	g_in_pos = sizeof(hdr);
+	g_in_mode = GH_IN_REPLAY;
+	gh_in_note("input: replaying %s (%lu bytes); the devices are still read but the game "
+		   "gets the recorded answers\n",
+		   path, g_in_size);
+}
+
+static void gh_in_end(DWORD frame, const char *why)
+{
+	g_in_mode = GH_IN_DONE;
+	gh_in_note("input: replay ENDED at frame %lu after %lu answer(s): %s. Input is live from "
+		   "here. %lu answer(s) came on a different frame than recorded.\n",
+		   frame, g_in_seq, why, g_in_drift);
+}
+
+/* method 9 is GetDeviceState, 10 GetDeviceData; in is the item count the game
+ * offered, and inout what it is told came back. */
+static HRESULT gh_in_step(GhDiProxy *self, WORD method, HRESULT hr, DWORD cb, DWORD flags,
+			  void *data, DWORD *inout, DWORD in)
+{
+	DWORD frame = savestate_present_frame();
+	WORD dev = (WORD)(self - g_di->p);
+
+	while (InterlockedCompareExchange(&g_in_lock, 1, 0))
+		SwitchToThread();
+	if (g_in_mode == GH_IN_RECORD) {
+		GhInRec r;
+		DWORD w;
+
+		r.seq = g_in_seq++;
+		r.frame = frame;
+		r.dev = dev;
+		r.method = method;
+		r.hr = hr;
+		r.cb = cb;
+		r.flags = flags;
+		r.in = in;
+		r.out = inout ? *inout : 0;
+		if (FAILED(hr) || !data)
+			r.len = 0;
+		else
+			r.len = method == 9 ? cb : (inout ? *inout * cb : 0);
+		WriteFile(g_in_file, &r, sizeof(r), &w, NULL);
+		if (r.len)
+			WriteFile(g_in_file, data, r.len, &w, NULL);
+		if (frame / 600 != g_in_last_note) {
+			g_in_last_note = frame / 600;
+			gh_in_note("input: frame %lu, %lu answer(s) recorded\n", frame, g_in_seq);
+		}
+	} else if (g_in_mode == GH_IN_REPLAY) {
+		const GhInRec *r = (const GhInRec *)(g_in_buf + g_in_pos);
+		char why[160];
+
+		if (g_in_pos + sizeof(*r) > g_in_size ||
+		    g_in_pos + sizeof(*r) + r->len > g_in_size) {
+			gh_in_end(frame, "the recording ran out");
+		} else if (r->dev != dev || r->method != method || r->cb != cb ||
+			   (method == 10 && (r->flags != flags || r->in != in || (!data && r->len)))) {
+			wsprintfA(why,
+				  "the game asked device %u method %u size %lu (%lu items, flags %lX), "
+				  "the recording has device %u method %u size %lu (%lu items, flags %lX) "
+				  "recorded on frame %lu",
+				  dev, method, cb, in, flags, r->dev, r->method, r->cb, r->in, r->flags,
+				  r->frame);
+			gh_in_end(frame, why);
+		} else {
+			if (r->frame != frame && g_in_drift++ < 20)
+				gh_in_note("input: answer %lu came on frame %lu, recorded on frame %lu\n",
+					   r->seq, frame, r->frame);
+			if (method == 9) {
+				if (r->len == cb && data)
+					memcpy(data, r + 1, cb);
+			} else {
+				if (inout)
+					*inout = r->out;
+				if (r->len && data)
+					memcpy(data, r + 1, r->len);
+			}
+			hr = r->hr;
+			g_in_pos += sizeof(*r) + r->len;
+			g_in_seq++;
+			if (frame / 600 != g_in_last_note) {
+				g_in_last_note = frame / 600;
+				gh_in_note("input: frame %lu, %lu answer(s) replayed, %lu off-frame\n",
+					   frame, g_in_seq, g_in_drift);
+			}
+		}
+	}
+	InterlockedExchange(&g_in_lock, 0);
+	return hr;
+}
+
+static HRESULT WINAPI gh_di_getstate(GhDiProxy *self, DWORD cb, void *data)
+{
+	void *r = self->real;
+	HRESULT hr =
+		((HRESULT(WINAPI *)(void *, DWORD, void *))(*(void ***)r)[9])(r, cb, data);
+
+	if (g_in_mode == GH_IN_RECORD || g_in_mode == GH_IN_REPLAY)
+		hr = gh_in_step(self, 9, hr, cb, 0, data, NULL, 0);
+	return hr;
+}
+
+static HRESULT WINAPI gh_di_getdata(GhDiProxy *self, DWORD cb, void *rg, DWORD *inout,
+				    DWORD flags)
+{
+	void *r = self->real;
+	DWORD in = inout ? *inout : 0;
+	HRESULT hr = ((HRESULT(WINAPI *)(void *, DWORD, void *, DWORD *, DWORD))(
+		*(void ***)r)[10])(r, cb, rg, inout, flags);
+
+	if (g_in_mode == GH_IN_RECORD || g_in_mode == GH_IN_REPLAY)
+		hr = gh_in_step(self, 10, hr, cb, flags, rg, inout, in);
 	return hr;
 }
 
@@ -6047,8 +6344,14 @@ static void gh_di_hook(HMODULE mod, const WCHAR *path)
 	for (i = 0; path[i]; i++)
 		if (path[i] == '\\' || path[i] == '/')
 			leaf = path + i + 1;
+	static int in_ready;
+
 	if (mod == g_self || !gh_knob("D3D9SW_DIPROXY", 0))
 		return;
+	if (!in_ready) {
+		in_ready = 1;
+		gh_in_init();
+	}
 	/* A static import (DDPR's default.exe) goes straight to DINPUT8. */
 	if (gh_di_home() && gh_iat_swap(mod, "DINPUT8.dll", "DirectInput8Create",
 					(void *)gh_di8create, (void **)&r_di8create) > 0)
@@ -6299,6 +6602,53 @@ static void gh_xa27_hook(HMODULE mod, const WCHAR *path)
 		ss_log("gameheap: %ls - CoCreateInstance(XAudio2 2.7) goes to xa2_sw\n", path);
 }
 
+/* A lock the game makes lives in memory a load restores, and by default Windows
+ * gives each one a bookkeeping block on the process heap - a different address
+ * every launch - and stores the pointer in the lock. The first time a restored
+ * lock is contended in another launch, ntdll counts the contention through that
+ * pointer and faults: the dat112.bin crash 629 frames after a load. Made
+ * without the bookkeeping, the lock holds no pointer at all. */
+#ifndef CRITICAL_SECTION_NO_DEBUG_INFO
+#define CRITICAL_SECTION_NO_DEBUG_INFO 0x01000000
+#endif
+static volatile LONG g_cs_plain;
+
+static void WINAPI gh_ics(LPCRITICAL_SECTION cs)
+{
+	InterlockedIncrement(&g_cs_plain);
+	InitializeCriticalSectionEx(cs, 0, CRITICAL_SECTION_NO_DEBUG_INFO);
+}
+
+static BOOL WINAPI gh_ics_spin(LPCRITICAL_SECTION cs, DWORD spin)
+{
+	InterlockedIncrement(&g_cs_plain);
+	return InitializeCriticalSectionEx(cs, spin, CRITICAL_SECTION_NO_DEBUG_INFO);
+}
+
+static BOOL WINAPI gh_ics_ex(LPCRITICAL_SECTION cs, DWORD spin, DWORD flags)
+{
+	InterlockedIncrement(&g_cs_plain);
+	return InitializeCriticalSectionEx(cs, spin, flags | CRITICAL_SECTION_NO_DEBUG_INFO);
+}
+
+static void gh_cs_hook(HMODULE mod, const WCHAR *path)
+{
+	const WCHAR *leaf = path;
+	unsigned i;
+
+	if (mod == g_self)
+		return;
+	for (i = 0; path[i]; i++)
+		if (path[i] == '\\' || path[i] == '/')
+			leaf = path + i + 1;
+	if (!gh_is_game_module(mod, path) && lstrcmpiW(leaf, L"MSVCR100.dll") &&
+	    lstrcmpiW(leaf, L"MSVCP100.dll"))
+		return;
+	gh_iat_swap(mod, NULL, "InitializeCriticalSection", (void *)gh_ics, NULL);
+	gh_iat_swap(mod, NULL, "InitializeCriticalSectionAndSpinCount", (void *)gh_ics_spin, NULL);
+	gh_iat_swap(mod, NULL, "InitializeCriticalSectionEx", (void *)gh_ics_ex, NULL);
+}
+
 static void gh_patch_module(HMODULE mod, const WCHAR *path)
 {
 	unsigned f, d;
@@ -6306,6 +6656,7 @@ static void gh_patch_module(HMODULE mod, const WCHAR *path)
 
 	gh_heapcreate_hook(mod);
 	ct_hook(mod, path);
+	gh_cs_hook(mod, path);
 	if (!gh_is_game_module(mod, path))
 		return;
 	gh_physx_hook(mod, path);
@@ -6788,6 +7139,119 @@ uintptr_t gameheap_texpack_region(size_t *size)
 	return g_tpk_base;
 }
 
+/* D3D9SW_HWWATCH=address: after a merge, a CPU write watchpoint on that word in
+ * every thread, logging who writes it. For a word that changes with nobody
+ * owning up to it. */
+static uintptr_t g_hww;
+static volatile LONG g_hww_hits;
+
+static LONG CALLBACK hww_veh(EXCEPTION_POINTERS *x)
+{
+	CONTEXT *c = x->ContextRecord;
+	DWORD *sp = (DWORD *)c->Esp, *bp = (DWORD *)c->Ebp;
+	MEMORY_BASIC_INFORMATION mbi;
+	DWORD ra = 0;
+
+	if (x->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP || !(c->Dr6 & 1))
+		return EXCEPTION_CONTINUE_SEARCH;
+	c->Dr6 = 0;
+	if (VirtualQuery(bp, &mbi, sizeof(mbi)) && mbi.State == MEM_COMMIT)
+		ra = bp[1];
+	if (InterlockedIncrement(&g_hww_hits) <= 16)
+		ss_log("hwwatch: %08lX now %08lX, written by the instruction before %08lX, "
+		       "thread %lu; [ebp+4] %08lX, stack %08lX %08lX %08lX %08lX %08lX %08lX\n",
+		       (unsigned long)g_hww, *(unsigned long *)g_hww, c->Eip,
+		       GetCurrentThreadId(), ra, sp[0], sp[1], sp[2], sp[3], sp[4], sp[5]);
+	return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+static DWORD WINAPI hww_arm(LPVOID unused)
+{
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+	THREADENTRY32 te;
+	int armed = 0;
+
+	(void)unused;
+	te.dwSize = sizeof(te);
+	if (snap == INVALID_HANDLE_VALUE)
+		return 0;
+	for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+		HANDLE t;
+		CONTEXT c;
+
+		if (te.th32OwnerProcessID != GetCurrentProcessId() ||
+		    te.th32ThreadID == GetCurrentThreadId())
+			continue;
+		t = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT,
+			       FALSE, te.th32ThreadID);
+		if (!t)
+			continue;
+		SuspendThread(t);
+		memset(&c, 0, sizeof(c));
+		c.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+		if (GetThreadContext(t, &c)) {
+			c.Dr0 = g_hww;
+			c.Dr7 = (c.Dr7 & ~0x000F0003u) | 1u | (1u << 16) | (3u << 18);
+			if (SetThreadContext(t, &c))
+				armed++;
+		}
+		ResumeThread(t);
+		CloseHandle(t);
+	}
+	CloseHandle(snap);
+	ss_log("hwwatch: watching writes to %08lX (now %08lX) in %d thread(s)\n",
+	       (unsigned long)g_hww, *(unsigned long *)g_hww, armed);
+	return 0;
+}
+
+static void hww_start(void)
+{
+	static int veh;
+	HANDLE t;
+
+	g_hww = gh_knob("D3D9SW_HWWATCH", 0) & ~(uintptr_t)3;
+	if (!g_hww)
+		return;
+	if (!veh++)
+		AddVectoredExceptionHandler(1, hww_veh);
+	t = CreateThread(NULL, 0, hww_arm, NULL, 0, NULL);
+	if (t) {
+		WaitForSingleObject(t, 5000);
+		CloseHandle(t);
+	}
+}
+
+int gameheap_nt_headers(uintptr_t *out, int n, int max);
+
+/* Every big-block chunk header and block header, as lo/hi pairs in out[2k],
+ * out[2k+1]. They hold sizes and free-list links, never stack or module
+ * addresses, but a 4 MB block's size reads as an address on the saving launch's
+ * stack, and the merge's pointer shift moved it. The pinned Windows heaps'
+ * headers follow. */
+int gameheap_big_headers(uintptr_t *out, int max)
+{
+	int n = 0;
+	LONG i;
+
+	for (i = 0; i < g_nbig && n + 2 <= max; i++) {
+		GhBigArena *c = g_bigch[i];
+		uintptr_t lo = (uintptr_t)c, b = lo + GH_BIG_GRAIN;
+
+		out[n++] = lo;
+		out[n++] = lo + sizeof(GhBigArena);
+		while (b < lo + c->top && n + 2 <= max) {
+			size_t sz = ((GhBigBlk *)b)->size;
+
+			out[n++] = b;
+			out[n++] = b + sizeof(GhBigBlk) + sizeof(GhHead);
+			if (sz < GH_BIG_GRAIN || (sz & (GH_BIG_GRAIN - 1)) || sz > lo + c->top - b)
+				break;
+			b += sz;
+		}
+	}
+	return gameheap_nt_headers(out, n, max);
+}
+
 void gameheap_merge_chunks(void)
 {
 	GhBigArena *old[GH_BIG_CHUNKS];
@@ -6798,19 +7262,52 @@ void gameheap_merge_chunks(void)
 	memcpy(old, g_bigch, sizeof(old));
 	g_bigpin_used = big_walk(g_bigpin_base, g_bigpin_size, &n);
 	g_bigpin2_used = big_walk(g_bigpin2_base, g_bigpin2_size, &n);
+	if (g_fbpin_base) {
+		LONG k = n;
+
+		big_walk(g_fbpin_base, g_fbpin_size, &n);
+		g_fbch = n > k ? g_bigch[k] : NULL;
+	}
 	/* Chunks Windows placed were not in the spans and were not taken. */
 	for (i = 0; i < was && n < GH_BIG_CHUNKS; i++) {
 		uintptr_t a = (uintptr_t)old[i];
 
 		if (!(a >= g_bigpin_base && a < g_bigpin_base + g_bigpin_size) &&
-		    !(g_bigpin2_base && a >= g_bigpin2_base && a < g_bigpin2_base + g_bigpin2_size))
+		    !(g_bigpin2_base && a >= g_bigpin2_base && a < g_bigpin2_base + g_bigpin2_size) &&
+		    !big_is_fb(old[i]))
 			g_bigch[n++] = old[i];
 	}
 	InterlockedExchange(&g_nbig, n);
+	/* A chunk lock the save caught held belongs to a thread of the saving
+	 * launch; nothing here will ever release it, and the next big block
+	 * spins forever. */
+	for (i = 0; i < n; i++)
+		if (InterlockedExchange(&g_bigch[i]->lock, 0))
+			ss_log("  merge: big-block chunk %08lX was locked in the save - "
+			       "released\n",
+			       (unsigned long)(uintptr_t)g_bigch[i]);
+	/* The header's commit mark came from the save; the pages under it are
+	 * whatever the restore committed. A block handed out below the mark on a
+	 * page that is not there faults in the game, far from the cause. */
+	for (i = 0; i < n; i++) {
+		uintptr_t lo = (uintptr_t)g_bigch[i], p = lo;
+		MEMORY_BASIC_INFORMATION mbi;
+
+		while (p < lo + g_bigch[i]->committed && VirtualQuery((void *)p, &mbi, sizeof(mbi)) &&
+		       mbi.State == MEM_COMMIT)
+			p = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+		if (p < lo + g_bigch[i]->committed)
+			ss_log("  merge: big-block chunk %08lX says %lu KB committed, top %lu KB, "
+			       "but only %lu KB are - pages from %08lX are missing\n",
+			       (unsigned long)lo, (unsigned long)(g_bigch[i]->committed >> 10),
+			       (unsigned long)(g_bigch[i]->top >> 10), (unsigned long)((p - lo) >> 10),
+			       (unsigned long)p);
+	}
 	ss_log("  merge: big-block chunks read back from the save: %ld (this launch had %ld), "
 	       "%lu KB and %lu KB of the pinned spans carved\n",
 	       (long)n, (long)was, (unsigned long)(g_bigpin_used >> 10),
 	       (unsigned long)(g_bigpin2_used >> 10));
+	hww_start();
 }
 
 int gameheap_import_mode(void)
@@ -6867,6 +7364,57 @@ void *gameheap_sw_alloc(size_t n, size_t a, const void *caller)
 	if (want >= GH_BIG)
 		((GhBigBlk *)raw - 1)->owner = GH_BIG_SW;
 	raw = give(raw, want, site);
+	p = ((uintptr_t)raw + sizeof(void *) + a - 1) & ~(uintptr_t)(a - 1);
+	((void **)p)[-1] = raw;
+	return (void *)p;
+}
+
+/* A renderer colour or depth buffer from the D3D9SW_GHFB_PIN span, laid out
+ * like gameheap_sw_alloc's so sw_free takes it back, or NULL when the span is
+ * off or full and the caller should use sw_malloc. */
+void *gameheap_fb_alloc(size_t n, size_t a, const void *caller)
+{
+	size_t want = n + a + sizeof(void *);
+	size_t need = (want + sizeof(GhHead) + sizeof(GhBigBlk) + GH_BIG_GRAIN - 1) &
+		      ~(size_t)(GH_BIG_GRAIN - 1);
+	GhBigBlk *b;
+	void *raw;
+	uintptr_t p;
+
+	if (!g_ready || !g_imports || !g_big_chunk || !g_fbpin_base || want < n || need < want)
+		return NULL;
+	if (!g_fbch) {
+		while (InterlockedCompareExchange(&g_big_grow, 1, 0))
+			Sleep(0);
+		if (!g_fbch && g_nbig < GH_BIG_CHUNKS &&
+		    VirtualAlloc((void *)g_fbpin_base, GH_BIG_GRAIN, MEM_COMMIT, PAGE_READWRITE)) {
+			GhBigArena *c = (GhBigArena *)g_fbpin_base;
+
+			c->cap = g_fbpin_size;
+			c->top = GH_BIG_GRAIN;
+			c->committed = GH_BIG_GRAIN;
+			gh_add_range(g_fbpin_base, g_fbpin_base + g_fbpin_size);
+			g_bigch[g_nbig] = c;
+			InterlockedIncrement(&g_nbig);
+			g_fbch = c;
+		}
+		InterlockedExchange(&g_big_grow, 0);
+		if (!g_fbch)
+			return NULL;
+	}
+	b = chunk_alloc(g_fbch, need);
+	if (!b) {
+		static LONG said;
+
+		if (!InterlockedExchange(&said, 1))
+			ss_log("gameheap: a %lu KB renderer buffer does not fit the %lu KB "
+			       "framebuffer span - it goes to the game's big-block span, and "
+			       "the game's blocks after it move with the screen size again\n",
+			       (unsigned long)(n >> 10), (unsigned long)(g_fbpin_size >> 10));
+		return NULL;
+	}
+	b->owner = GH_BIG_SW;
+	raw = give(b + 1, want, (unsigned)(uintptr_t)caller);
 	p = ((uintptr_t)raw + sizeof(void *) + a - 1) & ~(uintptr_t)(a - 1);
 	((void **)p)[-1] = raw;
 	return (void *)p;
@@ -8597,6 +9145,9 @@ void gameheap_report(void)
 		       (unsigned long)(peak >> 10), (unsigned long)(com >> 10), fails,
 		       g_big_nochunk, g_big_bad,
 		       (fails || g_big_nochunk || g_big_bad) ? " <<< read this" : "");
+		ss_log("gameheap: %ld lock(s) made by the game without Windows' per-lock "
+		       "bookkeeping, so a restored lock names nothing from another launch\n",
+		       (long)g_cs_plain);
 		if (g_fellback || g_orphan_dropped || g_stale || g_mods_unbound)
 			ss_log("gameheap: import mode - %lu fell back to the runtime (heap "
 			       "full: raise D3D9SW_GHPIN_MB), %lu orphan(s) dropped, %lu "
@@ -8961,3 +9512,4 @@ void gameheap_busy_rewind(void)
 		gh_busy_put(u, sz);
 	}
 }
+

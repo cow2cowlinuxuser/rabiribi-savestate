@@ -1,4 +1,5 @@
-param([int]$Runs = 10, [string]$SaveAt = '300', [int]$QuitAt = 420, [string]$Out = 'F:\ddpr-baseline', [string[]]$Extra = @())
+# -LoadFrom DIR puts that folder's slot 0 in place before each launch, for runs that restore it (D3D9SW_LOAD_AT).
+param([int]$Runs = 10, [string]$SaveAt = '300', [int]$QuitAt = 420, [string]$Out = 'F:\ddpr-baseline', [string[]]$Extra = @(), [string]$LoadFrom = '')
 $ErrorActionPreference = 'Stop'
 $game = 'C:\Program Files (x86)\Steam\steamapps\common\DoDonPachi Resurrection'
 $cfg = Join-Path $game 'd3d9_sw.cfg'
@@ -23,6 +24,7 @@ try {
 		New-Item -ItemType Directory -Force $dir | Out-Null
 		$logAt = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 		Get-ChildItem $game -Filter 'd3d9sw_slot0.*' | Remove-Item
+		if ($LoadFrom) { Get-ChildItem $LoadFrom -Filter 'd3d9sw_slot0.*' | Copy-Item -Destination $game }
 		Start-Process 'steam://rungameid/464450'
 		$p = $null; $t0 = Get-Date
 		while (-not $p -and ((Get-Date) - $t0).TotalSeconds -lt 120) { Start-Sleep -Milliseconds 200; $p = Get-Process default -ErrorAction SilentlyContinue | Select-Object -First 1 }
@@ -42,7 +44,12 @@ try {
 			Get-ChildItem $game -Filter 'd3d9sw_slot0.*' | Copy-Item -Destination $sd
 			Get-ChildItem $game -Filter 'gh_*.txt' | Copy-Item -Destination $sd
 		}
-		if (-not $p.WaitForExit(180000)) { "run $i : still running after 180 s, killed"; Stop-Process -Id $id -Force; Start-Sleep 2 }
+		if (-not $p.WaitForExit(180000)) {
+			# A hang says nothing in the log, so take every thread's stack and a full dump before killing it.
+			$cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\cdb.exe'
+			if (Test-Path $cdb) { & $cdb -pv -p $id -c ".logopen $(Join-Path $dir 'hang.txt'); ~*kv 40; .dump /ma $(Join-Path $dir 'hang.dmp'); .logclose; q" | Out-Null }
+			"run $i : still running after 180 s, stacks and dump taken, killed"; Stop-Process -Id $id -Force; Start-Sleep 2
+		}
 		Start-Sleep 2
 		$bin = Join-Path $game 'd3d9sw_slot0.bin'
 		$saved = if (Test-Path $bin) { (Get-Item $bin).LastWriteTime } else { $null }

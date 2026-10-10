@@ -222,6 +222,8 @@ int savestate_dump_image(void);
 
 void savestate_soak_arm(void);
 int savestate_soak_action(void);
+/* Frames presented so far in this process; a load does not wind it back. */
+unsigned savestate_present_frame(void);
 
 /* Does the saved image at this heap offset look like one of our busy malloc
  * blocks? live_head is the address that byte would occupy in the live heap

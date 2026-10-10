@@ -1,13 +1,66 @@
 # rabiribi-savestate
 
-Does state save for Rabi-Ribi. Now usable within a session.
+Does state save for Rabi-Ribi, and as of v2.0 for DoDonPachi Resurrection,
+where a save also loads in a later launch, after a reboot, and on another PC.
 
 In-process save and restore of a running 32-bit Windows game: memory regions,
 heap blocks, thread contexts, the clock, and audio cursors, taken and put back
 without a debugger and without the game's cooperation. It renders on the GPU
 and covers the monitor while doing it.
 
-## Current state (v1.3)
+## Current state (v2.0) - DoDonPachi Resurrection
+
+The game loads `d3d9.dll`, a software Direct3D 9 device with the engine
+inside it. F5 saves, Shift+F5 loads. The configuration is
+[examples/ddpr/d3d9_sw.cfg](examples/ddpr/d3d9_sw.cfg) and install notes are in
+[examples/ddpr/INSTALL.txt](examples/ddpr/INSTALL.txt).
+
+A save loads in the same session, in a later launch, after a reboot, and on
+another PC. Saves made on two other Windows machines - with different Windows
+builds, and the game's executable at different addresses - loaded and played
+on a third. Each load was followed for a few hundred to about a thousand frames;
+long sessions after a load are not tested.
+
+A load in a later launch does not put the old process back. It freezes the
+fresh launch, copies in only what the game owns - its data sections, its heaps,
+which live at fixed addresses (`D3D9SW_GAMEHEAP=2` and the pinned spans), and
+this DLL's own state - and leaves the fresh launch's threads and Windows state
+alone. Pointers into modules that loaded elsewhere are then moved, and v2.0
+decides which saved words are pointers by asking the module's own image: an
+address the image references through its relocations or exports, a return
+address, or an aligned word in writable data. Shifting every word that merely
+fell in the module's old range corrupted sizes and counts whenever the
+executable loaded low, which is most of the time; with that check off
+(`D3D9SW_MERGE_RELOC_CHECK=0`) the same save crashes at the same frame every
+time, and with it on it plays.
+
+### Other games
+
+| game | same-session restore | later launch / other PC |
+| --- | --- | --- |
+| DoDonPachi Resurrection | works | works, as above |
+| Mushihimesama | works | not a clean restore |
+| Zwei!! The Arges Adventure | works, but the video codec is not detected at start-up | not tested |
+| anything else of the D3D9 era | not tested | not tested |
+
+Nothing beyond DDPR is guaranteed. The renderer is a general Direct3D 9
+replacement, but the configuration and the cross-launch work are DDPR's.
+
+### Building the DDPR DLL
+
+From the repository root:
+
+```
+zig cc -O2 -Wall -Wno-incompatible-function-pointer-types -DD3D9SW_VARIANT=stock -target x86-windows-gnu -shared -o x86\d3d9.dll d3d9_sw.c swrast.c savestate.c vsinterp.c trace.c tramp.c allocwatch.c dsoundhook.c ds_sw.c xa2_sw.c gameheap.c phase.c logdir.c ntheap.c d3d9.def -lgdi32 -luser32 -lwinmm "-Wl,--image-base=0x60000000" "-Wl,--no-dynamicbase"
+```
+
+A save records a hash of the DLL that made it and is refused by any other
+build. The output path is part of the file, so this exact command - output
+`x86\d3d9.dll` - is what rebuilds the v2.0 release byte for byte (SHA-256
+`3780B93E04A1D35F1ABACC880394942FAB490E1CE0D1171D20AC6094EB61D6FF`) and so loads its saves; any other path or any change gives a
+different build.
+
+## Rabi-Ribi (v1.3)
 
 Save and restore both complete in under a second and survive normal play.
 Multiple full sessions with repeated saves and restores across rooms, with no
@@ -103,6 +156,10 @@ nine tracks responsible, and the `D3D9SW_GHVORBIS` knob that reports them live.
   traces by block identity rather than by address, `symres.c` turns the
   `module+RVA` in a fault report into a function and source line.
 - `examples/rabiribi/` — the configuration the game is actually run with.
+- `examples/ddpr/` — the DoDonPachi Resurrection configuration and install
+  notes for v2.0.
+- `ntheap.c` — keeps Windows heap headers in the pinned heaps out of the
+  load's pointer shift.
 
 ## Building
 

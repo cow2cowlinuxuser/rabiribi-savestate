@@ -5353,12 +5353,37 @@ static DWORD cfg_lookup(const char *name, char *buf, DWORD cap)
 }
 
 /* Environment first, then the file. Returns the length written, 0 if unset. */
+#ifdef SS_EXPERIMENT
+/* d3d9_experiment.dll: one job - put the whole snapshot back over a new launch,
+ * every heap included, and refuse nothing. Whatever the cfg says. */
+static const char *const g_forced[][2] = {
+	{ "D3D9SW_MERGE", "0" },
+	{ "D3D9SW_EXCLFORCE", "1" },
+	{ "D3D9SW_REWIND_NEWTHREADS", "run" },
+	{ "D3D9SW_REWIND_ALLHEAPS", "1" },
+};
+#endif
+
 static DWORD ss_getenv(const char *name, char *buf, DWORD cap)
 {
 	DWORD n;
 
 	if (cap == 0)
 		return 0;
+#ifdef SS_EXPERIMENT
+	{
+		size_t i;
+
+		for (i = 0; i < sizeof(g_forced) / sizeof(g_forced[0]); i++)
+			if (!strcmp(name, g_forced[i][0])) {
+				n = (DWORD)strlen(g_forced[i][1]);
+				if (n >= cap)
+					return 0;
+				memcpy(buf, g_forced[i][1], n + 1);
+				return n;
+			}
+	}
+#endif
 	n = env_once(name, buf, cap);
 	if (n > 0 && n < cap)
 		return n;
@@ -5412,14 +5437,14 @@ static const char *const g_knobs[] = {
 	"D3D9SW_MERGE_TAKE",
 	"D3D9SW_MERGE_SITES",
 	"D3D9SW_GHSW_OWN",	  "D3D9SW_MERGE_CHECK",
-	"D3D9SW_MERGE_RELINK",	  "D3D9SW_MERGE_RELOC",
+	"D3D9SW_MERGE_RELINK",	  "D3D9SW_MERGE_RELOC",	"D3D9SW_MERGE_RELOC_CHECK", "D3D9SW_PTRMAP",
 	"D3D9SW_MERGE_REFOCUS",
 	"D3D9SW_GHPIN_MB",	  "D3D9SW_GHBIG_MB",
 	"D3D9SW_GHPEEK",	  "D3D9SW_GHVORBIS",
 	"D3D9SW_ENTS",		  "D3D9SW_CLOCKPROBE",
 	"D3D9SW_KEY_EVERY",	  "D3D9SW_KEY_HOLD",
 	"D3D9SW_KEY_FROM",	  "D3D9SW_KEY_VK",
-	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT",
+	"D3D9SW_QUIT_AT",	  "D3D9SW_XINPUT",	"D3D9SW_SAVE_BEFORE_QUIT",
 	"D3D9SW_LOAD_AT",	  "D3D9SW_SAVE_AFTER_LOAD",
 	"D3D9SW_REC_GATE", "D3D9SW_LOSE_DEVICE", "D3D9SW_LOAD_AFTER_SAVE", "D3D9SW_MERGE_THREADS",
 	"D3D9SW_SAVE_VK",	  "D3D9SW_LOAD_VK",
@@ -6888,6 +6913,7 @@ HANDLE sw_heap(void)
 void *gameheap_sw_alloc(size_t n, size_t a, const void *caller);
 int gameheap_sw_owns(void *raw);
 void gameheap_sw_free(void *raw);
+extern const void *volatile gh_sw_free_caller;
 size_t gameheap_sw_size(void *raw);
 
 static void *sw_malloc_at(size_t n, const void *caller)
@@ -6911,6 +6937,17 @@ static void *sw_malloc_at(size_t n, const void *caller)
 void *sw_malloc(size_t n)
 {
 	return sw_malloc_at(n, __builtin_return_address(0));
+}
+
+void *gameheap_fb_alloc(size_t n, size_t a, const void *caller);
+
+/* The renderer's colour and depth buffers: screen-sized, so they get a span of
+ * their own rather than deciding where the game's big blocks start. */
+void *sw_malloc_fb(size_t n)
+{
+	void *p = gameheap_fb_alloc(n, SW_ALIGN, __builtin_return_address(0));
+
+	return p ? p : sw_malloc_at(n, __builtin_return_address(0));
 }
 
 void *sw_calloc(size_t count, size_t size)
@@ -6983,9 +7020,11 @@ void sw_free(void *p)
 	if ((unsigned char *)p - (unsigned char *)raw >= 64 + (ptrdiff_t)sizeof(void *) &&
 	    ((DWORD *)p)[-16] == SW_PLAIN_MAGIC)
 		((DWORD *)p)[-16] = 0;
-	if (gameheap_sw_owns(raw))
+	if (gameheap_sw_owns(raw)) {
+		gh_sw_free_caller = __builtin_return_address(0);
 		gameheap_sw_free(raw);
-	else
+		gh_sw_free_caller = NULL;
+	} else
 		HeapFree(sw_heap(), 0, raw);
 }
 
@@ -20126,13 +20165,60 @@ static int event_type(HANDLE h)
  * reset type, otherwise a fresh one in the saved state, and for a thread the
  * live thread that took the saved one's place. A value held by anything the
  * game did not create is left alone. */
+/* What each steered value named when the steering was set up: a private
+ * duplicate, or NULL when the value named nothing. Once the value names
+ * something else - its holder closed it and a new thread or event was given the
+ * number - the game means the new object and the steering is stale. A shutdown
+ * hung on exactly that: the game's ResumeThread for a thread it had just made
+ * went to a stand-in, and the thread never ran. */
+static HANDLE g_hx_held[SS_MAX_EVENTS] SS_PRESENT;
+static volatile LONG g_hx_stale SS_PRESENT;
+
+static HANDLE hx_hold(HANDLE v)
+{
+	HANDLE d = NULL;
+	DWORD flags;
+
+	if (GetHandleInformation(v, &flags))
+		DuplicateHandle(GetCurrentProcess(), v, GetCurrentProcess(), &d, 0, FALSE,
+				DUPLICATE_SAME_ACCESS);
+	return d;
+}
+
+static int hx_still(LONG k, HANDLE h)
+{
+	static BOOL(WINAPI * same)(HANDLE, HANDLE);
+	static int looked;
+	HANDLE was = k < SS_MAX_EVENTS ? g_hx_held[k] : NULL;
+	DWORD flags;
+
+	if (!was)
+		return !GetHandleInformation(h, &flags);
+	if (!looked) {
+		HMODULE kb = GetModuleHandleA("kernelbase.dll");
+
+		same = (BOOL(WINAPI *)(HANDLE, HANDLE))(kb ? GetProcAddress(kb, "CompareObjectHandles")
+							     : NULL);
+		looked = 1;
+	}
+	return !same || same(h, was);
+}
+
 HANDLE savestate_hx(HANDLE h)
 {
 	LONG k, n = g_ctl ? g_ctl->nhx : 0;
 
 	for (k = 0; k < n; k++)
-		if (g_ctl->hx_old[k] == (uintptr_t)h)
-			return g_ctl->hx_new[k];
+		if (g_ctl->hx_old[k] == (uintptr_t)h) {
+			if (hx_still(k, h))
+				return g_ctl->hx_new[k];
+			g_ctl->hx_old[k] = 0;
+			if (InterlockedIncrement(&g_hx_stale) <= 8)
+				ss_log("handles: %p names a new object now - the game's calls "
+				       "with it are no longer steered\n",
+				       h);
+			return h;
+		}
 	return h;
 }
 
@@ -20215,9 +20301,14 @@ static void xs_handles_pin(const Slot *s)
 	int i, kept = 0, made = 0, clash = 0, fail = 0, nothr = 0, said = 0, steered = 0;
 	int twins = 0;
 
-	for (i = 0; i < g_ctl->nhx; i++)
+	for (i = 0; i < g_ctl->nhx; i++) {
 		if (g_ctl->hx_old[i])
 			CloseHandle(g_ctl->hx_new[i]);
+		if (i < SS_MAX_EVENTS && g_hx_held[i]) {
+			CloseHandle(g_hx_held[i]);
+			g_hx_held[i] = NULL;
+		}
+	}
 	g_ctl->nhx = 0;
 	for (i = 0; i < s->nevents && i < SS_MAX_EVENTS; i++)
 		g_twin[i] = live_twin(s, i);
@@ -20253,6 +20344,7 @@ static void xs_handles_pin(const Slot *s)
 				continue;
 			}
 			if (g_ctl->nhx < SS_MAX_EVENTS) {
+				g_hx_held[g_ctl->nhx] = hx_hold(v);
 				g_ctl->hx_new[g_ctl->nhx] = d;
 				g_ctl->hx_old[g_ctl->nhx] = (uintptr_t)v;
 				InterlockedIncrement(&g_ctl->nhx);
@@ -20287,6 +20379,7 @@ static void xs_handles_pin(const Slot *s)
 
 				clash++;
 				if (w && g_ctl->nhx < SS_MAX_EVENTS) {
+					g_hx_held[g_ctl->nhx] = hx_hold(v);
 					g_ctl->hx_new[g_ctl->nhx] = w;
 					g_ctl->hx_old[g_ctl->nhx] = (uintptr_t)v;
 					InterlockedIncrement(&g_ctl->nhx);
@@ -22143,11 +22236,334 @@ static void merge_reloc_add(RelocEnt *map, int *n, uintptr_t lo, uintptr_t hi, i
 	(*n)++;
 }
 
+int gameheap_big_headers(uintptr_t *out, int max);
+
+static int hdr_cmp(const void *a, const void *b)
+{
+	uintptr_t x = *(const uintptr_t *)a, y = *(const uintptr_t *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* 1 when w lies in one of the nh sorted [lo, hi) pairs in h. */
+static int hdr_hit(const uintptr_t *h, int nh, uintptr_t w)
+{
+	int lo = 0, hi = nh - 1;
+
+	while (lo <= hi) {
+		int m = (lo + hi) / 2;
+
+		if (w < h[2 * m])
+			hi = m - 1;
+		else if (w >= h[2 * m + 1])
+			lo = m + 1;
+		else
+			return 1;
+	}
+	return 0;
+}
+
+/* D3D9SW_PTRMAP=1: d3d9sw_ptrmap.bin, written by tools/ptrmap.c - for each named
+ * module image, one bit per word that saves taken with the module at different
+ * bases showed is not a pointer into a module (it held the same value at both).
+ * The pointer shift leaves those words alone. Format: "PTRMAP1\0", module
+ * count, then per module char name[32], image size, word count, bitmap. */
+typedef struct {
+	uintptr_t lo;
+	DWORD nw;
+	const DWORD *bits;
+} PtrMap;
+static PtrMap g_pm[4];
+static int g_pm_n;
+static unsigned char *g_pm_file;
+static DWORD g_pm_size;
+
+/* Read before the merge stops any thread, since opening a file can allocate. */
+static void ptrmap_read(void)
+{
+	char v[8];
+	HANDLE f;
+	DWORD size, got;
+	unsigned char *p;
+
+	if (g_pm_file || !(ss_getenv("D3D9SW_PTRMAP", v, sizeof(v)) > 0 && v[0] == '1'))
+		return;
+	f = CreateFileA("d3d9sw_ptrmap.bin", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+			0, NULL);
+	if (f == INVALID_HANDLE_VALUE) {
+		ss_log("  ptrmap: D3D9SW_PTRMAP=1 but d3d9sw_ptrmap.bin is not there\n");
+		return;
+	}
+	size = GetFileSize(f, NULL);
+	p = size >= 12 && size != INVALID_FILE_SIZE
+		    ? (unsigned char *)VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE,
+						    PAGE_READWRITE)
+		    : NULL;
+	if (!p || !ReadFile(f, p, size, &got, NULL) || got != size || memcmp(p, "PTRMAP1", 8)) {
+		CloseHandle(f);
+		if (p)
+			VirtualFree(p, 0, MEM_RELEASE);
+		ss_log("  ptrmap: d3d9sw_ptrmap.bin is unreadable or not a map\n");
+		return;
+	}
+	CloseHandle(f);
+	g_pm_file = p;
+	g_pm_size = size;
+}
+
+/* Matches the map's modules to this launch's, once they are all loaded. */
+static void ptrmap_load(void)
+{
+	char name[33];
+	DWORD n, k;
+	unsigned char *p = g_pm_file, *e;
+
+	g_pm_n = 0;
+	if (!p)
+		return;
+	e = p + g_pm_size;
+	n = *(const DWORD *)(p + 8);
+	p += 12;
+	for (k = 0; k < n && p + 40 <= e; k++) {
+		DWORD isz = *(const DWORD *)(p + 32), nw = *(const DWORD *)(p + 36);
+		DWORD nb = (nw + 31) / 32 * 4;
+		HMODULE h;
+
+		memcpy(name, p, 32);
+		name[32] = 0;
+		p += 40;
+		if (p + nb > e)
+			break;
+		h = GetModuleHandleA(name);
+		if (h && g_pm_n < 4 && nw * 4 <= isz &&
+		    ((IMAGE_NT_HEADERS *)((char *)h + ((IMAGE_DOS_HEADER *)h)->e_lfanew))
+				    ->OptionalHeader.SizeOfImage == isz) {
+			g_pm[g_pm_n].lo = (uintptr_t)h;
+			g_pm[g_pm_n].nw = nw;
+			g_pm[g_pm_n].bits = (const DWORD *)p;
+			g_pm_n++;
+			ss_log("  ptrmap: %s at %p, %lu word(s) mapped\n", name, (void *)h,
+			       (unsigned long)nw);
+		} else {
+			ss_log("  ptrmap: %s is %s here - its map is not used\n", name,
+			       h ? "a different size" : "not loaded");
+		}
+		p += nb;
+	}
+}
+
+/* 1 when the map says the word at w is not a module pointer. */
+static int ptrmap_data(uintptr_t w)
+{
+	int i;
+
+	for (i = 0; i < g_pm_n; i++)
+		if (w >= g_pm[i].lo && w - g_pm[i].lo < (uintptr_t)g_pm[i].nw * 4) {
+			DWORD x = (DWORD)((w - g_pm[i].lo) / 4);
+
+			return (g_pm[i].bits[x >> 5] >> (x & 31)) & 1;
+		}
+	return 0;
+}
+
+/* Which words aimed into a moved module are pointers, judged from the module.
+ *
+ * A word is shifted when its value falls in a moved module's saved range, and a
+ * low-based exe's range is full of ordinary numbers: with default.exe at 1C0000,
+ * two saves from different boots had 52,661 heap words that moved with the exe
+ * and 163,044 that did not - sizes such as 200000 among them, and a size shifted
+ * by 7 MB is a clear of 7 MB. Measured on those saves, every real pointer kept
+ * one of these shapes, and almost none of the rest did:
+ *   code       an address the image itself references (relocation or export),
+ *              or one just after a call - a return address
+ *   read-only  4-aligned and referenced by the image (vtables, tables)
+ *   writable   4-aligned, not on a 64 KB boundary - dat112.bin's data is a pool
+ *              and pointers into it land anywhere; the resource and relocation
+ *              sections are judged the same way, as dat112.bin reads its own
+ *   the base   always - module handles
+ *   elsewhere  never: headers, the gaps between sections
+ * D3D9SW_MERGE_RELOC_CHECK=0 shifts everything in range, as before. */
+#define MP_SECS 32
+enum { MP_CODE = 1, MP_RDATA, MP_DATA };
+typedef struct {
+	uintptr_t live;
+	DWORD size;
+	int nsec; /* -1: no judgement, everything in range is shifted */
+	DWORD sec_lo[MP_SECS], sec_hi[MP_SECS];
+	unsigned char kind[MP_SECS];
+	DWORD *ref;
+	DWORD nref;
+	unsigned long no_sec, no_ref, no_align;
+	uintptr_t rej_at, rej_val;
+} ModPtrs;
+
+static int mp_dword_cmp(const void *a, const void *b)
+{
+	DWORD x = *(const DWORD *)a, y = *(const DWORD *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+static int mp_readable(uintptr_t a, DWORD n)
+{
+	MEMORY_BASIC_INFORMATION mb;
+
+	return VirtualQuery((LPCVOID)a, &mb, sizeof(mb)) && mb.State == MEM_COMMIT &&
+	       sr_readable(mb.Protect) && a + n <= (uintptr_t)mb.BaseAddress + mb.RegionSize;
+}
+
+static void mp_build(ModPtrs *m, uintptr_t live, uintptr_t saved)
+{
+	IMAGE_NT_HEADERS *nt;
+	IMAGE_SECTION_HEADER *sh;
+	IMAGE_DATA_DIRECTORY *dd;
+	DWORD rel, relsz, rsrc, exp, nexp = 0, cap, p, i;
+
+	memset(m, 0, sizeof(*m));
+	m->nsec = -1;
+	m->live = live;
+	if (!mp_readable(live, 0x400) || ((IMAGE_DOS_HEADER *)live)->e_magic != IMAGE_DOS_SIGNATURE)
+		return;
+	nt = (IMAGE_NT_HEADERS *)(live + ((IMAGE_DOS_HEADER *)live)->e_lfanew);
+	if (!mp_readable((uintptr_t)nt, sizeof(*nt)) || nt->Signature != IMAGE_NT_SIGNATURE ||
+	    nt->FileHeader.NumberOfSections > MP_SECS)
+		return;
+	m->size = nt->OptionalHeader.SizeOfImage;
+	dd = nt->OptionalHeader.DataDirectory;
+	rel = dd[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+	relsz = dd[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+	rsrc = dd[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress;
+	exp = dd[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+	if (!rel || !relsz || rel + relsz > m->size || !mp_readable(live + rel, relsz))
+		return;
+	if (exp && exp + sizeof(IMAGE_EXPORT_DIRECTORY) <= m->size &&
+	    mp_readable(live + exp, sizeof(IMAGE_EXPORT_DIRECTORY)))
+		nexp = ((IMAGE_EXPORT_DIRECTORY *)(live + exp))->NumberOfFunctions;
+	if (nexp > 0x10000)
+		nexp = 0;
+	cap = relsz / 2 + nexp;
+	m->ref = (DWORD *)VirtualAlloc(NULL, (SIZE_T)cap * 4 + 4, MEM_COMMIT | MEM_RESERVE,
+				       PAGE_READWRITE);
+	if (!m->ref)
+		return;
+	for (p = rel; p + 8 <= rel + relsz;) {
+		IMAGE_BASE_RELOCATION *b = (IMAGE_BASE_RELOCATION *)(live + p);
+		const WORD *e = (const WORD *)(b + 1);
+		DWORD k, ne;
+		int ok;
+
+		if (b->SizeOfBlock < 8 || p + b->SizeOfBlock > rel + relsz)
+			break;
+		ne = (b->SizeOfBlock - 8) / 2;
+		ok = b->VirtualAddress < m->size && mp_readable(live + b->VirtualAddress, 0x1000);
+		for (k = 0; ok && k < ne && m->nref < cap; k++) {
+			DWORD at = b->VirtualAddress + (e[k] & 0xFFF), v;
+
+			if ((e[k] >> 12) != IMAGE_REL_BASED_HIGHLOW || at + 4 > m->size)
+				continue;
+			v = *(const DWORD *)(live + at);
+			if (v >= live && v - live < m->size)
+				m->ref[m->nref++] = (DWORD)(v - live);
+			else if (v >= saved && v - saved < m->size)
+				m->ref[m->nref++] = (DWORD)(v - saved);
+		}
+		p += b->SizeOfBlock;
+	}
+	if (nexp) {
+		IMAGE_EXPORT_DIRECTORY *ed = (IMAGE_EXPORT_DIRECTORY *)(live + exp);
+		DWORD af = ed->AddressOfFunctions;
+
+		if (af && af + nexp * 4 <= m->size && mp_readable(live + af, nexp * 4))
+			for (i = 0; i < nexp && m->nref < cap; i++)
+				if (((const DWORD *)(live + af))[i])
+					m->ref[m->nref++] = ((const DWORD *)(live + af))[i];
+	}
+	qsort(m->ref, m->nref, sizeof(DWORD), mp_dword_cmp);
+	sh = IMAGE_FIRST_SECTION(nt);
+	for (i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+		DWORD lo = sh[i].VirtualAddress, hi = lo + sh[i].Misc.VirtualSize;
+		DWORD c = sh[i].Characteristics;
+
+		m->sec_lo[i] = lo;
+		m->sec_hi[i] = hi;
+		m->kind[i] = (rel >= lo && rel < hi) || (rsrc && rsrc >= lo && rsrc < hi) ? MP_DATA
+			     : (c & IMAGE_SCN_MEM_EXECUTE)			      ? MP_CODE
+			     : !(c & IMAGE_SCN_MEM_WRITE)			      ? MP_RDATA
+										      : MP_DATA;
+	}
+	m->nsec = (int)nt->FileHeader.NumberOfSections;
+}
+
+static int mp_refd(const ModPtrs *m, DWORD o)
+{
+	DWORD lo = 0, hi = m->nref;
+
+	while (lo < hi) {
+		DWORD mid = (lo + hi) / 2;
+
+		if (m->ref[mid] < o)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo < m->nref && m->ref[lo] == o;
+}
+
+/* The bytes before a return address: call rel32, call [abs32], call [reg+disp],
+ * call reg, call [reg]. */
+static int mp_after_call(const ModPtrs *m, DWORD o)
+{
+	const unsigned char *c = (const unsigned char *)(m->live + o);
+
+	if (o < 6 || !mp_readable(m->live + o - 6, 6))
+		return 0;
+	return c[-5] == 0xE8 || (c[-6] == 0xFF && (c[-5] == 0x15 || (c[-5] >= 0x90 && c[-5] <= 0x97))) ||
+	       (c[-3] == 0xFF && c[-2] >= 0x50 && c[-2] <= 0x57) ||
+	       (c[-2] == 0xFF && ((c[-1] >= 0xD0 && c[-1] <= 0xD7) ||
+				  (c[-1] >= 0x10 && c[-1] <= 0x17 && c[-1] != 0x14 && c[-1] != 0x15)));
+}
+
+static int mp_keep(ModPtrs *m, DWORD o)
+{
+	int i;
+
+	if (m->nsec < 0 || !o)
+		return 1;
+	for (i = 0; i < m->nsec && !(o >= m->sec_lo[i] && o < m->sec_hi[i]); i++)
+		;
+	if (i == m->nsec) {
+		m->no_sec++;
+		return 0;
+	}
+	switch (m->kind[i]) {
+	case MP_CODE:
+		if (mp_refd(m, o) || mp_after_call(m, o))
+			return 1;
+		m->no_ref++;
+		return 0;
+	case MP_RDATA:
+		if (!(o & 3) && mp_refd(m, o))
+			return 1;
+		m->no_ref++;
+		return 0;
+	default:
+		if (!(o & 3) && (o & 0xFFFF))
+			return 1;
+		m->no_align++;
+		return 0;
+	}
+}
+
 static void merge_reloc(const Slot *s)
 {
 	static RelocEnt map[MR_MAX];
+	static ModPtrs mp[MR_MAX];
+	int check;
+	unsigned long long refused = 0;
 	static unsigned short at[65536];
-	unsigned long long hits = 0, plain = 0;
+	static uintptr_t hdr[2 * 16384];
+	unsigned long long hits = 0, plain = 0, kept = 0, mapped = 0;
+	int nh;
 	DWORD t0 = GetTickCount();
 	char v[8];
 	int n = 0, nmod, i, k;
@@ -22179,6 +22595,17 @@ static void merge_reloc(const Slot *s)
 				(intptr_t)g_ctl - (intptr_t)g_ctl->xs_ctl_old, -2);
 	if (!n)
 		return;
+	nh = gameheap_big_headers(hdr, 2 * 16384);
+	qsort(hdr, (size_t)nh, 2 * sizeof(uintptr_t), hdr_cmp);
+	ptrmap_load();
+	check = !(ss_getenv("D3D9SW_MERGE_RELOC_CHECK", v, sizeof(v)) > 0 && v[0] == '0');
+	for (i = 0; i < nmod; i++)
+		if (check)
+			mp_build(&mp[i], map[i].lo + map[i].delta, map[i].lo);
+		else {
+			memset(&mp[i], 0, sizeof(mp[i]));
+			mp[i].nsec = -1;
+		}
 	memset(at, 0, sizeof(at));
 	for (i = 0; i < n; i++)
 		for (a = map[i].lo >> 16; a <= (map[i].hi - 1) >> 16 && a < 65536; a++)
@@ -22218,6 +22645,22 @@ static void merge_reloc(const Slot *s)
 			}
 			if (r->mod == -2 && !stk)
 				continue;
+			if (nh && hdr_hit(hdr, nh, (uintptr_t)wp)) {
+				kept++;
+				continue;
+			}
+			if (g_pm_n && ptrmap_data((uintptr_t)wp)) {
+				mapped++;
+				continue;
+			}
+			if (r->mod >= 0 && !mp_keep(&mp[r - map], (DWORD)(*wp - r->lo))) {
+				if (!mp[r - map].rej_at) {
+					mp[r - map].rej_at = (uintptr_t)wp;
+					mp[r - map].rej_val = *wp;
+				}
+				refused++;
+				continue;
+			}
 			if (!r->hits++) {
 				r->sample_at = (uintptr_t)wp;
 				r->sample_val = *wp;
@@ -22239,6 +22682,39 @@ static void merge_reloc(const Slot *s)
 	       "stack/TEB range(s) at their saved address and were shifted; %llu KB of pixels, "
 	       "vertices and shader code passed over (%lu ms)\n",
 	       hits, nmod, n - nmod, plain >> 10, (unsigned long)(GetTickCount() - t0));
+	ss_log("  merge: %llu word(s) in %d big-block header(s) looked like addresses and were "
+	       "left alone\n",
+	       kept, nh);
+	if (g_pm_n)
+		ss_log("  merge: %llu word(s) the pointer map marks as data were left alone\n",
+		       mapped);
+	for (i = 0; i < nmod; i++) {
+		ModPtrs *m = &mp[i];
+
+		if (m->no_sec + m->no_ref + m->no_align)
+			ss_log("    reloc: %lu word(s) into %s left alone as not pointers - %lu "
+			       "outside its sections, %lu at an address it never references, %lu "
+			       "misaligned for data; first at %08lX (%08lX)\n",
+			       m->no_sec + m->no_ref + m->no_align, s->mod_name[map[i].mod],
+			       m->no_sec, m->no_ref, m->no_align, (unsigned long)m->rej_at,
+			       (unsigned long)m->rej_val);
+		if (m->ref)
+			VirtualFree(m->ref, 0, MEM_RELEASE);
+		m->ref = NULL;
+	}
+	if (check) {
+		int judged = 0;
+
+		for (i = 0; i < nmod; i++)
+			judged += mp[i].nsec >= 0;
+		ss_log("  merge: %llu word(s) aimed into a moved module were left alone as not "
+		       "pointers; %d of %d moved module(s) judged by their own image, the rest "
+		       "shifted whole\n",
+		       refused, judged, nmod);
+	} else {
+		ss_log("  merge: D3D9SW_MERGE_RELOC_CHECK=0 - every word aimed into a moved module "
+		       "was shifted\n");
+	}
 }
 
 /* Named exports of a Windows DLL that is a different build here: the restored
@@ -22840,8 +23316,10 @@ static int do_load(int slotno)
 	if (slotfile_mode() && slotno != SS_SCRATCH && g_ctl->load_prov != PROV_SAME_PROCESS)
 		xp_check(slotno, s);
 #if defined(_M_IX86) || defined(__i386__)
-	if (merge_mode() && g_ctl->load_prov != PROV_SAME_PROCESS)
+	if (merge_mode() && g_ctl->load_prov != PROV_SAME_PROCESS) {
+		ptrmap_read();
 		return merge_load(s);
+	}
 #endif
 	g_ctl->mf_short = -1;
 	g_rsv_n = 0;
@@ -24950,6 +25428,11 @@ static int ensure_helper(void)
 		}
 		ss_log("settings: d3d9_sw.cfg %s\n",
 		       g_cfg_len > 0 ? "found" : "not present (environment only)");
+#ifdef SS_EXPERIMENT
+		ss_log("  EXPERIMENT BUILD (d3d9_experiment.dll): a load puts the whole "
+		       "snapshot back - MERGE=0, EXCLFORCE=1, REWIND_NEWTHREADS=run, "
+		       "REWIND_ALLHEAPS=1 - whatever the cfg says\n");
+#endif
 		/* Loud, and above the knob list, because the failure it describes
 		 * looks exactly like a knob nobody set. */
 		if (g_cfg_over)
@@ -27596,21 +28079,31 @@ static BOOL CALLBACK quit_find_window(HWND w, LPARAM lp)
 	return FALSE;
 }
 
-static void quit_at_tick(void)
+/* 1 on the frame D3D9SW_SAVE_BEFORE_QUIT=N names: N frames before QUIT_AT. */
+static int quit_at_tick(void)
 {
-	static long at = -1;
+	static long at = -1, before;
 	static long frame;
 	HWND w = NULL;
 
 	if (at < 0) {
 		at = (long)soak_knob("D3D9SW_QUIT_AT", 0);
+		before = (long)soak_knob("D3D9SW_SAVE_BEFORE_QUIT", 0);
 		if (at > 0)
 			ss_log("quit-at: this run will close itself at frame %ld, so "
 			       "it is exactly as long as the last one\n",
 			       at);
 	}
-	if (at <= 0 || ++frame != at)
-		return;
+	if (at <= 0)
+		return 0;
+	++frame;
+	if (before > 0 && frame == at - before) {
+		ensure_helper();
+		ss_log("save-before-quit: taking the save %ld frame(s) before quit-at\n", before);
+		return 1;
+	}
+	if (frame != at)
+		return 0;
 
 	EnumWindows(quit_find_window, (LPARAM)&w);
 	ss_log("quit-at: frame %ld reached, closing %s\n", at,
@@ -27619,6 +28112,7 @@ static void quit_at_tick(void)
 		PostMessageA(w, WM_CLOSE, 0, 0);
 	else
 		ExitProcess(0);
+	return 0;
 }
 
 static int save_at_frame(void)
@@ -27642,10 +28136,18 @@ static int save_at_frame(void)
 	return 1;
 }
 
+static volatile LONG g_present_frame SS_PRESENT;
+
+unsigned savestate_present_frame(void)
+{
+	return (unsigned)g_present_frame;
+}
+
 int savestate_soak_action(void)
 {
 	int survived;
 
+	InterlockedIncrement(&g_present_frame);
 	/* Ahead of everything, including the control-block check: scripted input
 	 * is about making two runs identical, and a run that skipped its presses
 	 * because a pointer was not ready yet would be a run that silently is
@@ -27654,7 +28156,8 @@ int savestate_soak_action(void)
 	/* Beside the input tick and for the same reason: a run that ends on a
 	 * different frame is not comparable, whether or not the control block
 	 * ever came up. */
-	quit_at_tick();
+	if (quit_at_tick())
+		return SS_SOAK_SAVE;
 	/* Ahead of the soak state check, because this is armed by a knob on its
 	 * own and there is no reason to make a measurement run also arm the soak
 	 * ladder to get at it. */

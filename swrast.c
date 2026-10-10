@@ -2179,11 +2179,19 @@ static int cpu_detect(void)
 	return f;
 }
 
+unsigned savestate_getenv(const char *name, char *buf, unsigned cap) __attribute__((weak));
+
+/* D3D9SW_NOAVX512=1 runs the AVX2 kernels on a CPU that has AVX-512, so a run
+ * here can be held against machines without it. */
 int swrast_cpu_features(void)
 {
 	static int cached = -1;
-	if (cached < 0)
+	if (cached < 0) {
+		char v[8];
 		cached = cpu_detect();
+		if (savestate_getenv && savestate_getenv("D3D9SW_NOAVX512", v, sizeof(v)) && v[0] == '1')
+			cached &= ~CPU_AVX512;
+	}
 	return cached;
 }
 
@@ -2782,6 +2790,15 @@ static void target_invalidate(const SwRast *r)
 		g_have_target = 0;
 }
 
+void *sw_malloc_fb(size_t n) __attribute__((weak));
+
+/* Screen-sized, so kept out of the game's big-block span where it would decide
+ * the address of everything the game allocates after it. */
+static void *fb_alloc(size_t n)
+{
+	return sw_malloc_fb ? sw_malloc_fb(n) : malloc(n);
+}
+
 void swrast_resize(SwRast *r, int width, int height)
 {
 	target_invalidate(r);
@@ -2800,8 +2817,10 @@ void swrast_resize(SwRast *r, int width, int height)
 	r->height = height;
 	if (width <= 0 || height <= 0)
 		return;
-	r->color = (uint32_t *)calloc((size_t)width * (size_t)height, sizeof(uint32_t));
-	r->depth = (float *)malloc((size_t)width * (size_t)height * sizeof(float));
+	r->color = (uint32_t *)fb_alloc((size_t)width * (size_t)height * sizeof(uint32_t));
+	if (r->color)
+		memset(r->color, 0, (size_t)width * (size_t)height * sizeof(uint32_t));
+	r->depth = (float *)fb_alloc((size_t)width * (size_t)height * sizeof(float));
 	if (r->depth) {
 		size_t i, n = (size_t)width * (size_t)height;
 		for (i = 0; i < n; i++)
